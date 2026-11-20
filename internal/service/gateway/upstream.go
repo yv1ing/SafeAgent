@@ -27,32 +27,76 @@ type upstreamCall struct {
 	reader    *format.Reader
 	decoder   format.StreamDecoder
 	losses    []protocol.Loss
+	repairs   []protocol.Repair
 	body      io.Closer
 }
 
-func (call *upstreamCall) close() { _ = call.body.Close() }
+func (call *upstreamCall) close() {
+	if call.body != nil {
+		_ = call.body.Close()
+	}
+}
 
-func (pipeline *Pipeline) openUpstream(ctx context.Context, request *protocol.Request, salt string, channel *entity.Channel, candidate routing.Candidate, key routing.Key) (*upstreamCall, *protocol.Error) {
+func (pipeline *Pipeline) openUpstream(ctx context.Context, state *call, channel *entity.Channel, candidate routing.Candidate, key routing.Key) (*upstreamCall, *protocol.Error) {
 	kind := protocol.Format(channel.Format)
 	codec, found := pipeline.codecs.Get(kind)
 	if !found {
 		return nil, internal("unsupported_channel_format", "The channel format is not supported.")
 	}
-	adapted := protocol.CloneRequest(request)
-	losses := protocol.AdaptReasoning(adapted, protocol.Vendor(channel.Vendor))
+	adapted := protocol.CloneRequest(state.request)
+	adapted.Source = state.kind
 	adapted.Stream = true
-	peer := format.Peer{Side: format.Upstream, Vendor: protocol.Vendor(channel.Vendor), Model: candidate.Target.UpstreamModel, Salt: salt}
-	body, header, encodeLosses, err := codec.EncodeRequest(adapted, peer)
-	if err != nil {
-		return nil, failure("invalid_request", protocol.ClassInvalid, "conversion_failed", sentence("The request cannot be represented in the channel protocol: "+err.Error()), http.StatusUnprocessableEntity)
+	losses := protocol.AdaptReasoning(adapted, protocol.Vendor(channel.Vendor), kind)
+	missingReasoning := protocol.MissingToolReasoning(adapted)
+	if missingReasoning {
+		adapted.Reasoning = &protocol.ReasoningConfig{Effort: "none"}
+		losses = append(losses, protocol.Loss{Path: "reasoning", Code: protocol.LossReasoningNotReplayable, Class: protocol.LossDegraded, Detail: "the client history has a tool call without reasoning; target thinking was disabled", From: state.kind, To: kind})
 	}
-	losses = append(losses, encodeLosses...)
-	endpoint := streamEndpoint(channel, candidate.Target.UpstreamModel)
+	repairs := protocol.RepairRequest(adapted, kind)
+	if loss, applied := resolveMaxOutputTokens(adapted, kind, candidate.Target.MaxOutputTokens, channel, state.identity.Project); applied {
+		losses = append(losses, loss)
+	}
+	capability := codec.Capability()
+	capabilityLosses := protocol.ValidateRequestCapability(adapted, capability)
+	peer := format.Peer{Side: format.Upstream, Vendor: protocol.Vendor(channel.Vendor), Model: candidate.Target.UpstreamModel, Salt: state.salt}
+	header, headerLosses := format.ForwardHeaders(state.clientHeader, kind, channel.ForwardHeaders)
+	raw := state.kind == kind && len(state.hits) == 0 && !state.historyExpanded && !state.unsealed && !missingReasoning && len(repairs) == 0 && rawSafeTarget(state.request, kind)
+	state.failureLedger.Repairs = append(state.failureLedger.Repairs, repairs...)
+	for _, loss := range capabilityLosses {
+		if loss.Fatal() {
+			state.failureLedger.Losses = append(state.failureLedger.Losses, losses...)
+			state.failureLedger.Losses = append(state.failureLedger.Losses, capabilityLosses...)
+			state.failureLedger.Losses = append(state.failureLedger.Losses, headerLosses...)
+			return nil, failure("invalid_request", protocol.ClassInvalid, "conversion_failed", sentence("The request cannot be represented in the channel protocol: "+loss.Detail), http.StatusUnprocessableEntity)
+		}
+	}
+	if !raw {
+		losses = append(losses, capabilityLosses...)
+	}
+	losses = append(losses, headerLosses...)
+	state.failureLedger.Losses = append(state.failureLedger.Losses, losses...)
+	var body []byte
+	if raw {
+		var err error
+		body, err = patchRawBody(state.body, kind, candidate.Target.UpstreamModel, true)
+		if err != nil {
+			return nil, internal("invalid_request_body", "The request body could not be prepared.")
+		}
+	} else {
+		encoded, encodedHeader, encodeLosses, err := codec.EncodeRequest(adapted, peer)
+		if err != nil {
+			return nil, failure("invalid_request", protocol.ClassInvalid, "conversion_failed", sentence("The request cannot be represented in the channel protocol: "+err.Error()), http.StatusUnprocessableEntity)
+		}
+		body = encoded
+		losses = append(losses, encodeLosses...)
+		mergeHeaders(header, encodedHeader)
+	}
+	endpoint := upstreamEndpoint(channel, candidate.Target.UpstreamModel, true)
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, internal("invalid_endpoint", "The channel endpoint is invalid.")
 	}
-	applyHeaders(httpRequest, channel, header)
+	applyHeaders(httpRequest, channel, header, true)
 	setAuth(httpRequest, kind, key.Secret)
 	response, err := pipeline.clients.get(channel).Do(httpRequest)
 	if err != nil {
@@ -68,32 +112,122 @@ func (pipeline *Pipeline) openUpstream(ctx context.Context, request *protocol.Re
 		defer response.Body.Close()
 		return nil, pipeline.upstreamFailure(response, channel, key)
 	}
+	call := &upstreamCall{channel: channel, candidate: candidate, key: key, losses: losses, repairs: repairs}
 	stream := newIdleReader(response.Body, pipeline.settings.StreamIdle)
 	reader, err := format.NewReader(stream, pipeline.settings.MaxStreamBytes)
 	if err != nil {
 		stream.Close()
 		return nil, transient("upstream_stream_failed", "The upstream stream could not be read.")
 	}
-	return &upstreamCall{channel: channel, candidate: candidate, key: key, reader: reader, decoder: codec.NewStreamDecoder(peer), losses: losses, body: stream}, nil
+	call.reader, call.decoder, call.body = reader, codec.NewStreamDecoder(peer), stream
+	return call, nil
+}
+
+func rawSafeTarget(request *protocol.Request, target protocol.Format) bool {
+	if target == protocol.Messages && request.MaxOutputTokens == nil {
+		return false
+	}
+	if target == protocol.Responses {
+		for _, include := range request.Include {
+			if include == "reasoning.encrypted_content" {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func resolveMaxOutputTokens(request *protocol.Request, target protocol.Format, routeDefault int, channel *entity.Channel, project *entity.Project) (protocol.Loss, bool) {
+	if target != protocol.Messages || request.MaxOutputTokens != nil {
+		return protocol.Loss{}, false
+	}
+	value := int64(0)
+	source := ""
+	switch {
+	case routeDefault > 0:
+		value, source = int64(routeDefault), "route target default"
+	case channel != nil && channel.DefaultMaxOutputTokens > 0:
+		value, source = int64(channel.DefaultMaxOutputTokens), "channel default"
+	case project != nil && project.DefaultMaxOutputTokens > 0:
+		value, source = int64(project.DefaultMaxOutputTokens), "project default"
+	default:
+		value, source = 8192, "gateway fallback"
+	}
+	request.MaxOutputTokens = &value
+	return protocol.Loss{Path: "max_output_tokens", Code: protocol.LossDefaultTokenLimit, Class: protocol.LossDegraded, Detail: "Messages requires a token limit; " + source + " was applied", To: target}, true
+}
+
+func upstreamDecodeFailure(err error) *protocol.Error {
+	var streamFailure *format.StreamError
+	if errors.As(err, &streamFailure) {
+		status := streamFailure.Status
+		if status < 400 || status >= 600 {
+			status = http.StatusBadGateway
+		}
+		return failure("upstream_failure", protocol.ClassTransient, firstNonEmpty(streamFailure.Code, "upstream_rejected"), firstNonEmpty(streamFailure.Message, "The upstream rejected the response."), status)
+	}
+	var failure *protocol.Error
+	if errors.As(err, &failure) {
+		return failure
+	}
+	return transient("invalid_upstream_response", "The upstream response could not be decoded.")
+}
+
+func patchRawBody(body []byte, kind protocol.Format, model string, stream bool) ([]byte, error) {
+	if kind == protocol.Gemini {
+		return body, nil
+	}
+	root, err := protocol.DecodeObject(body)
+	if err != nil {
+		return nil, err
+	}
+	root["model"] = model
+	root["stream"] = stream
+	if kind == protocol.Chat {
+		options := protocol.Object(root["stream_options"])
+		if options == nil {
+			options = map[string]any{}
+			root["stream_options"] = options
+		}
+		options["include_usage"] = true
+	}
+	return protocol.Marshal(root), nil
+}
+
+func mergeHeaders(target, source http.Header) {
+	for name, values := range source {
+		for _, value := range values {
+			if name == "Anthropic-Beta" && target.Get(name) != "" {
+				target.Set(name, target.Get(name)+","+value)
+				continue
+			}
+			target.Set(name, value)
+		}
+	}
 }
 
 func isReservedHeader(name string) bool {
 	switch http.CanonicalHeaderKey(name) {
-	case "Authorization", "X-Api-Key", "X-Goog-Api-Key", "Host", "Content-Length", "Transfer-Encoding", "Connection":
+	case "Authorization", "X-Api-Key", "X-Goog-Api-Key", "Host", "Content-Length", "Transfer-Encoding", "Connection", "Cookie":
 		return true
 	}
 	return false
 }
 
-func applyHeaders(request *http.Request, channel *entity.Channel, encoded http.Header) {
+func applyHeaders(request *http.Request, channel *entity.Channel, forwarded http.Header, stream bool) {
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "text/event-stream")
+	if stream {
+		request.Header.Set("Accept", "text/event-stream")
+	} else {
+		request.Header.Set("Accept", "application/json")
+	}
 	for name, value := range channel.Headers {
 		if !isReservedHeader(name) {
 			request.Header.Set(name, value)
 		}
 	}
-	for name, values := range encoded {
+	for name, values := range forwarded {
 		for _, value := range values {
 			if name == "Anthropic-Beta" && request.Header.Get(name) != "" {
 				request.Header.Set(name, request.Header.Get(name)+","+value)
@@ -118,18 +252,22 @@ func setAuth(request *http.Request, kind protocol.Format, secret string) {
 	}
 }
 
-// streamEndpoint expands {model}; a Gemini endpoint without it is a base URL to which the model
-// and the streaming action are appended.
-func streamEndpoint(channel *entity.Channel, upstreamModel string) string {
+// upstreamEndpoint expands {model}; a Gemini endpoint without it is a base URL to which the model
+// and the streaming or plain action are appended.
+func upstreamEndpoint(channel *entity.Channel, upstreamModel string, stream bool) string {
 	endpoint := channel.Endpoint
 	if strings.Contains(endpoint, "{model}") {
 		endpoint = strings.ReplaceAll(endpoint, "{model}", upstreamModel)
 	} else if channel.Format == string(protocol.Gemini) {
-		endpoint = strings.TrimRight(endpoint, "/") + "/" + upstreamModel + ":streamGenerateContent"
+		action := ":generateContent"
+		if stream {
+			action = ":streamGenerateContent"
+		}
+		endpoint = strings.TrimRight(endpoint, "/") + "/" + upstreamModel + action
 	} else {
 		return endpoint
 	}
-	if channel.Format == string(protocol.Gemini) && !strings.Contains(endpoint, "alt=sse") {
+	if channel.Format == string(protocol.Gemini) && stream && !strings.Contains(endpoint, "alt=sse") {
 		separator := "?"
 		if strings.Contains(endpoint, "?") {
 			separator = "&"

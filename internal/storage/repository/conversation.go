@@ -23,14 +23,14 @@ func (store *Store) SessionCalls(ctx context.Context, projectID, sessionID strin
 // MaximumSessionCalls bounds how many calls one conversation view reads.
 const MaximumSessionCalls = 1000
 
-// RequestMessages returns, per call, the request event with its payload reduced to the messages the
+// RequestMessages returns, per call, the request event with its payload reduced to the items the
 // call added; the rest of the payload (parameters, tool definitions, hits) is not read.
 func (store *Store) RequestMessages(ctx context.Context, callIDs []string) ([]entity.Event, error) {
 	events := []entity.Event{}
 	if len(callIDs) == 0 {
 		return events, nil
 	}
-	err := store.DB.NewRaw(`SELECT call_id, sequence, kind, payload->'messages' AS payload
+	err := store.DB.NewRaw(`SELECT call_id, sequence, kind, jsonb_build_object('items', payload->'items') AS payload
 		FROM events WHERE kind = 'request' AND call_id IN (?) ORDER BY call_id, sequence`, bun.In(callIDs)).Scan(ctx, &events)
 	return events, err
 }

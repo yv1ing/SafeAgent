@@ -169,6 +169,9 @@ func EvidenceAt(ref observation.ItemRef, section, path string, value observation
 	if start < 0 {
 		start = 0
 	}
+	if start > len(value.Raw) {
+		start = len(value.Raw)
+	}
 	if end > len(value.Raw) {
 		end = len(value.Raw)
 	}

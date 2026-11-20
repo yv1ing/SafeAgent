@@ -11,7 +11,7 @@ DOCS_ZH := README_zh.md $(shell find docs -name '*_zh.md' | sort)
 LAB_JS := $(shell find testenv -name '*.mjs' | sort)
 
 .PHONY: help deps generate format check contract test integration verify build run web dev security clean \
-	lab-setup lab-restart lab-agents lab-protocol lab-policy lab-analysis lab-browser lab-integration lab-load lab-down
+	lab-setup lab-restart lab-agents lab-protocol lab-policy lab-analysis lab-security lab-faults lab-browser lab-integration lab-load lab-acceptance lab-down
 
 help:
 	@printf '%s\n' \
@@ -24,13 +24,16 @@ help:
 		'  integration  Run repository tests against SAFEAGENT_TEST_DATABASE' \
 		'  lab-setup    Build and start the acceptance lab: make lab-setup [FRESH=1]' \
 		'  lab-restart  Rebuild the console and binary, then restart the lab gateway' \
-		'  lab-agents   Run Claude Code, Codex, Gemini CLI and Pi through every lab channel' \
-		'  lab-protocol Run the live 3x3 protocol conversion matrix' \
-		'  lab-policy   Check request and tool-call enforcement' \
+		'  lab-agents   Run Claude Code, Codex, Gemini CLI and Pi through every lab route' \
+		'  lab-protocol Run the live client-by-channel protocol matrix' \
+		'  lab-policy   Check request and tool-call enforcement across client protocols' \
 		'  lab-analysis Check asynchronous diagnosis and reversible redaction' \
+		'  lab-security Check authentication, quotas, isolation and console permissions' \
+		'  lab-faults   Check failover, truncation, tool holds, headers and default limits' \
 		'  lab-browser  Run the Playwright console acceptance suite' \
 		'  lab-integration Run repository integration tests on the lab database' \
-		'  lab-load     Compare gateway latency and throughput with a direct provider baseline' \
+		'  lab-load     Run the quick four-protocol performance smoke' \
+		'  lab-acceptance Run every lab suite in order, then clean up on success' \
 		'  lab-down     Stop the lab and remove its containers, volume and runtime files' \
 		'  verify       Run check and test' \
 		'  build        Build build/bin/safeagent with the console embedded' \
@@ -49,14 +52,14 @@ generate:
 	npm --prefix web run generate
 
 format:
-	gofmt -w cmd internal web/*.go
+	gofmt -w cmd internal testenv web/*.go
 	npm --prefix web run format
 	npx --prefix web prettier --write --single-quote --trailing-comma all --print-width 100 $(LAB_JS)
 	npx --prefix web prettier --write --prose-wrap never --print-width 100 $(DOCS_EN)
 	npx --prefix web prettier --write --prose-wrap preserve --print-width 100 $(DOCS_ZH)
 
 check: contract
-	@unformatted=$$(gofmt -l cmd internal web/*.go); \
+	@unformatted=$$(gofmt -l cmd internal testenv web/*.go); \
 		if [ -n "$$unformatted" ]; then printf '%s\n' "$$unformatted"; exit 1; fi
 	go vet ./...
 	npm --prefix web run typecheck
@@ -99,14 +102,25 @@ lab-policy:
 lab-analysis:
 	testenv/scripts/analysis-acceptance.sh
 
+lab-security:
+	testenv/scripts/security-acceptance.sh
+
+lab-faults:
+	testenv/scripts/faults-acceptance.sh
+
 lab-browser:
-	@set -a; . testenv/runtime/env; set +a; docker compose -f testenv/docker-compose.yml run --rm browser
+	@set -a; . testenv/runtime/env; set +a; \
+		docker compose -f testenv/docker-compose.yml build browser && \
+		docker compose -f testenv/docker-compose.yml run --rm browser
 
 lab-integration:
 	testenv/scripts/integration.sh
 
 lab-load:
 	testenv/scripts/load-acceptance.sh
+
+lab-acceptance:
+	testenv/scripts/acceptance.sh
 
 lab-down:
 	testenv/scripts/teardown.sh

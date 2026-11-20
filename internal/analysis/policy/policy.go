@@ -358,8 +358,13 @@ func flatten(result map[string]any, prefix string, value any, depth int) {
 	}
 	switch typed := value.(type) {
 	case map[string]any:
-		for key, entry := range typed {
-			flatten(result, joinKey(prefix, key), entry, depth+1)
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			flatten(result, joinKey(prefix, key), typed[key], depth+1)
 		}
 	case []any:
 		for _, entry := range typed {

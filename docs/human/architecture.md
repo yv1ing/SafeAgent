@@ -40,15 +40,15 @@ sequenceDiagram
     Console->>Database: read calls, decisions and analyses
 ```
 
-A request is decoded, redacted and observed before the request checkpoint runs. A block returns an error in the caller's protocol and skips the upstream call. Otherwise the gateway forwards the redacted request and restores masked values before the response reaches the client. Each completed client-executed tool call is held until its verdict is ready, then released or refused.
+A request is decoded and observed before the request checkpoint runs; redaction happens before the upstream call. A block returns an error in the caller's protocol and skips the upstream call. Otherwise the gateway forwards the redacted request and restores masked values before the response reaches the client. Each completed tool call, including a provider-executed server tool, is held until its verdict is ready, then released or refused.
 
 Policy evaluation does not wait for response text. In a stream, text is forwarded to the client as it arrives; only tool-call frames wait for a verdict. When the call ends, its events, online decisions and analysis job are stored together.
 
 ## Online enforcement
 
-The request checkpoint sees the redacted request, the instructions, the declared tools and every message from the client. It runs the structural and content detectors and evaluates request-phase rules.
+The request checkpoint sees the client request, the instructions, the declared tools and every message. Detectors read the raw values; policy arguments and targets use the redacted view when redaction changed them. It runs the structural and content detectors and evaluates request-phase rules.
 
-The tool checkpoint sees the same trajectory plus one complete tool call. It runs the structural, content and relation detectors and evaluates tool-call-phase rules. For a client-executed tool the frames are still held, so a block prevents the side effect. A provider-executed tool has already run at the provider; a block withholds its result but cannot undo that execution.
+The tool checkpoint sees the same trajectory plus one complete tool call. It runs the structural, content and relation detectors and evaluates tool-call-phase rules. A client-executed tool's frames are still held, so a block prevents the side effect. A provider-executed tool has already run at the provider; a block withholds its result but cannot undo that execution.
 
 When a detector or rule cannot finish, the phase outcome depends on the project's rules. A project with a blocking rule in that phase fails closed; a record-only project stores a visible "guard unavailable" decision and continues. After the rules allow a side-effecting call, the decision model may add a veto. A model failure leaves the policy outcome unchanged.
 

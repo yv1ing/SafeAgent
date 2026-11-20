@@ -33,14 +33,13 @@ type Call struct {
 	RedactionHits          int        `json:"redaction_hits"`
 	MaxSeverity            string     `json:"max_severity"`
 	Losses                 []Loss     `bun:"type:jsonb" json:"losses"`
+	Repairs                []Repair   `bun:"type:jsonb" json:"repairs"`
 	Attempts               int        `json:"attempts"`
 	ResponseID             string     `json:"response_id"`
-	UpstreamResponseID     string     `json:"upstream_response_id"`
 	SessionID              string     `json:"session_id"`
 	ParentCallID           string     `json:"parent_call_id"`
 	ConversationHash       string     `json:"conversation_hash"`
 	MessageOffset          int        `json:"message_offset"`
-	MessageCount           int        `json:"message_count"`
 	AnalysisState          string     `json:"analysis_state"`
 	LatestAnalysisID       string     `json:"latest_analysis_id"`
 	FindingCount           int        `json:"finding_count"`
@@ -48,12 +47,21 @@ type Call struct {
 	TerminatedAt           *time.Time `json:"terminated_at,omitempty"`
 }
 
+type Repair struct {
+	Kind    string `json:"kind"`
+	Path    string `json:"path"`
+	Detail  string `json:"detail,omitempty"`
+	ItemKey string `json:"item_key,omitempty"`
+}
+
 type Loss struct {
-	Path   string `json:"path"`
-	Code   string `json:"code"`
-	Detail string `json:"detail,omitempty"`
-	From   string `json:"from,omitempty"`
-	To     string `json:"to,omitempty"`
+	Path    string `json:"path"`
+	Code    string `json:"code"`
+	Class   string `json:"class,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	ItemKey string `json:"item_key,omitempty"`
 }
 
 // Conversation is the console's unit of listing: the calls that share one session id.

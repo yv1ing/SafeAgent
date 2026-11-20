@@ -74,6 +74,9 @@ func analysisFindingID(analysisID, fingerprint string) string {
 }
 
 func analysisFromEntity(row *entity.Analysis, findings []entity.AnalysisFinding, flows []entity.AnalysisFlow) *analysis.Analysis {
+	parsedFindings := analysisOfFindings(findings)
+	parsedFlows := analysisOfFlows(flows)
+	hydrateFindingFlows(parsedFindings, parsedFlows)
 	value := &analysis.Analysis{
 		ID: row.ID, ProjectID: row.ProjectID, CallID: row.CallID, AgentKeyID: row.AgentKeyID,
 		BatchID: row.BatchID, State: row.State, InputHash: row.InputHash, ModelState: row.ModelState,
@@ -82,7 +85,7 @@ func analysisFromEntity(row *entity.Analysis, findings []entity.AnalysisFinding,
 			Adapter: row.AdapterVersion, Detectors: row.DetectorVersion, Catalogue: row.CatalogueVersion,
 			Taxonomy: row.TaxonomyVersion, DecisionModel: row.DecisionModel,
 		},
-		Findings: analysisOfFindings(findings), Flows: analysisOfFlows(flows),
+		Findings: parsedFindings, Flows: parsedFlows,
 	}
 	_ = decode(row.Verdict, &value.Verdict)
 	_ = decode(row.Coverage, &value.Coverage)
@@ -117,6 +120,25 @@ func analysisOfFindings(rows []entity.AnalysisFinding) []analysis.Finding {
 		findings = append(findings, finding)
 	}
 	return findings
+}
+
+// hydrateFindingFlows restores the fields that analysis_findings does not store. The complete edge
+// is kept in analysis_flows; the embedded copy exists only for a finding's own view.
+func hydrateFindingFlows(findings []analysis.Finding, flows []analysis.Flow) {
+	for index := range findings {
+		embedded := findings[index].Flow
+		if embedded == nil {
+			continue
+		}
+		for _, flow := range flows {
+			if flow.SourceTurn == embedded.SourceTurn && flow.SourceItem == embedded.SourceItem &&
+				flow.SinkToolCallID == embedded.SinkToolCallID && flow.Relation == embedded.Relation {
+				copied := flow
+				findings[index].Flow = &copied
+				break
+			}
+		}
+	}
 }
 
 func analysisOfFlows(rows []entity.AnalysisFlow) []analysis.Flow {

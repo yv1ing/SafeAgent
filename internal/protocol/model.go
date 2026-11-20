@@ -1,5 +1,5 @@
-// Package protocol defines the canonical request and response model shared by the four wire
-// protocols. It depends only on the standard library; codecs live in protocol/format.
+// Package protocol defines the canonical item model shared by the four wire protocols. It depends
+// only on the standard library; codecs live in protocol/format.
 package protocol
 
 import "encoding/json"
@@ -23,6 +23,7 @@ const (
 	VendorOpenAI    Vendor = "openai"
 	VendorAnthropic Vendor = "anthropic"
 	VendorGoogle    Vendor = "google"
+	VendorSafeAgent Vendor = "safeagent"
 )
 
 func (format Format) DefaultVendor() Vendor {
@@ -46,17 +47,37 @@ const (
 	RoleTool      Role = "tool"
 )
 
-type BlockKind string
+type ItemKind string
 
 const (
-	KindText       BlockKind = "text"
-	KindReasoning  BlockKind = "reasoning"
-	KindRedacted   BlockKind = "redacted_reasoning"
-	KindToolCall   BlockKind = "tool_call"
-	KindToolResult BlockKind = "tool_result"
-	KindMedia      BlockKind = "media"
-	KindRefusal    BlockKind = "refusal"
-	KindNative     BlockKind = "native"
+	ItemMessage          ItemKind = "message"
+	ItemReasoning        ItemKind = "reasoning"
+	ItemToolCall         ItemKind = "tool_call"
+	ItemToolResult       ItemKind = "tool_result"
+	ItemServerToolCall   ItemKind = "server_tool_call"
+	ItemServerToolResult ItemKind = "server_tool_result"
+	ItemNative           ItemKind = "native"
+)
+
+func (kind ItemKind) IsTool() bool {
+	return kind == ItemToolCall || kind == ItemServerToolCall
+}
+
+func (kind ItemKind) IsToolResult() bool {
+	return kind == ItemToolResult || kind == ItemServerToolResult
+}
+
+type PartKind string
+
+const (
+	PartText              PartKind = "text"
+	PartRefusal           PartKind = "refusal"
+	PartReasoningText     PartKind = "reasoning_text"
+	PartReasoningSummary  PartKind = "reasoning_summary"
+	PartRedactedReasoning PartKind = "redacted_reasoning"
+	PartToolArguments     PartKind = "tool_arguments"
+	PartMedia             PartKind = "media"
+	PartNative            PartKind = "native"
 )
 
 type ToolKind string
@@ -66,22 +87,6 @@ const (
 	ToolCustom   ToolKind = "custom"
 	ToolServer   ToolKind = "server"
 )
-
-// NativeField is the Extras key holding the complete provider object of a block that has no
-// canonical form (native, redacted reasoning, server tool calls and results).
-const NativeField = "native"
-
-type Block struct {
-	Kind         BlockKind     `json:"kind" required:"true"`
-	Text         string        `json:"text,omitempty"`
-	Reasoning    *Reasoning    `json:"reasoning,omitempty"`
-	ToolCall     *ToolCall     `json:"tool_call,omitempty"`
-	ToolResult   *ToolResult   `json:"tool_result,omitempty"`
-	Media        *Media        `json:"media,omitempty"`
-	CacheControl *CacheControl `json:"cache_control,omitempty"`
-	Citations    []Citation    `json:"citations,omitempty"`
-	Extras       Extras        `json:"extras,omitempty"`
-}
 
 type CacheControl struct {
 	Type string `json:"type"`
@@ -95,12 +100,11 @@ type Citation struct {
 	Title     string `json:"title,omitempty"`
 	Start     *int64 `json:"start,omitempty"`
 	End       *int64 `json:"end,omitempty"`
-	Extras    Extras `json:"extras,omitempty"`
+	Raw       *Raw   `json:"raw,omitempty"`
 }
 
 type Reasoning struct {
 	Visibility string     `json:"visibility" enum:"full,summary"`
-	ItemID     string     `json:"item_id,omitempty"`
 	Signature  *Signature `json:"signature,omitempty"`
 }
 
@@ -108,15 +112,15 @@ type ToolCall struct {
 	Kind      ToolKind   `json:"kind" enum:"function,custom,server"`
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
-	Arguments string     `json:"arguments"`
+	Arguments string     `json:"arguments,omitempty"`
 	Signature *Signature `json:"signature,omitempty"`
 }
 
-type ToolResult struct {
-	CallID  string  `json:"call_id"`
-	Name    string  `json:"name,omitempty"`
-	IsError bool    `json:"is_error,omitempty"`
-	Content []Block `json:"content,omitempty"`
+func (call *ToolCall) Input() string {
+	if call == nil {
+		return ""
+	}
+	return call.Arguments
 }
 
 type Media struct {
@@ -129,26 +133,6 @@ type Media struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// Extras keeps the fields a codec does not model. They are replayed only towards the format they
-// came from; any other target records extras_dropped.
-type Extras struct {
-	Format Format                     `json:"format,omitempty"`
-	Fields map[string]json.RawMessage `json:"fields,omitempty"`
-}
-
-func (extras Extras) For(format Format) map[string]json.RawMessage {
-	if extras.Format != format {
-		return nil
-	}
-	return extras.Fields
-}
-
-type Message struct {
-	Role   Role    `json:"role" required:"true"`
-	Blocks []Block `json:"blocks"`
-	Extras Extras  `json:"extras,omitempty"`
-}
-
 type Tool struct {
 	Kind         ToolKind        `json:"kind" enum:"function,custom,server"`
 	Name         string          `json:"name"`
@@ -158,7 +142,7 @@ type Tool struct {
 	Server       *ServerTool     `json:"server,omitempty"`
 	Strict       *bool           `json:"strict,omitempty"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
-	Extras       Extras          `json:"extras,omitempty"`
+	Raw          *Raw            `json:"raw,omitempty"`
 }
 
 // ServerTool is a provider-executed tool. Config is the complete tool object in Format, so the
@@ -194,52 +178,19 @@ type ReasoningConfig struct {
 	IncludeThoughts *bool  `json:"include_thoughts,omitempty"`
 }
 
-type Request struct {
-	Model                string             `json:"model"`
-	Instructions         string             `json:"instructions,omitempty"`
-	Messages             []Message          `json:"messages"`
-	Tools                []Tool             `json:"tools,omitempty"`
-	ToolChoice           *ToolChoice        `json:"tool_choice,omitempty"`
-	ParallelToolCalls    *bool              `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat       *ResponseFormat    `json:"response_format,omitempty"`
-	Reasoning            *ReasoningConfig   `json:"reasoning,omitempty"`
-	MaxOutputTokens      *int64             `json:"max_output_tokens,omitempty"`
-	Temperature          *float64           `json:"temperature,omitempty"`
-	TopP                 *float64           `json:"top_p,omitempty"`
-	TopK                 *int64             `json:"top_k,omitempty"`
-	Stop                 []string           `json:"stop,omitempty"`
-	Stream               bool               `json:"stream"`
-	PreviousResponseID   string             `json:"previous_response_id,omitempty"`
-	Store                *bool              `json:"store,omitempty"`
-	Include              []string           `json:"include,omitempty"`
-	Truncation           string             `json:"truncation,omitempty"`
-	MaxToolCalls         *int64             `json:"max_tool_calls,omitempty"`
-	PromptCacheRetention string             `json:"prompt_cache_retention,omitempty"`
-	SafetyIdentifier     string             `json:"safety_identifier,omitempty"`
-	Verbosity            string             `json:"verbosity,omitempty"`
-	Logprobs             *bool              `json:"logprobs,omitempty"`
-	TopLogprobs          *int64             `json:"top_logprobs,omitempty"`
-	LogitBias            map[string]float64 `json:"logit_bias,omitempty"`
-	Modalities           []string           `json:"modalities,omitempty"`
-	Metadata             map[string]string  `json:"metadata,omitempty"`
-	User                 string             `json:"user,omitempty"`
-	Seed                 *int64             `json:"seed,omitempty"`
-	ServiceTier          string             `json:"service_tier,omitempty"`
-	PromptCacheKey       string             `json:"prompt_cache_key,omitempty"`
-	FrequencyPenalty     *float64           `json:"frequency_penalty,omitempty"`
-	PresencePenalty      *float64           `json:"presence_penalty,omitempty"`
-	Extras               Extras             `json:"extras,omitempty"`
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 type Usage struct {
-	Input      int64 `json:"input_tokens"`
-	Output     int64 `json:"output_tokens"`
-	CacheRead  int64 `json:"cache_read_tokens"`
-	CacheWrite int64 `json:"cache_write_tokens"`
-	// CacheWrite1h is the portion of CacheWrite cached for an hour; it is a breakdown, not an
-	// additional count.
-	CacheWrite1h int64 `json:"cache_write_1h_tokens,omitempty"`
-	Reasoning    int64 `json:"reasoning_tokens"`
+	Input        int64            `json:"input_tokens"`
+	Output       int64            `json:"output_tokens"`
+	CacheRead    int64            `json:"cache_read_tokens"`
+	CacheWrite   int64            `json:"cache_write_tokens"`
+	CacheWrite1h int64            `json:"cache_write_1h_tokens,omitempty"`
+	Reasoning    int64            `json:"reasoning_tokens"`
+	Details      map[string]int64 `json:"details,omitempty"`
+	Raw          *Raw             `json:"raw,omitempty"`
 }
 
 type FinishReason string
@@ -254,6 +205,13 @@ const (
 	FinishError         FinishReason = "error"
 )
 
+type Finish struct {
+	Kind             FinishReason `json:"kind"`
+	Raw              string       `json:"raw,omitempty"`
+	StopSequence     string       `json:"stop_sequence,omitempty"`
+	IncompleteReason string       `json:"incomplete_reason,omitempty"`
+}
+
 type ResponseMeta struct {
 	ID                string `json:"id"`
 	Model             string `json:"model"`
@@ -262,150 +220,31 @@ type ResponseMeta struct {
 	ServiceTier       string `json:"service_tier,omitempty"`
 }
 
-type Response struct {
-	ResponseMeta
-	Blocks       []Block      `json:"blocks"`
-	Finish       FinishReason `json:"finish"`
-	StopSequence string       `json:"stop_sequence,omitempty"`
-	Failure      *Error       `json:"failure,omitempty"`
-	Usage        *Usage       `json:"usage,omitempty"`
-	Extras       Extras       `json:"extras,omitempty"`
+type FailureClass string
+
+const (
+	ClassCancelled FailureClass = "cancelled"
+	ClassPolicy    FailureClass = "policy"
+	ClassInvalid   FailureClass = "invalid_request"
+	ClassTransient FailureClass = "upstream_transient"
+	ClassRejected  FailureClass = "upstream_rejected"
+	ClassAuth      FailureClass = "upstream_auth"
+	ClassRateLimit FailureClass = "rate_limited"
+	ClassNoChannel FailureClass = "no_channel"
+	ClassInternal  FailureClass = "internal"
+)
+
+type Error struct {
+	Kind    string       `json:"kind" required:"true" enum:"invalid_request,unsupported,unauthorized,rate_limited,upstream_failure,timeout,blocked,internal"`
+	Class   FailureClass `json:"class,omitempty"`
+	Code    string       `json:"code"`
+	Message string       `json:"message"`
+	Status  int          `json:"status,omitempty"`
 }
 
-func CloneRequest(request *Request) *Request {
-	clone := *request
-	clone.Extras = cloneExtras(request.Extras)
-	clone.Stop = append([]string(nil), request.Stop...)
-	clone.Include = append([]string(nil), request.Include...)
-	clone.Modalities = append([]string(nil), request.Modalities...)
-	if request.Metadata != nil {
-		clone.Metadata = make(map[string]string, len(request.Metadata))
-		for key, value := range request.Metadata {
-			clone.Metadata[key] = value
-		}
+func (failure *Error) Error() string {
+	if failure.Message == "" {
+		return failure.Code
 	}
-	if request.LogitBias != nil {
-		clone.LogitBias = make(map[string]float64, len(request.LogitBias))
-		for key, value := range request.LogitBias {
-			clone.LogitBias[key] = value
-		}
-	}
-	if request.ToolChoice != nil {
-		choice := *request.ToolChoice
-		choice.Names = append([]string(nil), request.ToolChoice.Names...)
-		clone.ToolChoice = &choice
-	}
-	if request.ResponseFormat != nil {
-		format := *request.ResponseFormat
-		if request.ResponseFormat.Strict != nil {
-			strict := *request.ResponseFormat.Strict
-			format.Strict = &strict
-		}
-		clone.ResponseFormat = &format
-	}
-	if request.Reasoning != nil {
-		reasoning := *request.Reasoning
-		if request.Reasoning.BudgetTokens != nil {
-			budget := *request.Reasoning.BudgetTokens
-			reasoning.BudgetTokens = &budget
-		}
-		if request.Reasoning.IncludeThoughts != nil {
-			include := *request.Reasoning.IncludeThoughts
-			reasoning.IncludeThoughts = &include
-		}
-		clone.Reasoning = &reasoning
-	}
-	for _, pointer := range []**bool{&clone.Store, &clone.ParallelToolCalls, &clone.Logprobs} {
-		if *pointer == nil {
-			continue
-		}
-		value := **pointer
-		*pointer = &value
-	}
-	for _, pointer := range []**int64{&clone.MaxOutputTokens, &clone.MaxToolCalls, &clone.TopLogprobs} {
-		if *pointer == nil {
-			continue
-		}
-		value := **pointer
-		*pointer = &value
-	}
-	for _, pointer := range []**float64{&clone.Temperature, &clone.TopP, &clone.FrequencyPenalty, &clone.PresencePenalty} {
-		if *pointer == nil {
-			continue
-		}
-		value := **pointer
-		*pointer = &value
-	}
-	clone.Messages = make([]Message, len(request.Messages))
-	for index, message := range request.Messages {
-		clone.Messages[index] = Message{Role: message.Role, Extras: cloneExtras(message.Extras), Blocks: make([]Block, len(message.Blocks))}
-		for position, block := range message.Blocks {
-			clone.Messages[index].Blocks[position] = CloneBlock(block)
-		}
-	}
-	clone.Tools = make([]Tool, len(request.Tools))
-	for index, tool := range request.Tools {
-		clone.Tools[index] = tool
-		clone.Tools[index].Extras = cloneExtras(tool.Extras)
-		if tool.Server != nil {
-			server := *tool.Server
-			clone.Tools[index].Server = &server
-		}
-	}
-	return &clone
-}
-
-func CloneBlock(block Block) Block {
-	clone := block
-	clone.Extras = cloneExtras(block.Extras)
-	clone.Citations = make([]Citation, len(block.Citations))
-	for index, citation := range block.Citations {
-		clone.Citations[index] = citation
-		clone.Citations[index].Extras = cloneExtras(citation.Extras)
-	}
-	if block.CacheControl != nil {
-		cache := *block.CacheControl
-		clone.CacheControl = &cache
-	}
-	if block.Reasoning != nil {
-		reasoning := *block.Reasoning
-		if block.Reasoning.Signature != nil {
-			signature := *block.Reasoning.Signature
-			reasoning.Signature = &signature
-		}
-		clone.Reasoning = &reasoning
-	}
-	if block.ToolCall != nil {
-		call := *block.ToolCall
-		if block.ToolCall.Signature != nil {
-			signature := *block.ToolCall.Signature
-			call.Signature = &signature
-		}
-		clone.ToolCall = &call
-	}
-	if block.ToolResult != nil {
-		result := *block.ToolResult
-		result.Content = make([]Block, len(block.ToolResult.Content))
-		for index, nested := range block.ToolResult.Content {
-			result.Content[index] = CloneBlock(nested)
-		}
-		clone.ToolResult = &result
-	}
-	if block.Media != nil {
-		media := *block.Media
-		clone.Media = &media
-	}
-	return clone
-}
-
-func cloneExtras(extras Extras) Extras {
-	if extras.Fields == nil {
-		return extras
-	}
-	fields := make(map[string]json.RawMessage, len(extras.Fields))
-	for key, value := range extras.Fields {
-		fields[key] = value
-	}
-	extras.Fields = fields
-	return extras
+	return failure.Message
 }

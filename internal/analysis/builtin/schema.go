@@ -41,13 +41,14 @@ func evaluateSchema(_ context.Context, trace *observation.Trace) []analysis.Find
 			if item.Locator.Section != "response" {
 				continue
 			}
+			name := observation.NewValue(call.Name, call.Name, nil)
 			if _, found := declared[call.Name]; !found {
 				findings = append(findings, makeWholeFinding("schema", analysis.CodeUndeclaredTool, ref, item.Origin, call.Sink,
-					"message", "tool_call.name", call.Arguments))
+					"message", "tool_call.name", name))
 			}
 			if !toolSelected(choice, choiceNames, call.Name) {
 				findings = append(findings, makeWholeFinding("schema", analysis.CodeToolChoiceViolation, ref, item.Origin, call.Sink,
-					"message", "tool_call.name", call.Arguments))
+					"message", "tool_call.name", name))
 			}
 			findings = append(findings, inspectArguments(ref, item, declared)...)
 		case observation.ItemToolResult:

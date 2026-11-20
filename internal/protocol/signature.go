@@ -21,6 +21,7 @@ type Signature struct {
 	Model      string `json:"m,omitempty"`
 	Blob       string `json:"b"`
 	TextDigest string `json:"d,omitempty"`
+	Text       string `json:"-"`
 }
 
 type signaturePayload struct {
@@ -29,6 +30,7 @@ type signaturePayload struct {
 	Model      string `json:"m,omitempty"`
 	Blob       string `json:"b"`
 	TextDigest string `json:"d,omitempty"`
+	Text       string `json:"t,omitempty"`
 }
 
 func TextDigest(text string) string {
@@ -37,7 +39,7 @@ func TextDigest(text string) string {
 }
 
 func SealSignature(secret []byte, signature Signature) (string, error) {
-	payload, err := json.Marshal(signaturePayload{Version: signaturePrefix, Vendor: string(signature.Vendor), Model: signature.Model, Blob: signature.Blob, TextDigest: signature.TextDigest})
+	payload, err := json.Marshal(signaturePayload{Version: signaturePrefix, Vendor: string(signature.Vendor), Model: signature.Model, Blob: signature.Blob, TextDigest: signature.TextDigest, Text: signature.Text})
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +71,7 @@ func OpenSignature(secret []byte, encoded string) (Signature, bool) {
 	if decoded.Version != signaturePrefix || decoded.Blob == "" {
 		return Signature{}, false
 	}
-	return Signature{Vendor: Vendor(decoded.Vendor), Model: decoded.Model, Blob: decoded.Blob, TextDigest: decoded.TextDigest}, true
+	return Signature{Vendor: Vendor(decoded.Vendor), Model: decoded.Model, Blob: decoded.Blob, TextDigest: decoded.TextDigest, Text: decoded.Text}, true
 }
 
 func signatureMAC(secret, payload []byte) []byte {
@@ -80,43 +82,32 @@ func signatureMAC(secret, payload []byte) []byte {
 }
 
 // AdaptReasoning removes reasoning that only its issuing vendor can interpret: foreign signatures
-// are stripped (the text stays) and redacted reasoning is dropped.
-func AdaptReasoning(request *Request, vendor Vendor) []Loss {
+// are stripped (the text stays) and redacted reasoning from another protocol is dropped.
+func AdaptReasoning(request *Request, vendor Vendor, target Format) []Loss {
 	var losses []Loss
-	for messageIndex := range request.Messages {
-		message := &request.Messages[messageIndex]
-		for blockIndex := range message.Blocks {
-			block := &message.Blocks[blockIndex]
-			path := "messages[" + strconv.Itoa(messageIndex) + "].blocks[" + strconv.Itoa(blockIndex) + "]"
-			switch block.Kind {
-			case KindReasoning:
-				if block.Reasoning == nil || block.Reasoning.Signature == nil {
-					continue
-				}
-				if block.Reasoning.Signature.Vendor != vendor {
-					block.Reasoning.Signature = nil
-					losses = append(losses, Loss{Path: path, Code: LossSignatureStripped, Detail: "reasoning signature was issued by a different provider; the text is retained without a signature"})
-				}
-			case KindRedacted:
-				if block.Extras.Format == "" || block.Extras.Format.DefaultVendor() == vendor {
-					continue
-				}
-				block.Kind = ""
-				losses = append(losses, Loss{Path: path, Code: LossFieldDropped, Detail: "redacted reasoning is only meaningful to its originating provider", From: block.Extras.Format})
-			}
+	for index := range request.Items {
+		item := &request.Items[index]
+		path := "items[" + strconv.Itoa(index) + "]"
+		if item.ToolCall != nil && item.ToolCall.Signature != nil && item.ToolCall.Signature.Vendor != vendor {
+			item.ToolCall.Signature = nil
+			losses = append(losses, Loss{Path: path + ".tool_call.signature", Code: LossSignatureStripped, Class: LossDegraded, Detail: "the tool call signature was issued by a different provider; the call is retained without a signature", From: request.Source, To: target})
 		}
-		message.Blocks = dropEmptyBlocks(message.Blocks)
-	}
-	return losses
-}
-
-func dropEmptyBlocks(blocks []Block) []Block {
-	result := blocks[:0]
-	for _, block := range blocks {
-		if block.Kind == "" || block.Kind == KindText && block.Text == "" {
+		if item.Kind != ItemReasoning {
 			continue
 		}
-		result = append(result, block)
+		if item.Reasoning != nil && item.Reasoning.Signature != nil && item.Reasoning.Signature.Vendor != vendor {
+			item.Reasoning.Signature = nil
+			losses = append(losses, Loss{Path: path + ".reasoning.signature", Code: LossSignatureStripped, Class: LossDegraded, Detail: "reasoning signature was issued by a different provider; the text is retained without a signature", From: request.Source, To: target})
+		}
+		parts := item.Parts[:0]
+		for partIndex, part := range item.Parts {
+			if part.Kind == PartRedactedReasoning && target != request.Source {
+				losses = append(losses, Loss{Path: path + ".parts[" + strconv.Itoa(partIndex) + "]", Code: LossFieldDropped, Class: LossDegraded, Detail: "redacted reasoning is only meaningful to its originating provider", From: request.Source, To: target})
+				continue
+			}
+			parts = append(parts, part)
+		}
+		item.Parts = parts
 	}
-	return result
+	return losses
 }

@@ -22,6 +22,8 @@ type ChannelView struct {
 	Endpoint                string             `json:"endpoint"`
 	CountTokensEndpoint     string             `json:"count_tokens_endpoint"`
 	Headers                 map[string]string  `json:"headers"`
+	ForwardHeaders          []string           `json:"forward_headers"`
+	DefaultMaxOutputTokens  int                `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
 	Models                  []ChannelModelView `json:"models"`
 	Currency                string             `json:"currency"`
 	TimeoutSeconds          int                `json:"timeout_seconds"`
@@ -38,6 +40,8 @@ type ChannelInput struct {
 	Endpoint                string             `json:"endpoint" required:"true"`
 	CountTokensEndpoint     string             `json:"count_tokens_endpoint"`
 	Headers                 map[string]string  `json:"headers"`
+	ForwardHeaders          []string           `json:"forward_headers"`
+	DefaultMaxOutputTokens  int                `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
 	Models                  []ChannelModelView `json:"models"`
 	Currency                string             `json:"currency"`
 	TimeoutSeconds          int                `json:"timeout_seconds"`
@@ -107,7 +111,7 @@ func channelModelViews(models []entity.ChannelModel) []ChannelModelView {
 }
 
 func channelView(value *entity.Channel) ChannelView {
-	return ChannelView{ID: value.ID, Name: value.Name, Format: value.Format, Vendor: value.Vendor, Endpoint: value.Endpoint, CountTokensEndpoint: value.CountTokensEndpoint, Headers: service.MaskHeaders(value.Headers), Models: channelModelViews(value.Models), Currency: value.Currency, TimeoutSeconds: value.TimeoutSeconds, FirstByteTimeoutSeconds: value.FirstByteTimeoutSeconds, AllowPrivateNetwork: value.AllowPrivateNetwork, Enabled: value.Enabled, Version: value.Version}
+	return ChannelView{ID: value.ID, Name: value.Name, Format: value.Format, Vendor: value.Vendor, Endpoint: value.Endpoint, CountTokensEndpoint: value.CountTokensEndpoint, Headers: service.MaskHeaders(value.Headers), ForwardHeaders: value.ForwardHeaders, DefaultMaxOutputTokens: value.DefaultMaxOutputTokens, Models: channelModelViews(value.Models), Currency: value.Currency, TimeoutSeconds: value.TimeoutSeconds, FirstByteTimeoutSeconds: value.FirstByteTimeoutSeconds, AllowPrivateNetwork: value.AllowPrivateNetwork, Enabled: value.Enabled, Version: value.Version}
 }
 
 func (input ChannelInput) service() service.ChannelInput {
@@ -115,7 +119,7 @@ func (input ChannelInput) service() service.ChannelInput {
 	for _, entry := range input.Models {
 		models = append(models, entity.ChannelModel{Name: entry.Name, InputPrice: entry.InputPrice, OutputPrice: entry.OutputPrice, CacheReadPrice: entry.CacheReadPrice, CacheWritePrice: entry.CacheWritePrice})
 	}
-	return service.ChannelInput{Name: input.Name, Format: input.Format, Vendor: input.Vendor, Endpoint: input.Endpoint, CountTokensEndpoint: input.CountTokensEndpoint, Headers: input.Headers, Models: models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled, Version: input.Version}
+	return service.ChannelInput{Name: input.Name, Format: input.Format, Vendor: input.Vendor, Endpoint: input.Endpoint, CountTokensEndpoint: input.CountTokensEndpoint, Headers: input.Headers, ForwardHeaders: input.ForwardHeaders, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Models: models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled, Version: input.Version}
 }
 
 func channelKeyView(key *entity.ChannelKey) ChannelKeyView {

@@ -8,7 +8,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
-var responseKeys = []string{"id", "object", "model", "choices", "usage"}
+var responseKeys = []string{"id", "object", "created", "model", "choices", "usage", "system_fingerprint", "service_tier"}
 
 func (Codec) DecodeResponse(body []byte, peer format.Peer) (*protocol.Response, []protocol.Loss, error) {
 	root, err := protocol.DecodeObject(body)
@@ -16,15 +16,16 @@ func (Codec) DecodeResponse(body []byte, peer format.Peer) (*protocol.Response, 
 		return nil, nil, errors.New("response must be a JSON object")
 	}
 	if failure := protocol.Object(root["error"]); failure != nil {
-		return nil, nil, &format.StreamError{Code: protocol.String(failure["code"]), Message: protocol.String(failure["message"])}
+		return nil, nil, &format.StreamError{Code: protocol.String(failure["code"]), Type: protocol.String(failure["type"]), Message: protocol.String(failure["message"]), Status: int(protocol.IntegerOrZero(failure["status"]))}
 	}
 	created, _ := protocol.Integer(root["created"])
 	response := &protocol.Response{
-		ResponseMeta: protocol.ResponseMeta{
+		Source: protocol.Chat,
+		Meta: protocol.ResponseMeta{
 			ID: protocol.String(root["id"]), Model: protocol.String(root["model"]), Created: created,
 			SystemFingerprint: protocol.String(root["system_fingerprint"]), ServiceTier: protocol.String(root["service_tier"]),
 		},
-		Usage: format.ParseChatUsage(root), Extras: format.UnmodelledFields(protocol.Chat, root, responseKeys...),
+		Usage: format.ParseChatUsage(root), Raw: format.CaptureRaw(protocol.Chat, root, responseKeys...),
 	}
 	choices := protocol.Array(root["choices"])
 	if len(choices) == 0 {
@@ -32,61 +33,82 @@ func (Codec) DecodeResponse(body []byte, peer format.Peer) (*protocol.Response, 
 	}
 	choice := protocol.Object(choices[0])
 	if index, _ := protocol.Integer(choice["index"]); index != 0 || len(choices) > 1 {
-		return nil, nil, errors.New("multiple choices are not supported")
+		return nil, nil, protocol.UnsupportedFeature("unsupported_multi_choice", "Multiple choices are not supported.")
 	}
-	message, err := decodeMessage(protocol.Object(choice["message"]))
+	items, err := decodeMessage(protocol.Object(choice["message"]), peer)
 	if err != nil {
 		return nil, nil, err
 	}
-	response.Blocks = message.Blocks
-	var losses []protocol.Loss
+	if choice["message"] == nil {
+		items, err = decodeMessage(protocol.Object(choice["delta"]), peer)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	response.Items = items
+	format.AssignCallIDs(response.Items, format.NewCallIDs(peer))
 	finish := protocol.String(choice["finish_reason"])
-	var known bool
-	if response.Finish, known = format.ParseChatFinish(finish); !known {
+	reason, known := format.ParseChatFinish(finish)
+	response.Finish = protocol.Finish{Kind: reason, Raw: finish}
+	var losses []protocol.Loss
+	if !known {
 		losses = append(losses, format.FinishMappedLoss(finish, protocol.Chat))
 	}
 	return response, losses, nil
 }
 
 func (Codec) EncodeResponse(response *protocol.Response, peer format.Peer) ([]byte, []protocol.Loss, error) {
-	context := format.NewPartContext(protocol.Chat, peer)
-	context.Role = protocol.RoleAssistant
-	encoded, losses, err := encodeMessage(protocol.Message{Role: protocol.RoleAssistant, Blocks: response.Blocks}, context, "blocks")
+	context := format.PartContext{Target: protocol.Chat, Peer: peer, Role: protocol.RoleAssistant, Output: true}
+	encoded, losses, err := encodeMessages(response.Items, context)
 	if err != nil {
 		return nil, losses, err
 	}
 	message := map[string]any{"role": "assistant", "content": nil}
 	if len(encoded) > 0 {
-		message = encoded[len(encoded)-1].(map[string]any)
+		message = encoded[0].(map[string]any)
 	}
-	finish := format.ChatFinish(response.Finish)
+	finishKind := response.Finish.Kind
+	if finishKind == "" || finishKind == protocol.FinishStop {
+		for index := range response.Items {
+			if response.Items[index].Kind == protocol.ItemToolCall {
+				finishKind = protocol.FinishToolCalls
+				break
+			}
+		}
+	}
+	finish := format.ChatFinish(finishKind)
 	if finish == "" {
 		finish = "stop"
 	}
-	created := response.Created
+	created := response.Meta.Created
 	if created == 0 {
 		created = time.Now().Unix()
 	}
+	model := response.Meta.Model
+	if peer.Model != "" {
+		model = peer.Model
+	}
 	root := map[string]any{
-		"id":      response.ID,
+		"id":      response.Meta.ID,
 		"object":  "chat.completion",
 		"created": created,
-		"model":   response.Model,
+		"model":   model,
 		"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}},
 	}
-	if response.SystemFingerprint != "" {
-		root["system_fingerprint"] = response.SystemFingerprint
+	if response.Meta.SystemFingerprint != "" {
+		root["system_fingerprint"] = response.Meta.SystemFingerprint
 	}
-	if response.ServiceTier != "" {
-		root["service_tier"] = response.ServiceTier
+	if response.Meta.ServiceTier != "" {
+		root["service_tier"] = response.Meta.ServiceTier
 	}
 	if usage := format.EncodeChatUsage(response.Usage); usage != nil {
 		root["usage"] = usage
 	}
-	if format.FinishLoss(response.Finish, protocol.Chat) {
-		losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: string(response.Finish), To: protocol.Chat})
+	if format.FinishLoss(response.Finish.Kind, protocol.Chat) {
+		losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: string(response.Finish.Kind), To: protocol.Chat})
 	}
-	losses = append(losses, format.ApplyExtras(root, response.Extras, protocol.Chat, "extras")...)
+	losses = append(losses, format.RawFields(root, response.Raw, protocol.Chat, "raw")...)
+	losses = append(losses, format.UsageLosses(response.Usage, protocol.Chat)...)
 	return protocol.Marshal(root), losses, nil
 }
 
@@ -96,20 +118,4 @@ func (Codec) EncodeError(failure *protocol.Error, streaming bool) (int, []byte) 
 		status = 400
 	}
 	return status, protocol.Marshal(map[string]any{"error": map[string]any{"message": failure.Message, "type": errorType(failure.Kind), "code": failure.Code}})
-}
-
-func errorType(kind string) string {
-	switch kind {
-	case "invalid_request", "unauthorized":
-		return "invalid_request_error"
-	case "rate_limited":
-		return "rate_limit_error"
-	case "upstream_failure":
-		return "api_error"
-	case "timeout":
-		return "timeout_error"
-	case "blocked":
-		return "permission_error"
-	}
-	return "server_error"
 }

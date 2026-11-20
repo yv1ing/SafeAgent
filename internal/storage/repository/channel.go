@@ -19,8 +19,8 @@ func (store *Store) CreateChannel(ctx context.Context, channel *entity.Channel) 
 
 func (store *Store) UpdateChannel(ctx context.Context, id string, channel entity.Channel, version int64) (*entity.Channel, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Channel)(nil)).
-		Set("name = ?, format = ?, vendor = ?, endpoint = ?, count_tokens_endpoint = ?, headers = ?, models = ?, currency = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
-			channel.Name, channel.Format, channel.Vendor, channel.Endpoint, channel.CountTokensEndpoint, channel.Headers, channel.Models, channel.Currency, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
+		Set("name = ?, format = ?, vendor = ?, endpoint = ?, count_tokens_endpoint = ?, headers = ?, forward_headers = ?, default_max_output_tokens = ?, models = ?, currency = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
+			channel.Name, channel.Format, channel.Vendor, channel.Endpoint, channel.CountTokensEndpoint, channel.Headers, channel.ForwardHeaders, channel.DefaultMaxOutputTokens, channel.Models, channel.Currency, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
 		return nil, err

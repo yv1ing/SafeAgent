@@ -7,9 +7,12 @@
  */
 
 export interface ConsoleLossView {
+  /** fatal or degraded */
+  class?: string;
   code: string;
   detail: string;
   from: string;
+  item_key?: string;
   path: string;
   to: string;
 }

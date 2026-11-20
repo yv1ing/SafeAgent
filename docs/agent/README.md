@@ -38,7 +38,7 @@ The request path is synchronous through the request checkpoint. The provider res
 4. [`storage.md`](storage.md) — tables, cascades, idempotency, retention and secrets.
 5. [`protocol.md`](protocol.md) — canonical model, codecs, media, clean EOF and conversion losses.
 6. [`development.md`](development.md) — commands, configuration, tests and extension points.
-7. [`testenv.md`](testenv.md) — the Docker acceptance lab, functional suites and the relative performance gate.
+7. [`testenv.md`](testenv.md) — the Docker acceptance lab, functional suites and the performance smoke.
 8. [`papers.md`](papers.md) — what AgentDoG and AgentGuard say, and what this project adopts.
 
 ## Repository layout

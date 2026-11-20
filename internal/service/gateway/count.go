@@ -38,7 +38,7 @@ func (pipeline *Pipeline) CountTokens(ctx context.Context, input Request) (count
 		return 0, false, internal("unsupported_format", "The protocol is not supported.")
 	}
 	peer := format.Peer{Side: format.Client, Vendor: input.Kind.DefaultVendor(), Envelope: Envelope{Secret: pipeline.secret}}
-	request, err := codec.DecodeRequest(input.Body, input.Header, peer)
+	request, _, err := codec.DecodeRequest(input.Body, input.Header, peer)
 	if err != nil {
 		return 0, false, invalid("invalid_request", "The request is invalid: "+sentence(err.Error()))
 	}
@@ -99,7 +99,7 @@ func (pipeline *Pipeline) forwardCount(ctx context.Context, request *protocol.Re
 	if err != nil {
 		return 0, false
 	}
-	applyHeaders(httpRequest, channel, header)
+	applyHeaders(httpRequest, channel, header, false)
 	httpRequest.Header.Set("Accept", "application/json")
 	setAuth(httpRequest, kind, candidate.Keys[0].Secret)
 	response, err := pipeline.clients.get(channel).Do(httpRequest)

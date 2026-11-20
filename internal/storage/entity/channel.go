@@ -15,6 +15,8 @@ type Channel struct {
 	Endpoint                string            `json:"endpoint"`
 	CountTokensEndpoint     string            `json:"count_tokens_endpoint"`
 	Headers                 map[string]string `bun:"type:jsonb" json:"headers"`
+	ForwardHeaders          []string          `bun:"type:jsonb" json:"forward_headers"`
+	DefaultMaxOutputTokens  int               `json:"default_max_output_tokens"`
 	Models                  []ChannelModel    `bun:"type:jsonb" json:"models"`
 	Currency                string            `json:"currency"`
 	TimeoutSeconds          int               `json:"timeout_seconds"`

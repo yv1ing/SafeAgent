@@ -1,12 +1,6 @@
 SafeAgent
 Copyright 2026 yv1ing
 
-This product includes protocol test fixtures copied unmodified from AxonHub
-1.0.0-rc.4 (https://github.com/looplj/axonhub), located under
-internal/protocol/format/testdata/axonhub. AxonHub is licensed under the Apache
-License, Version 2.0; the full text is included in that directory as LICENSE.
-These fixtures are read only by tests and are excluded from the container image.
-
 The analysis model draws on two papers. This product contains no source code
 from either paper or its reference implementation.
 

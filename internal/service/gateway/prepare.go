@@ -63,12 +63,33 @@ type call struct {
 	// client is the request as the client sent it; analysis and fingerprints are taken from it,
 	// never from the redacted copy that goes upstream.
 	client          *protocol.Request
+	clientHeader    http.Header
+	body            []byte
+	targetFormat    protocol.Format
+	historyExpanded bool
+	unsealed        bool
+	headersSent     bool
+	toolKinds       map[string]protocol.ToolKind
+	failureLedger   protocol.Ledger
 	findings        []analysis.Finding
 	decisions       []entity.Decision
 	redactionRules  []redact.Rule
 	reserved        bool
 	opened          bool
 	blockedRecorded bool
+}
+
+func requestHasSignature(request *protocol.Request) bool {
+	for index := range request.Items {
+		item := &request.Items[index]
+		if item.Reasoning != nil && item.Reasoning.Signature != nil {
+			return true
+		}
+		if item.ToolCall != nil && item.ToolCall.Signature != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Serve runs one client call end to end and writes the protocol-shaped response or error. Every
@@ -98,22 +119,30 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	callID := pipeline.ids()
 	salt := callID
 	peer := format.Peer{Side: format.Client, Vendor: input.Kind.DefaultVendor(), Envelope: Envelope{Secret: pipeline.secret}, Salt: salt}
-	request, err := codec.DecodeRequest(input.Body, input.Header, peer)
+	request, decodeLosses, err := codec.DecodeRequest(input.Body, input.Header, peer)
 	if err != nil {
+		var failure *protocol.Error
+		if errors.As(err, &failure) {
+			return nil, failure
+		}
 		return nil, invalid("invalid_request", "The request is invalid: "+sentence(err.Error()))
 	}
-	losses := unsealRequest(peer, request)
+	unsealLosses := unsealRequest(peer, request)
+	losses := append(decodeLosses, unsealLosses...)
 	if input.Model != "" {
 		request.Model = input.Model
 	}
 	if request.Model == "" {
 		return nil, invalid("model_required", "The model field is required.")
 	}
+	if refusal := protocol.RejectUpstreamState(request); refusal != nil {
+		return nil, refusal
+	}
 	if input.ForceStream {
 		request.Stream = true
 	}
 
-	state := &call{ctx: ctx, pipeline: pipeline, kind: input.Kind, codec: codec, peer: peer, salt: salt, writer: writer, request: request, identity: identity, started: started, release: func() {}}
+	state := &call{ctx: ctx, pipeline: pipeline, kind: input.Kind, codec: codec, peer: peer, salt: salt, writer: writer, request: request, identity: identity, started: started, release: func() {}, clientHeader: input.Header, body: input.Body, unsealed: len(unsealLosses) > 0 || requestHasSignature(request)}
 	compiled, version, err := pipeline.compiledPolicy(ctx, identity.Project.ID)
 	if err != nil {
 		pipeline.logger.Error("project policy could not be compiled", "project", identity.Project.ID, "error", err)
@@ -136,18 +165,17 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	}
 	state.release = release
 
-	// offset counts the leading messages the parent conversation already holds; those are not
+	// offset counts the leading items the parent conversation already holds; those are not
 	// stored again.
 	offset := 0
 	var parent *entity.Call
 	if request.PreviousResponseID != "" {
-		sent := len(request.Messages)
 		var refusal *protocol.Error
-		if parent, refusal = pipeline.attachHistory(ctx, identity.AgentKey.ID, request); refusal != nil {
+		if parent, offset, refusal = pipeline.attachHistory(ctx, identity.AgentKey.ID, request); refusal != nil {
 			release()
 			return nil, refusal
 		}
-		offset = len(request.Messages) - sent
+		state.historyExpanded = true
 	}
 	if parent == nil {
 		if linked, prefix := pipeline.link(ctx, identity, request); linked != nil {
@@ -168,7 +196,6 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 func (state *call) open() *protocol.Error {
 	record := state.recorder.Call()
 	record.MessageOffset = state.offset
-	record.MessageCount = len(state.request.Messages)
 	if state.parent != nil {
 		record.ParentCallID = state.parent.ID
 		record.SessionID = state.parent.SessionID
@@ -191,6 +218,10 @@ func (state *call) screen(unsealLosses []protocol.Loss) *protocol.Error {
 	pipeline, identity, request := state.pipeline, state.identity, state.request
 	original := protocol.CloneRequest(request)
 	state.client = original
+	state.toolKinds = map[string]protocol.ToolKind{}
+	for _, tool := range original.Tools {
+		state.toolKinds[tool.Name] = tool.Kind
+	}
 	engine, rules, err := pipeline.redactionEngine(state.ctx, identity.Project)
 	if err != nil {
 		state.recordRequest(original, nil)
@@ -206,11 +237,20 @@ func (state *call) screen(unsealLosses []protocol.Loss) *protocol.Error {
 	state.recorder.Call().RedactionHits = state.redacted
 	if err != nil {
 		state.recordRequest(original, nil)
+		state.recordRedactionBlock("redaction_immutable", "Sensitive content appears in a position that cannot be rewritten safely.")
 		return blocked("redaction_immutable", "Sensitive content appears in a position that cannot be redacted safely.", http.StatusUnprocessableEntity)
 	}
 	if result.Blocked {
 		state.recordRequest(original, nil)
-		return blocked("sensitive_content_blocked", "The request matches a blocking redaction rule.", http.StatusForbidden)
+		reason := "The request matches a blocking redaction rule."
+		for _, hit := range result.Hits {
+			if hit.Action == redact.ActionBlock {
+				reason = "The request matches the blocking redaction rule " + hit.Label + "."
+				break
+			}
+		}
+		state.recordRedactionBlock("sensitive_content_blocked", reason)
+		return blocked("sensitive_content_blocked", reason, http.StatusForbidden)
 	}
 
 	state.recordRequest(original, unsealLosses)
@@ -397,6 +437,11 @@ func (state *call) gateFailure(phase, detail string) *protocol.Error {
 // recordBlocked writes the one blocked event of a call. Several layers observe the same refusal
 // (the detector pass, the tool gate, the terminal settle); the first record carries the most
 // specific reason and later ones would only duplicate it.
+func (state *call) recordRedactionBlock(code, reason string) {
+	state.recordDecision(policy.PhaseRequest, policy.DecisionResult{Action: policy.ActionBlock, RuleID: code, Reason: reason, Severity: analysis.SeverityHigh}, true)
+	state.recordBlocked(auditevent.Decision{Stage: policy.PhaseRequest, Action: policy.ActionBlock, Blocked: true, RuleID: code, Code: code, Reason: reason})
+}
+
 func (state *call) recordBlocked(decision auditevent.Decision) {
 	if state.blockedRecorded {
 		return
@@ -425,16 +470,17 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// recordRequest stores what the client sent: the messages this call added, in plaintext, and the
-// parameters. Tool definitions are repeated only when they differ from the parent's.
+// recordRequest stores what the client sent: the messages this call added, in plaintext, the
+// parameters and the effective tool definitions. A continuation therefore carries its own tools.
 func (state *call) recordRequest(original *protocol.Request, losses []protocol.Loss) {
 	params := *original
-	params.Messages = nil
+	params.Items = nil
 	params.Tools = nil
-	offset := min(state.offset, len(original.Messages))
+	offset := min(state.offset, len(original.Items))
 	record := auditevent.Request{
-		Messages: original.Messages[offset:], Params: params, Tools: original.Tools,
-		Hits: nonNil(state.hits), Losses: losses,
+		Items: original.Items[offset:], Params: params, Tools: original.Tools,
+		Hits: nonNil(state.hits), Ledger: protocol.Ledger{Losses: losses},
+		Principal: &auditevent.Principal{AgentKeyID: state.identity.AgentKey.ID, Role: state.identity.AgentKey.Role, TrustLevel: state.identity.AgentKey.TrustLevel},
 	}
 	state.recorder.Event(auditevent.KindRequest, record)
 }
@@ -453,7 +499,7 @@ func estimateTokens(request *protocol.Request) int64 {
 	if request.MaxOutputTokens != nil {
 		output = min(max(*request.MaxOutputTokens, 1), maximumOutputEstimate)
 	}
-	return int64(len(protocol.Marshal(request.Messages))/4) + output
+	return int64(len(protocol.Marshal(request.Items))/4) + output
 }
 
 const (

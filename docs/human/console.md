@@ -18,6 +18,8 @@ Create and edit actions use dialogs, except project settings, channel settings a
 
 The interface shows only the actions a user is allowed to take. Project members manage routes, non-blocking redaction rules, record-only policy rules and agent keys; trust levels and non-default roles are administrator-only. Administrators also manage channels, users, the global log, project creation and deletion, members, blocking policy and redaction rules, policy restore, the decision model, and the retention and limit fields in project settings.
 
+Channels also carry a default output limit and a list of client headers the gateway may forward. Project settings provide a project-wide default. The limits matter when a call is sent to an Anthropic Messages upstream, which requires a value: an explicit client limit wins, then a route-target override (set through the API), the channel default, the project default, and finally the gateway fallback. Other protocols leave an omitted limit to the provider.
+
 ## Calls
 
 A call page shows metrics, online decisions, the conversation, upstream attempts and asynchronous analyses. Raw events are visible to administrators only.

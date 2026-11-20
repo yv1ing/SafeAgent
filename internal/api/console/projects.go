@@ -12,15 +12,16 @@ import (
 )
 
 type ProjectView struct {
-	ID                  string `json:"id" required:"true"`
-	Name                string `json:"name" required:"true"`
-	RetentionDays       int    `json:"retention_days" required:"true"`
-	RequestsPerMinute   int    `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
-	Concurrency         int    `json:"concurrency" required:"true" description:"0 means unlimited"`
-	DailyTokenQuota     int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
-	ActivePolicyVersion int64  `json:"active_policy_version" required:"true"`
-	Version             int64  `json:"version" required:"true"`
-	CreatedAt           string `json:"created_at" required:"true"`
+	ID                     string `json:"id" required:"true"`
+	Name                   string `json:"name" required:"true"`
+	RetentionDays          int    `json:"retention_days" required:"true"`
+	RequestsPerMinute      int    `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
+	Concurrency            int    `json:"concurrency" required:"true" description:"0 means unlimited"`
+	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
+	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
+	ActivePolicyVersion    int64  `json:"active_policy_version" required:"true"`
+	Version                int64  `json:"version" required:"true"`
+	CreatedAt              string `json:"created_at" required:"true"`
 	// Summary fields for project card display (24h window)
 	Calls24h          int64  `json:"calls_24h"`
 	Blocked24h        int64  `json:"blocked_24h"`
@@ -31,20 +32,22 @@ type ProjectView struct {
 
 // ProjectCreate leaves a limit out to take its default; an explicit zero means unlimited.
 type ProjectCreate struct {
-	Name              string `json:"name" required:"true"`
-	RetentionDays     *int   `json:"retention_days,omitempty"`
-	RequestsPerMinute *int   `json:"requests_per_minute,omitempty"`
-	Concurrency       *int   `json:"concurrency,omitempty"`
-	DailyTokenQuota   *int64 `json:"daily_token_quota,omitempty"`
+	Name                   string `json:"name" required:"true"`
+	RetentionDays          *int   `json:"retention_days,omitempty"`
+	RequestsPerMinute      *int   `json:"requests_per_minute,omitempty"`
+	Concurrency            *int   `json:"concurrency,omitempty"`
+	DailyTokenQuota        *int64 `json:"daily_token_quota,omitempty"`
+	DefaultMaxOutputTokens *int   `json:"default_max_output_tokens,omitempty" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
 }
 
 type ProjectUpdate struct {
-	Name              string `json:"name" required:"true"`
-	RetentionDays     int    `json:"retention_days" required:"true"`
-	RequestsPerMinute int    `json:"requests_per_minute" required:"true"`
-	Concurrency       int    `json:"concurrency" required:"true"`
-	DailyTokenQuota   int64  `json:"daily_token_quota" required:"true"`
-	Version           int64  `json:"version" required:"true"`
+	Name                   string `json:"name" required:"true"`
+	RetentionDays          int    `json:"retention_days" required:"true"`
+	RequestsPerMinute      int    `json:"requests_per_minute" required:"true"`
+	Concurrency            int    `json:"concurrency" required:"true"`
+	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true"`
+	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
+	Version                int64  `json:"version" required:"true"`
 }
 
 type updateProjectInput struct {
@@ -54,15 +57,16 @@ type updateProjectInput struct {
 
 func projectView(value *entity.Project) ProjectView {
 	return ProjectView{
-		ID:                  value.ID,
-		Name:                value.Name,
-		RetentionDays:       value.RetentionDays,
-		RequestsPerMinute:   value.RequestsPerMinute,
-		Concurrency:         value.Concurrency,
-		DailyTokenQuota:     value.DailyTokenQuota,
-		ActivePolicyVersion: value.ActivePolicyVersion,
-		Version:             value.Version,
-		CreatedAt:           stamp(value.CreatedAt),
+		ID:                     value.ID,
+		Name:                   value.Name,
+		RetentionDays:          value.RetentionDays,
+		RequestsPerMinute:      value.RequestsPerMinute,
+		Concurrency:            value.Concurrency,
+		DailyTokenQuota:        value.DailyTokenQuota,
+		DefaultMaxOutputTokens: value.DefaultMaxOutputTokens,
+		ActivePolicyVersion:    value.ActivePolicyVersion,
+		Version:                value.Version,
+		CreatedAt:              stamp(value.CreatedAt),
 	}
 }
 
@@ -140,7 +144,7 @@ func (console *Console) registerProjects() {
 		}
 		created, err := console.Project.Create(ctx.Request.Context(), identity.actor(), service.ProjectCreateInput{
 			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
-			DailyTokenQuota: input.DailyTokenQuota,
+			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
 		})
 		if err != nil {
 			return nil, err
@@ -161,7 +165,7 @@ func (console *Console) registerProjects() {
 		}
 		updated, err := console.Project.Update(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), service.ProjectInput{
 			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
-			DailyTokenQuota: input.DailyTokenQuota, Version: input.Version,
+			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Version: input.Version,
 		})
 		if err != nil {
 			return nil, err

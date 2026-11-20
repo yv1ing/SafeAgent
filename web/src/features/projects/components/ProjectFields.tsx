@@ -8,6 +8,7 @@ export interface ProjectDraft {
   requests_per_minute: number;
   concurrency: number;
   daily_token_quota: number;
+  default_max_output_tokens: number;
 }
 
 export function ProjectFields({
@@ -51,6 +52,16 @@ export function ProjectFields({
             value={draft.daily_token_quota}
             disabled={limitsReadOnly}
             onValueChange={(daily_token_quota) => set({ daily_token_quota })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.defaultMaxOutput} hint={t.projects.defaultMaxOutputHint}>
+        {(id) => (
+          <IntegerInput
+            id={id}
+            value={draft.default_max_output_tokens}
+            disabled={limitsReadOnly}
+            onValueChange={(default_max_output_tokens) => set({ default_max_output_tokens })}
           />
         )}
       </Field>

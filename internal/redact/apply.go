@@ -86,16 +86,9 @@ func (applier *applier) request(request *protocol.Request) error {
 	if err := applier.metadata(request); err != nil {
 		return err
 	}
-	for index := range request.Messages {
-		message := &request.Messages[index]
-		path := "messages[" + strconv.Itoa(index) + "]"
-		if err := applier.extras(&message.Extras, path+".extras"); err != nil {
+	for index := range request.Items {
+		if err := applier.item(&request.Items[index], "items["+strconv.Itoa(index)+"]"); err != nil {
 			return err
-		}
-		for position := range message.Blocks {
-			if err := applier.block(&message.Blocks[position], path+".blocks["+strconv.Itoa(position)+"]"); err != nil {
-				return err
-			}
 		}
 	}
 	for index := range request.Tools {
@@ -114,7 +107,7 @@ func (applier *applier) request(request *protocol.Request) error {
 		}
 		format.Schema = schema
 	}
-	return applier.extras(&request.Extras, "extras")
+	return applier.raw(request.Raw, "raw")
 }
 
 func (applier *applier) metadata(request *protocol.Request) error {
@@ -146,9 +139,6 @@ func (applier *applier) tool(tool *protocol.Tool, path string) error {
 		return err
 	}
 	tool.Description = applier.text(tool.Description, path+".description")
-	if err := applier.extras(&tool.Extras, path+".extras"); err != nil {
-		return err
-	}
 	var err error
 	if tool.Parameters, err = applier.redactJSON(tool.Parameters, path+".parameters"); err != nil {
 		return err
@@ -161,69 +151,92 @@ func (applier *applier) tool(tool *protocol.Tool, path string) error {
 			return err
 		}
 	}
-	return nil
+	return applier.raw(tool.Raw, path+".raw")
 }
 
-func (applier *applier) block(block *protocol.Block, path string) error {
-	switch block.Kind {
-	case protocol.KindText, protocol.KindRefusal:
-		block.Text = applier.text(block.Text, path+".text")
-	case protocol.KindReasoning:
-		applier.reasoning(block, path+".reasoning")
-	case protocol.KindRedacted:
-		if err := applier.immutable(block.Text); err != nil {
-			return err
-		}
-	case protocol.KindToolCall:
-		if err := applier.toolCall(block.ToolCall, path+".tool_call"); err != nil {
-			return err
-		}
-	case protocol.KindToolResult:
-		if err := applier.toolResult(block.ToolResult, path+".tool_result"); err != nil {
-			return err
-		}
-	case protocol.KindMedia:
-		if err := applier.media(block.Media, path+".media"); err != nil {
+func (applier *applier) item(item *protocol.Item, path string) error {
+	if item.ToolCall != nil {
+		if err := applier.toolCall(item.ToolCall, path+".tool_call"); err != nil {
 			return err
 		}
 	}
-	if err := applier.extras(&block.Extras, path+".extras"); err != nil {
+	if err := applier.immutables(item.CallID, item.Name); err != nil {
 		return err
 	}
-	for index := range block.Citations {
-		citation := &block.Citations[index]
+	if item.Kind == protocol.ItemReasoning {
+		applier.reasoning(item, path+".reasoning")
+	}
+	for index := range item.Parts {
+		if err := applier.part(&item.Parts[index], path+".parts["+strconv.Itoa(index)+"]"); err != nil {
+			return err
+		}
+	}
+	if len(item.Native) > 0 {
+		redacted, err := applier.redactJSON(item.Native, path+".native")
+		if err != nil {
+			return err
+		}
+		item.Native = redacted
+	}
+	return applier.raw(item.Raw, path+".raw")
+}
+
+func (applier *applier) part(part *protocol.Part, path string) error {
+	switch part.Kind {
+	case protocol.PartText, protocol.PartRefusal, protocol.PartReasoningText, protocol.PartReasoningSummary:
+		part.Text = applier.text(part.Text, path+".text")
+	case protocol.PartRedactedReasoning:
+		if err := applier.immutable(part.Text); err != nil {
+			return err
+		}
+	case protocol.PartMedia:
+		if err := applier.media(part.Media, path+".media"); err != nil {
+			return err
+		}
+	}
+	for index := range part.Citations {
+		citation := &part.Citations[index]
 		citationPath := path + ".citations[" + strconv.Itoa(index) + "]"
 		if err := applier.immutable(citation.URL); err != nil {
 			return err
 		}
 		citation.CitedText = applier.text(citation.CitedText, citationPath+".cited_text")
 		citation.Title = applier.text(citation.Title, citationPath+".title")
-		if err := applier.extras(&citation.Extras, citationPath+".extras"); err != nil {
+		if err := applier.raw(citation.Raw, citationPath+".raw"); err != nil {
 			return err
 		}
 	}
-	return nil
+	if len(part.Native) > 0 {
+		redacted, err := applier.redactJSON(part.Native, path+".native")
+		if err != nil {
+			return err
+		}
+		part.Native = redacted
+	}
+	return applier.raw(part.Raw, path+".raw")
 }
 
-// reasoning redacts a reasoning text the client echoed back. Its signature was issued for the text
-// the client was shown, which is the restored form of what the provider produced; redacting it
-// again yields the provider's text, so the signature stays valid as long as the echoed text is the
-// text it was issued for. Without that proof a rewritten text loses its signature.
-func (applier *applier) reasoning(block *protocol.Block, path string) {
-	original := block.Text
-	block.Text = applier.text(original, path)
-	if block.Text == original || block.Reasoning == nil || block.Reasoning.Signature == nil {
+// reasoning redacts the reasoning text the client echoed back. Its signature was issued for the
+// text the client was shown, which is the restored form of what the provider produced; redacting
+// it again yields the provider's text, so the signature stays valid as long as the echoed text is
+// the text it was issued for. Without that proof a rewritten text loses its signature.
+func (applier *applier) reasoning(item *protocol.Item, path string) {
+	original := item.Text()
+	for index := range item.Parts {
+		part := &item.Parts[index]
+		if part.Kind == protocol.PartReasoningText || part.Kind == protocol.PartReasoningSummary {
+			part.Text = applier.text(part.Text, path+".text["+strconv.Itoa(index)+"]")
+		}
+	}
+	if item.Text() == original || item.Reasoning == nil || item.Reasoning.Signature == nil {
 		return
 	}
-	if block.Reasoning.Signature.TextDigest != protocol.TextDigest(original) {
-		block.Reasoning.Signature = nil
+	if item.Reasoning.Signature.TextDigest != protocol.TextDigest(original) {
+		item.Reasoning.Signature = nil
 	}
 }
 
 func (applier *applier) toolCall(call *protocol.ToolCall, path string) error {
-	if call == nil {
-		return nil
-	}
 	if err := applier.immutables(call.ID, call.Name); err != nil {
 		return err
 	}
@@ -234,21 +247,6 @@ func (applier *applier) toolCall(call *protocol.ToolCall, path string) error {
 	arguments, err := applier.redactJSON([]byte(call.Arguments), path+".arguments")
 	call.Arguments = string(arguments)
 	return err
-}
-
-func (applier *applier) toolResult(result *protocol.ToolResult, path string) error {
-	if result == nil {
-		return nil
-	}
-	if err := applier.immutables(result.CallID, result.Name); err != nil {
-		return err
-	}
-	for index := range result.Content {
-		if err := applier.block(&result.Content[index], path+".content["+strconv.Itoa(index)+"]"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (applier *applier) media(media *protocol.Media, path string) error {
@@ -292,18 +290,21 @@ func textualMIME(mimeType string) bool {
 	return strings.HasPrefix(mimeType, "text/") || mimeType == "application/json" || mimeType == "application/xml"
 }
 
-func (applier *applier) extras(extras *protocol.Extras, path string) error {
-	names := make([]string, 0, len(extras.Fields))
-	for name := range extras.Fields {
+func (applier *applier) raw(raw *protocol.Raw, path string) error {
+	if raw == nil {
+		return nil
+	}
+	names := make([]string, 0, len(raw.Fields))
+	for name := range raw.Fields {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		transformed, err := applier.redactJSON(extras.Fields[name], path+"."+name)
+		transformed, err := applier.redactJSON(raw.Fields[name], path+"."+name)
 		if err != nil {
 			return err
 		}
-		extras.Fields[name] = transformed
+		raw.Fields[name] = transformed
 	}
 	return nil
 }

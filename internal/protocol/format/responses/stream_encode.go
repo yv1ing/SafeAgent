@@ -1,39 +1,52 @@
 package responses
 
 import (
+	"strings"
 	"time"
 
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
-// outputItem is one output item. Output indexes are assigned in the order items start, and sequence
-// numbers in the order frames are produced, so the frames of a block form a contiguous run that a
-// caller may hold back and release as a whole.
-type outputItem struct {
-	block  *protocol.Block
-	index  int
-	itemID string
-	open   bool
+type outputPart struct {
+	kind         protocol.PartKind
+	contentIndex int
+	summaryIndex int
+	text         strings.Builder
+	citations    []protocol.Citation
+	streamed     bool
+}
+
+type outputItemState struct {
+	index        int
+	item         protocol.Item
+	itemID       string
+	peer         format.Peer
+	toolPart     int
+	contentParts int
+	summaryParts int
+	parts        map[int]*outputPart
+	order        []int
+	closed       bool
 }
 
 type streamEncoder struct {
 	meta     protocol.ResponseMeta
-	created  int64
 	peer     format.Peer
-	items    map[int]*outputItem
-	order    []*outputItem
+	created  int64
+	items    map[int]*outputItemState
+	order    []*outputItemState
 	outputs  int
 	sequence int
 	started  bool
 	stopped  bool
 	usage    *protocol.Usage
-	finish   protocol.FinishReason
+	finish   protocol.Finish
 	failure  *protocol.Error
 }
 
 func (Codec) NewStreamEncoder(meta protocol.ResponseMeta, peer format.Peer) format.StreamEncoder {
-	return &streamEncoder{meta: meta, peer: peer, items: map[int]*outputItem{}, created: time.Now().Unix()}
+	return &streamEncoder{meta: meta, peer: peer, items: map[int]*outputItemState{}, created: time.Now().Unix()}
 }
 
 func (encoder *streamEncoder) Encode(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
@@ -41,35 +54,56 @@ func (encoder *streamEncoder) Encode(event protocol.Event) ([]format.Frame, []pr
 	case protocol.EventMessageStart:
 		if event.Meta != nil {
 			encoder.meta = *event.Meta
+			if event.Meta.Created != 0 {
+				encoder.created = event.Meta.Created
+			}
 		}
 		return encoder.begin(), nil, nil
-	case protocol.EventBlockStart:
-		if event.Block == nil {
-			return nil, nil, nil
-		}
-		return encoder.startItem(event.Index, *event.Block)
-	case protocol.EventBlockDelta:
-		item := encoder.items[event.Index]
-		if item == nil || !item.open || event.Text == "" {
-			return nil, nil, nil
-		}
-		return encoder.delta(item, event.Text), nil, nil
-	case protocol.EventBlockStop:
+	case protocol.EventItemStart:
+		return encoder.startItem(event)
+	case protocol.EventPartStart:
+		return encoder.startPart(event)
+	case protocol.EventPartDelta:
+		return encoder.partDelta(event)
+	case protocol.EventPartStop:
+		return encoder.stopPart(event)
+	case protocol.EventItemStop:
 		return encoder.stopItem(event)
 	case protocol.EventMessageDelta:
-		encoder.usage, encoder.finish, encoder.failure = event.Usage, event.Finish, event.Failure
+		encoder.usage, encoder.failure = event.Usage, event.Failure
+		if event.Finish != nil {
+			encoder.finish = *event.Finish
+		}
 		var losses []protocol.Loss
-		if format.FinishLoss(event.Finish, protocol.Responses) {
-			losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: string(event.Finish), To: protocol.Responses})
+		if format.FinishLoss(encoder.finish.Kind, protocol.Responses) {
+			losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: string(encoder.finish.Kind), To: protocol.Responses})
 		}
 		return nil, losses, nil
 	case protocol.EventMessageStop:
+		return encoder.terminal(), format.UsageLosses(encoder.usage, protocol.Responses), nil
+	case protocol.EventError:
+		encoder.failure = event.Failure
 		return encoder.terminal(), nil, nil
+	case protocol.EventPing:
+		return nil, nil, nil
 	}
 	return nil, nil, nil
 }
 
+func (encoder *streamEncoder) Resume(priorItems, priorParts int, priorSequence int64) {
+	encoder.started = true
+	encoder.outputs += priorItems
+	if priorSequence > int64(encoder.sequence) {
+		encoder.sequence = int(priorSequence)
+	}
+}
+
 func (encoder *streamEncoder) Finish() ([]format.Frame, []protocol.Loss, error) {
+	return encoder.terminal(), nil, nil
+}
+
+func (encoder *streamEncoder) Fail(failure *protocol.Error) ([]format.Frame, []protocol.Loss, error) {
+	encoder.failure = failure
 	return encoder.terminal(), nil, nil
 }
 
@@ -82,178 +116,388 @@ func (encoder *streamEncoder) begin() []format.Frame {
 	return append(frames, encoder.emit("response.in_progress", map[string]any{"response": encoder.snapshot("in_progress")})...)
 }
 
-// itemOf encodes a block as the output item it becomes; nil means the block has no Responses form.
-func (encoder *streamEncoder) itemOf(block protocol.Block, outputIndex int) (map[string]any, []protocol.Loss, error) {
-	context := format.NewPartContext(protocol.Responses, encoder.peer)
-	context.Output = true
-	items, losses, err := encodeItems(protocol.Message{Role: protocol.RoleAssistant, Blocks: []protocol.Block{block}}, context, "block")
-	if err != nil || len(items) == 0 {
-		return nil, losses, err
-	}
-	item := items[0].(map[string]any)
-	assignItemID(item, outputIndex)
-	if item["type"] == "message" {
-		item["status"] = "completed"
-	}
-	return item, losses, nil
+func (encoder *streamEncoder) emit(kind string, payload map[string]any) []format.Frame {
+	payload["type"] = kind
+	payload["sequence_number"] = encoder.sequence
+	encoder.sequence++
+	return []format.Frame{{Event: kind, Data: protocol.Marshal(payload)}}
 }
 
-func (encoder *streamEncoder) startItem(index int, block protocol.Block) ([]format.Frame, []protocol.Loss, error) {
+func (encoder *streamEncoder) snapshot(status string) map[string]any {
+	snapshot := map[string]any{
+		"id": encoder.meta.ID, "object": "response", "created_at": encoder.created,
+		"model": encoder.meta.Model, "status": status, "output": encoder.outputItems(),
+	}
+	if encoder.meta.ServiceTier != "" {
+		snapshot["service_tier"] = encoder.meta.ServiceTier
+	}
+	if encoder.usage != nil {
+		snapshot["usage"] = format.EncodeResponsesUsage(encoder.usage)
+	}
+	if encoder.failure != nil {
+		snapshot["error"] = map[string]any{"code": encoder.failure.Code, "message": encoder.failure.Message}
+	}
+	if status == "incomplete" {
+		snapshot["incomplete_details"] = map[string]any{"reason": incompleteReason(encoder.finish)}
+	}
+	return snapshot
+}
+
+func (encoder *streamEncoder) outputItems() []any {
+	items := make([]any, 0, len(encoder.order))
+	for _, state := range encoder.order {
+		if state.closed {
+			items = append(items, finalOutputMap(state))
+		}
+	}
+	return items
+}
+
+func (encoder *streamEncoder) startItem(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
 	frames := encoder.begin()
-	output := encoder.outputs
-	item, losses, err := encoder.itemOf(block, output)
-	if err != nil {
-		return nil, losses, err
+	if event.Item == nil {
+		return frames, nil, nil
 	}
-	if item == nil {
-		return frames, losses, nil
+	item := event.Item.Clone()
+	itemKind := item.Kind
+	if itemKind == "" {
+		itemKind = protocol.ItemMessage
 	}
+	var losses []protocol.Loss
+	switch itemKind {
+	case protocol.ItemServerToolCall, protocol.ItemServerToolResult, protocol.ItemNative:
+		if format.RawObject(item.Raw, protocol.Responses) == nil {
+			return frames, []protocol.Loss{format.Degraded("item", "the provider item cannot be represented by Responses", protocol.Responses)}, nil
+		}
+	case protocol.ItemToolCall:
+		if item.ToolCall == nil || item.ToolCall.Kind == protocol.ToolServer {
+			return frames, []protocol.Loss{format.Degraded("item", "provider-executed tool calls cannot be represented by this gateway", protocol.Responses)}, nil
+		}
+	}
+	outputIndex := encoder.outputs
 	encoder.outputs++
-	cloned := protocol.CloneBlock(block)
-	state := &outputItem{block: &cloned, index: output, itemID: protocol.String(item["id"]), open: true}
-	encoder.items[index] = state
+	id, synthesized := protocol.ItemID(protocol.Responses, itemKind, item.ID, toolCallID(&item), outputIndex)
+	if synthesized {
+		losses = append(losses, protocol.Loss{Path: "id", Code: protocol.LossItemIDMapped, Class: protocol.LossDegraded, Detail: "the target response id was synthesized", To: protocol.Responses})
+	}
+	state := &outputItemState{index: outputIndex, item: item, itemID: id, peer: encoder.peer, parts: map[int]*outputPart{}, toolPart: -1}
+	encoder.items[event.ItemIndex] = state
 	encoder.order = append(encoder.order, state)
-	frames = append(frames, encoder.emit("response.output_item.added", map[string]any{"output_index": output, "item": announced(item)})...)
-	return append(frames, encoder.openContent(state)...), losses, nil
+	announced := map[string]any{"id": id}
+	switch itemKind {
+	case protocol.ItemMessage:
+		role := string(item.Role)
+		if role == "" {
+			role = "assistant"
+		}
+		announced["type"], announced["role"], announced["status"], announced["content"] = "message", role, "in_progress", []any{}
+	case protocol.ItemReasoning:
+		announced["type"], announced["summary"] = "reasoning", []any{}
+		if itemHasFullReasoning(&item) {
+			announced["content"] = []any{}
+		}
+	case protocol.ItemServerToolCall, protocol.ItemServerToolResult:
+		native := format.RawObject(item.Raw, protocol.Responses)
+		native["id"] = id
+		announced = native
+	case protocol.ItemToolCall:
+		if item.ToolCall.Kind == protocol.ToolCustom {
+			announced["type"], announced["call_id"], announced["name"], announced["input"], announced["status"] = "custom_tool_call", item.ToolCall.ID, item.ToolCall.Name, "", "in_progress"
+		} else {
+			announced["type"], announced["call_id"], announced["name"], announced["arguments"], announced["status"] = "function_call", item.ToolCall.ID, item.ToolCall.Name, "", "in_progress"
+		}
+	case protocol.ItemNative:
+		announced = format.RawObject(item.Raw, protocol.Responses)
+		announced["id"] = id
+	}
+	if itemKind == protocol.ItemToolCall && item.ToolCall != nil && item.ToolCall.Signature != nil {
+		losses = append(losses, format.Degraded("signature", "Responses has no tool call signature", protocol.Responses))
+	}
+	frames = append(frames, encoder.emit("response.output_item.added", map[string]any{"output_index": outputIndex, "item": announced})...)
+	return frames, losses, nil
 }
 
-// announced strips what the deltas deliver, as output_item.added describes an item before its
-// content exists.
-func announced(item map[string]any) map[string]any {
-	shallow := make(map[string]any, len(item))
-	for key, value := range item {
-		shallow[key] = value
+func (encoder *streamEncoder) itemOf(irIndex int) *outputItemState { return encoder.items[irIndex] }
+
+func toolCallID(item *protocol.Item) string {
+	if item != nil && item.ToolCall != nil {
+		return item.ToolCall.ID
 	}
-	switch shallow["type"] {
-	case "message":
-		shallow["status"], shallow["content"] = "in_progress", []any{}
-	case "function_call":
-		shallow["status"], shallow["arguments"] = "in_progress", ""
-	case "custom_tool_call":
-		shallow["status"], shallow["input"] = "in_progress", ""
-	case "reasoning":
-		shallow["summary"] = []any{}
-		if _, present := shallow["content"]; present {
-			shallow["content"] = []any{}
+	return ""
+}
+
+func itemHasFullReasoning(item *protocol.Item) bool {
+	for _, part := range item.Parts {
+		if part.Kind == protocol.PartReasoningText {
+			return true
 		}
 	}
-	return shallow
+	return false
 }
 
-func (encoder *streamEncoder) openContent(state *outputItem) []format.Frame {
-	switch state.block.Kind {
-	case protocol.KindText, protocol.KindRefusal:
-		return encoder.emit("response.content_part.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "part": emptyPart(state.block)})
-	case protocol.KindReasoning:
-		if fullReasoning(state.block) {
-			return encoder.emit("response.content_part.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "part": map[string]any{"type": "reasoning_text", "text": ""}})
+func (encoder *streamEncoder) startPart(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.itemOf(event.ItemIndex)
+	if state == nil || event.Part == nil {
+		return nil, nil, nil
+	}
+	part := &outputPart{kind: event.Part.Kind, citations: event.Part.Citations}
+	state.parts[event.PartIndex] = part
+	state.order = append(state.order, event.PartIndex)
+	switch part.kind {
+	case protocol.PartText, protocol.PartRefusal, protocol.PartReasoningText:
+		part.contentIndex = state.contentParts
+		state.contentParts++
+		empty := map[string]any{"type": "output_text", "text": "", "annotations": []any{}}
+		if part.kind == protocol.PartRefusal {
+			empty = map[string]any{"type": "refusal", "refusal": ""}
 		}
-		return encoder.emit("response.reasoning_summary_part.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}})
+		if part.kind == protocol.PartReasoningText {
+			empty = map[string]any{"type": "reasoning_text", "text": ""}
+		}
+		return encoder.emit("response.content_part.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": part.contentIndex, "part": empty}), nil, nil
+	case protocol.PartReasoningSummary:
+		part.summaryIndex = state.summaryParts
+		state.summaryParts++
+		return encoder.emit("response.reasoning_summary_part.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "summary_index": part.summaryIndex, "part": map[string]any{"type": "summary_text", "text": ""}}), nil, nil
+	case protocol.PartToolArguments:
+		state.toolPart = event.PartIndex
+	case protocol.PartMedia:
+		return nil, []protocol.Loss{format.Degraded("media", "Responses cannot stream generated media", protocol.Responses)}, nil
+	case protocol.PartNative, protocol.PartRedactedReasoning:
+		return nil, []protocol.Loss{format.Degraded("part", "the provider part cannot be represented by Responses", protocol.Responses)}, nil
 	}
-	return nil
+	return nil, nil, nil
 }
 
-// fullReasoning reports a block that carries the model's raw reasoning, which Responses streams
-// as reasoning_text content rather than as a summary.
-func fullReasoning(block *protocol.Block) bool {
-	return block.Reasoning != nil && block.Reasoning.Visibility == "full"
-}
-
-func emptyPart(block *protocol.Block) map[string]any {
-	if block.Kind == protocol.KindRefusal {
-		return map[string]any{"type": "refusal", "refusal": ""}
+func (encoder *streamEncoder) partDelta(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.itemOf(event.ItemIndex)
+	if state == nil || event.Delta == "" {
+		return nil, nil, nil
 	}
-	return map[string]any{"type": "output_text", "text": "", "annotations": []any{}}
+	part := state.parts[event.PartIndex]
+	if part == nil {
+		return nil, nil, nil
+	}
+	part.streamed = true
+	part.text.WriteString(event.Delta)
+	return encoder.deltaFrames(state, part, event.Delta), nil, nil
 }
 
-func (encoder *streamEncoder) delta(state *outputItem, text string) []format.Frame {
-	block := state.block
+func (encoder *streamEncoder) deltaFrames(state *outputItemState, part *outputPart, text string) []format.Frame {
 	body := map[string]any{"item_id": state.itemID, "output_index": state.index, "delta": text}
-	switch block.Kind {
-	case protocol.KindToolCall:
-		if block.ToolCall.Kind == protocol.ToolServer {
-			return nil
-		}
-		block.ToolCall.Arguments += text
-		if block.ToolCall.Kind == protocol.ToolCustom {
+	switch part.kind {
+	case protocol.PartText:
+		body["content_index"] = part.contentIndex
+		return encoder.emit("response.output_text.delta", body)
+	case protocol.PartRefusal:
+		body["content_index"] = part.contentIndex
+		return encoder.emit("response.refusal.delta", body)
+	case protocol.PartReasoningSummary:
+		body["summary_index"] = part.summaryIndex
+		return encoder.emit("response.reasoning_summary_text.delta", body)
+	case protocol.PartReasoningText:
+		body["content_index"] = part.contentIndex
+		return encoder.emit("response.reasoning_text.delta", body)
+	case protocol.PartToolArguments:
+		if state.item.ToolCall != nil && state.item.ToolCall.Kind == protocol.ToolCustom {
 			return encoder.emit("response.custom_tool_call_input.delta", body)
 		}
 		return encoder.emit("response.function_call_arguments.delta", body)
-	case protocol.KindReasoning:
-		block.Text += text
-		if fullReasoning(block) {
-			body["content_index"] = 0
-			return encoder.emit("response.reasoning_text.delta", body)
-		}
-		body["summary_index"] = 0
-		return encoder.emit("response.reasoning_summary_text.delta", body)
-	case protocol.KindRefusal:
-		block.Text += text
-		body["content_index"] = 0
-		return encoder.emit("response.refusal.delta", body)
-	case protocol.KindText:
-		block.Text += text
-		body["content_index"] = 0
-		return encoder.emit("response.output_text.delta", body)
 	}
 	return nil
+}
+
+func (encoder *streamEncoder) stopPart(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.itemOf(event.ItemIndex)
+	if state == nil {
+		return nil, nil, nil
+	}
+	part := state.parts[event.PartIndex]
+	if part == nil {
+		return nil, nil, nil
+	}
+	var frames []format.Frame
+	var losses []protocol.Loss
+	if event.Part != nil {
+		if len(event.Part.Citations) > 0 {
+			part.citations = event.Part.Citations
+		}
+		if content := protocol.StreamedContent(*event.Part); content != "" && !part.streamed {
+			part.text.WriteString(content)
+			frames = append(frames, encoder.deltaFrames(state, part, content)...)
+			part.streamed = true
+		}
+	}
+	if part.kind == protocol.PartToolArguments && !part.streamed {
+		arguments := ""
+		if state.item.ToolCall != nil {
+			arguments = state.item.ToolCall.Arguments
+		}
+		if arguments != "" {
+			part.text.WriteString(arguments)
+			frames = append(frames, encoder.deltaFrames(state, part, arguments)...)
+			part.streamed = true
+		}
+	}
+	if len(part.citations) > 0 && part.kind == protocol.PartText {
+		for index, citation := range part.citations {
+			annotation, nested := format.EncodeCitation(citation, protocol.Responses)
+			losses = append(losses, nested...)
+			if annotation == nil {
+				continue
+			}
+			frames = append(frames, encoder.emit("response.output_text.annotation.added", map[string]any{
+				"item_id": state.itemID, "output_index": state.index, "content_index": part.contentIndex,
+				"annotation_index": index, "annotation": annotation,
+			})...)
+		}
+	}
+	return frames, losses, nil
 }
 
 func (encoder *streamEncoder) stopItem(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
-	state := encoder.items[event.Index]
-	if state == nil || !state.open {
+	state := encoder.itemOf(event.ItemIndex)
+	if state == nil || state.closed {
 		return nil, nil, nil
 	}
-	state.open = false
-	var frames []format.Frame
-	if event.Block != nil {
-		final := protocol.CloneBlock(*event.Block)
-		state.block = &final
+	if event.Item != nil {
+		protocol.MergeItem(&state.item, *event.Item)
 	}
-	block := state.block
-	annotations := 0
-	for _, annotation := range block.Citations {
-		if entry, _ := format.EncodeCitation(annotation, protocol.Responses); entry != nil && block.Kind == protocol.KindText {
-			frames = append(frames, encoder.emit("response.output_text.annotation.added", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "annotation_index": annotations, "annotation": entry})...)
-			annotations++
+	for _, part := range state.parts {
+		if part.kind == protocol.PartToolArguments && !part.streamed && state.item.ToolCall != nil {
+			arguments := state.item.ToolCall.Arguments
+			if arguments != "" {
+				part.text.WriteString(arguments)
+				part.streamed = true
+			}
 		}
 	}
-	frames = append(frames, encoder.closeContent(state)...)
-	item, losses, err := encoder.itemOf(*block, state.index)
-	if err != nil {
-		return nil, losses, err
-	}
-	item["id"] = state.itemID
-	return append(frames, encoder.emit("response.output_item.done", map[string]any{"output_index": state.index, "item": item})...), losses, nil
+	state.closed = true
+	final := finalOutputMap(state)
+	return encoder.emit("response.output_item.done", map[string]any{"output_index": state.index, "item": final}), nil, nil
 }
 
-func (encoder *streamEncoder) closeContent(state *outputItem) []format.Frame {
-	block := state.block
-	switch block.Kind {
-	case protocol.KindText:
-		frames := encoder.emit("response.output_text.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "text": block.Text})
-		part := emptyPart(block)
-		part["text"] = block.Text
-		return append(frames, encoder.emit("response.content_part.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "part": part})...)
-	case protocol.KindRefusal:
-		frames := encoder.emit("response.refusal.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "refusal": block.Text})
-		return append(frames, encoder.emit("response.content_part.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "part": map[string]any{"type": "refusal", "refusal": block.Text}})...)
-	case protocol.KindReasoning:
-		if fullReasoning(block) {
-			frames := encoder.emit("response.reasoning_text.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "text": block.Text})
-			return append(frames, encoder.emit("response.content_part.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "content_index": 0, "part": map[string]any{"type": "reasoning_text", "text": block.Text}})...)
+func finalOutputMap(state *outputItemState) map[string]any {
+	item := map[string]any{"id": state.itemID}
+	switch state.item.Kind {
+	case protocol.ItemMessage, "":
+		role := string(state.item.Role)
+		if role == "" {
+			role = "assistant"
 		}
-		frames := encoder.emit("response.reasoning_summary_text.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "summary_index": 0, "text": block.Text})
-		return append(frames, encoder.emit("response.reasoning_summary_part.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": block.Text}})...)
-	case protocol.KindToolCall:
-		if block.ToolCall.Kind == protocol.ToolCustom {
-			return encoder.emit("response.custom_tool_call_input.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "input": block.ToolCall.Arguments})
+		item["type"], item["role"], item["status"] = "message", role, "completed"
+		content := []any{}
+		for _, partIndex := range state.order {
+			part := state.parts[partIndex]
+			if part == nil {
+				continue
+			}
+			switch part.kind {
+			case protocol.PartText:
+				entry := map[string]any{"type": "output_text", "text": part.text.String(), "annotations": []any{}}
+				if annotations, _ := encodeAnnotations(part.citations); len(annotations) > 0 {
+					entry["annotations"] = annotations
+				}
+				content = append(content, entry)
+			case protocol.PartRefusal:
+				content = append(content, map[string]any{"type": "refusal", "refusal": part.text.String()})
+			}
 		}
-		if block.ToolCall.Kind == protocol.ToolFunction {
-			return encoder.emit("response.function_call_arguments.done", map[string]any{"item_id": state.itemID, "output_index": state.index, "arguments": format.EmptyObjectIfBlank(block.ToolCall.Arguments)})
+		item["content"] = content
+	case protocol.ItemReasoning:
+		item["type"] = "reasoning"
+		summary, content := []any{}, []any{}
+		for _, partIndex := range state.order {
+			part := state.parts[partIndex]
+			if part == nil {
+				continue
+			}
+			switch part.kind {
+			case protocol.PartReasoningSummary:
+				summary = append(summary, map[string]any{"type": "summary_text", "text": part.text.String()})
+			case protocol.PartReasoningText:
+				content = append(content, map[string]any{"type": "reasoning_text", "text": part.text.String()})
+			}
+		}
+		item["summary"] = summary
+		if len(content) > 0 {
+			item["content"] = content
+		}
+		if state.item.Reasoning != nil && state.item.Reasoning.Signature != nil {
+			if blob := signatureBlob(state); blob != "" {
+				item["encrypted_content"] = blob
+			}
+		}
+	case protocol.ItemToolCall:
+		if state.item.ToolCall == nil {
+			item["type"] = "function_call"
+			break
+		}
+		if state.item.ToolCall.Kind == protocol.ToolCustom {
+			item["type"], item["call_id"], item["name"], item["input"], item["status"] = "custom_tool_call", state.item.ToolCall.ID, state.item.ToolCall.Name, state.toolText(), "completed"
+		} else {
+			arguments := state.toolText()
+			if arguments == "" {
+				arguments = "{}"
+			}
+			item["type"], item["call_id"], item["name"], item["arguments"], item["status"] = "function_call", state.item.ToolCall.ID, state.item.ToolCall.Name, arguments, "completed"
+		}
+	case protocol.ItemNative, protocol.ItemServerToolCall, protocol.ItemServerToolResult:
+		if native := format.RawObject(state.item.Raw, protocol.Responses); native != nil {
+			native["id"] = state.itemID
+			return native
+		}
+		item["type"] = "message"
+	}
+	return item
+}
+
+func (state *outputItemState) toolText() string {
+	if state.toolPart >= 0 {
+		if part := state.parts[state.toolPart]; part != nil {
+			if part.text.Len() > 0 {
+				return part.text.String()
+			}
 		}
 	}
-	return nil
+	if state.item.ToolCall != nil {
+		return state.item.ToolCall.Arguments
+	}
+	return ""
+}
+
+func signatureBlob(state *outputItemState) string {
+	if state.item.Reasoning == nil || state.item.Reasoning.Signature == nil {
+		return ""
+	}
+	return state.peer.WireSignature(state.item.Reasoning.Signature, state.reasoningText())
+}
+
+func (state *outputItemState) reasoningText() string {
+	var text strings.Builder
+	for _, partIndex := range state.order {
+		part := state.parts[partIndex]
+		if part != nil && (part.kind == protocol.PartReasoningText || part.kind == protocol.PartReasoningSummary) {
+			text.WriteString(part.text.String())
+		}
+	}
+	if text.Len() == 0 {
+		return state.item.Text()
+	}
+	return text.String()
+}
+
+func encodeAnnotations(citations []protocol.Citation) ([]any, []protocol.Loss) {
+	var losses []protocol.Loss
+	annotations := make([]any, 0, len(citations))
+	for _, citation := range citations {
+		entry, nested := format.EncodeCitation(citation, protocol.Responses)
+		losses = append(losses, nested...)
+		if entry != nil {
+			annotations = append(annotations, entry)
+		}
+	}
+	return annotations, losses
 }
 
 func (encoder *streamEncoder) terminal() []format.Frame {
@@ -261,55 +505,19 @@ func (encoder *streamEncoder) terminal() []format.Frame {
 		return nil
 	}
 	encoder.stopped = true
-	frames := encoder.begin()
 	for _, state := range encoder.order {
-		if state.open {
-			state.open = false
-			frames = append(frames, encoder.closeContent(state)...)
-			if item, _, err := encoder.itemOf(*state.block, state.index); err == nil {
-				item["id"] = state.itemID
-				frames = append(frames, encoder.emit("response.output_item.done", map[string]any{"output_index": state.index, "item": item})...)
-			}
-		}
+		state.closed = true
 	}
-	status := format.ResponsesStatus(encoder.finish)
-	name := "response.completed"
-	snapshot := encoder.snapshot(status)
-	switch {
-	case encoder.failure != nil || status == "failed":
-		name, snapshot["status"] = "response.failed", "failed"
-		failure := encoder.failure
-		if failure == nil {
-			failure = &protocol.Error{Code: "upstream_failure", Message: "The upstream reported a failure."}
-		}
-		snapshot["error"] = map[string]any{"code": failure.Code, "message": failure.Message}
-	case status == "incomplete":
-		name = "response.incomplete"
-		snapshot["incomplete_details"] = map[string]any{"reason": format.ResponsesIncompleteReason(encoder.finish)}
+	status := format.ResponsesStatus(encoder.finish.Kind)
+	if encoder.failure != nil {
+		status = "failed"
 	}
-	return append(frames, encoder.emit(name, map[string]any{"response": snapshot})...)
-}
-
-func (encoder *streamEncoder) snapshot(status string) map[string]any {
-	output := []any{}
-	if status != "in_progress" {
-		for _, state := range encoder.order {
-			if item, _, err := encoder.itemOf(*state.block, state.index); err == nil && item != nil {
-				item["id"] = state.itemID
-				output = append(output, item)
-			}
-		}
+	kind := "response.completed"
+	switch status {
+	case "incomplete":
+		kind = "response.incomplete"
+	case "failed":
+		kind = "response.failed"
 	}
-	snapshot := map[string]any{"id": encoder.meta.ID, "object": "response", "created_at": encoder.created, "model": encoder.meta.Model, "status": status, "output": output}
-	if usage := format.EncodeResponsesUsage(encoder.usage); usage != nil {
-		snapshot["usage"] = usage
-	}
-	return snapshot
-}
-
-func (encoder *streamEncoder) emit(name string, payload map[string]any) []format.Frame {
-	payload["type"] = name
-	payload["sequence_number"] = encoder.sequence
-	encoder.sequence++
-	return []format.Frame{{Event: name, Data: protocol.Marshal(payload)}}
+	return encoder.emit(kind, map[string]any{"response": encoder.snapshot(status)})
 }

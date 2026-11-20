@@ -30,21 +30,23 @@ func NewProjectService(store *repository.Store) *ProjectService { return &Projec
 // ProjectInput is a full project definition. Limits and retention belong to administrators; a member's
 // update may carry them only unchanged.
 type ProjectInput struct {
-	Name              string
-	RetentionDays     int
-	RequestsPerMinute int
-	Concurrency       int
-	DailyTokenQuota   int64
-	Version           int64
+	Name                   string
+	RetentionDays          int
+	RequestsPerMinute      int
+	Concurrency            int
+	DailyTokenQuota        int64
+	DefaultMaxOutputTokens int
+	Version                int64
 }
 
 // ProjectCreateInput leaves a field nil to take its default; an explicit zero limit means unlimited.
 type ProjectCreateInput struct {
-	Name              string
-	RetentionDays     *int
-	RequestsPerMinute *int
-	Concurrency       *int
-	DailyTokenQuota   *int64
+	Name                   string
+	RetentionDays          *int
+	RequestsPerMinute      *int
+	Concurrency            *int
+	DailyTokenQuota        *int64
+	DefaultMaxOutputTokens *int
 }
 
 func (input ProjectCreateInput) resolve() ProjectInput {
@@ -64,6 +66,9 @@ func (input ProjectCreateInput) resolve() ProjectInput {
 	if input.DailyTokenQuota != nil {
 		resolved.DailyTokenQuota = *input.DailyTokenQuota
 	}
+	if input.DefaultMaxOutputTokens != nil {
+		resolved.DefaultMaxOutputTokens = *input.DefaultMaxOutputTokens
+	}
 	return resolved
 }
 
@@ -77,14 +82,14 @@ func (input ProjectInput) normalize() (ProjectInput, error) {
 		return input, Invalid("invalid_retention_days")
 	}
 	if input.RequestsPerMinute < 0 || input.RequestsPerMinute > MaximumRequestsPerMinute ||
-		input.Concurrency < 0 || input.Concurrency > MaximumConcurrency || input.DailyTokenQuota < 0 {
+		input.Concurrency < 0 || input.Concurrency > MaximumConcurrency || input.DailyTokenQuota < 0 || input.DefaultMaxOutputTokens < 0 || input.DefaultMaxOutputTokens > MaximumOutputTokens {
 		return input, Invalid("invalid_limit")
 	}
 	return input, nil
 }
 
 func (input ProjectInput) entity() entity.Project {
-	return entity.Project{Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency, DailyTokenQuota: input.DailyTokenQuota}
+	return entity.Project{Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency, DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens}
 }
 
 // changesAdministratorFields reports whether input alters anything only administrators may set.
@@ -92,7 +97,8 @@ func (input ProjectInput) changesAdministratorFields(existing *entity.Project) b
 	return input.RetentionDays != existing.RetentionDays ||
 		input.RequestsPerMinute != existing.RequestsPerMinute ||
 		input.Concurrency != existing.Concurrency ||
-		input.DailyTokenQuota != existing.DailyTokenQuota
+		input.DailyTokenQuota != existing.DailyTokenQuota ||
+		input.DefaultMaxOutputTokens != existing.DefaultMaxOutputTokens
 }
 
 func (service *ProjectService) List(ctx context.Context, actor Actor) ([]entity.Project, error) {

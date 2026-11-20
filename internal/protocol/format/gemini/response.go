@@ -15,43 +15,44 @@ func (Codec) DecodeResponse(body []byte, peer format.Peer) (*protocol.Response, 
 		return nil, nil, errors.New("response must be a JSON object")
 	}
 	if failure := protocol.Object(root["error"]); failure != nil {
-		return nil, nil, &format.StreamError{Code: protocol.String(failure["status"]), Message: protocol.String(failure["message"])}
+		return nil, nil, &format.StreamError{Code: protocol.String(failure["status"]), Type: protocol.String(failure["status"]), Message: protocol.String(failure["message"]), Status: int(protocol.IntegerOrZero(failure["code"]))}
 	}
 	response := &protocol.Response{
-		ResponseMeta: protocol.ResponseMeta{ID: protocol.String(root["responseId"]), Model: protocol.String(root["modelVersion"])},
-		Finish:       protocol.FinishStop,
-		Usage:        format.ParseGeminiUsage(root),
-		Extras:       format.UnmodelledFields(protocol.Gemini, root, responseKeys...),
+		Source: protocol.Gemini,
+		Meta:   protocol.ResponseMeta{ID: protocol.String(root["responseId"]), Model: protocol.String(root["modelVersion"])},
+		Finish: protocol.Finish{Kind: protocol.FinishStop},
+		Usage:  format.ParseGeminiUsage(root), Raw: format.CaptureRaw(protocol.Gemini, root, responseKeys...),
 	}
 	candidates := protocol.Array(root["candidates"])
 	if len(candidates) > 1 {
-		return nil, nil, errors.New("multiple candidates are not supported")
+		return nil, nil, protocol.UnsupportedFeature("unsupported_multi_choice", "Multiple candidates are not supported.")
 	}
 	ids := format.NewCallIDs(peer)
 	losses := []protocol.Loss{}
-	for _, item := range candidates {
-		candidate := protocol.Object(item)
-		blocks, err := format.DecodeContent(protocol.Gemini, protocol.Object(candidate["content"])["parts"])
+	for _, value := range candidates {
+		candidate := protocol.Object(value)
+		items, err := decodeParts(protocol.RoleAssistant, protocol.Array(protocol.Object(candidate["content"])["parts"]), ids, nil)
 		if err != nil {
 			return nil, nil, err
 		}
-		assignCallIDs(blocks, ids)
-		blocks = attachCitations(blocks, candidateCitations(candidate))
-		response.Blocks = blocks
+		response.Items = attachCitations(items, candidateCitations(candidate))
 		reason := protocol.String(candidate["finishReason"])
-		finish, known := format.ParseGeminiFinish(reason)
-		response.Finish = finish
-		if !known {
-			losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: reason, To: protocol.Gemini})
+		response.Finish = protocol.Finish{Kind: protocol.FinishStop, Raw: reason}
+		if reason != "" {
+			finish, known := format.ParseGeminiFinish(reason)
+			response.Finish.Kind = finish
+			if !known {
+				losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: reason, To: protocol.Gemini})
+			}
 		}
 	}
 	if feedback := protocol.Object(root["promptFeedback"]); protocol.String(feedback["blockReason"]) != "" {
-		response.Finish = protocol.FinishContentFilter
+		response.Finish.Kind = protocol.FinishContentFilter
 	}
-	if response.Finish == protocol.FinishStop {
-		for _, block := range response.Blocks {
-			if block.Kind == protocol.KindToolCall {
-				response.Finish = protocol.FinishToolCalls
+	if response.Finish.Kind == protocol.FinishStop {
+		for _, item := range response.Items {
+			if item.Kind == protocol.ItemToolCall {
+				response.Finish.Kind = protocol.FinishToolCalls
 			}
 		}
 	}
@@ -59,28 +60,65 @@ func (Codec) DecodeResponse(body []byte, peer format.Peer) (*protocol.Response, 
 }
 
 func (Codec) EncodeResponse(response *protocol.Response, peer format.Peer) ([]byte, []protocol.Loss, error) {
-	context := format.NewPartContext(protocol.Gemini, peer)
-	context.Role = protocol.RoleAssistant
-	parts, losses, err := format.EncodeBlocks(response.Blocks, context, "blocks")
-	if err != nil {
-		return nil, losses, err
+	var losses []protocol.Loss
+	parts := make([]any, 0, len(response.Items))
+	var citations []protocol.Citation
+	for index := range response.Items {
+		item := &response.Items[index]
+		switch item.Kind {
+		case protocol.ItemMessage, protocol.ItemReasoning:
+			nested, itemLosses, err := encodeItemParts(item, "items", peer, true)
+			if err != nil {
+				return nil, losses, err
+			}
+			losses = append(losses, itemLosses...)
+			parts = append(parts, nested...)
+			for _, part := range item.Parts {
+				citations = append(citations, part.Citations...)
+			}
+		case protocol.ItemToolCall:
+			if item.ToolCall == nil || item.ToolCall.Kind == protocol.ToolServer {
+				losses = append(losses, format.Degraded("item", "provider-executed tool calls cannot be represented by Gemini", protocol.Gemini))
+				continue
+			}
+			entry, itemLosses := encodeFunctionCall(item, peer, "items")
+			losses = append(losses, itemLosses...)
+			parts = append(parts, entry)
+		case protocol.ItemServerToolCall, protocol.ItemServerToolResult, protocol.ItemNative:
+			if native := format.RawObject(item.Raw, protocol.Gemini); native != nil {
+				parts = append(parts, native)
+				continue
+			}
+			losses = append(losses, format.Degraded("item", "provider-private item cannot be represented by Gemini", protocol.Gemini))
+		}
 	}
-	root := map[string]any{
-		"candidates": []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": parts}, "finishReason": format.GeminiFinish(response.Finish)}},
+	candidate := map[string]any{
+		"index": 0, "content": map[string]any{"role": "model", "parts": parts},
+		"finishReason": format.GeminiFinish(response.Finish.Kind),
 	}
-	if response.ID != "" {
-		root["responseId"] = response.ID
+	if grounding, nested := encodeCitations(citations); grounding != nil {
+		for key, value := range grounding {
+			candidate[key] = value
+		}
+		losses = append(losses, nested...)
+	} else {
+		losses = append(losses, nested...)
 	}
-	if response.Model != "" {
-		root["modelVersion"] = response.Model
+	root := map[string]any{"candidates": []any{candidate}}
+	if response.Meta.ID != "" {
+		root["responseId"] = response.Meta.ID
+	}
+	if response.Meta.Model != "" {
+		root["modelVersion"] = response.Meta.Model
 	}
 	if usage := format.EncodeGeminiUsage(response.Usage); usage != nil {
 		root["usageMetadata"] = usage
 	}
-	if format.FinishLoss(response.Finish, protocol.Gemini) {
-		losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: string(response.Finish), To: protocol.Gemini})
+	if format.FinishLoss(response.Finish.Kind, protocol.Gemini) {
+		losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: string(response.Finish.Kind), To: protocol.Gemini})
 	}
-	losses = append(losses, format.ApplyExtras(root, response.Extras, protocol.Gemini, "extras")...)
+	losses = append(losses, format.RawFields(root, response.Raw, protocol.Gemini, "raw")...)
+	losses = append(losses, format.UsageLosses(response.Usage, protocol.Gemini)...)
 	return protocol.Marshal(root), losses, nil
 }
 
@@ -90,20 +128,4 @@ func (Codec) EncodeError(failure *protocol.Error, streaming bool) (int, []byte) 
 		status = 400
 	}
 	return status, protocol.Marshal(map[string]any{"error": map[string]any{"code": status, "message": failure.Message, "status": errorStatus(failure.Kind)}})
-}
-
-func errorStatus(kind string) string {
-	switch kind {
-	case "invalid_request":
-		return "INVALID_ARGUMENT"
-	case "unauthorized":
-		return "UNAUTHENTICATED"
-	case "blocked":
-		return "PERMISSION_DENIED"
-	case "rate_limited":
-		return "RESOURCE_EXHAUSTED"
-	case "timeout":
-		return "DEADLINE_EXCEEDED"
-	}
-	return "INTERNAL"
 }

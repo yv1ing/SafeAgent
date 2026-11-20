@@ -107,6 +107,6 @@ func (store *Store) TrafficSeries(ctx context.Context, projectIDs []string, buck
 		FROM grid LEFT JOIN summed USING (start) ORDER BY grid.start`,
 		step.Seconds(), since, step.Seconds(), until, step.Seconds(),
 		step.Seconds(), bun.In(projectIDs), bucketSize, step.Seconds(), since, step.Seconds(), until,
-		step.Seconds(), bun.In(projectIDs), step.Seconds(), since, until).Scan(ctx, &rows)
+		step.Seconds(), bun.In(projectIDs), step.Seconds(), until, until).Scan(ctx, &rows)
 	return rows, err
 }

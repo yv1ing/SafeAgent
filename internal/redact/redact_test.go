@@ -32,7 +32,7 @@ func regex(pattern, label string, action redact.Action) redact.Rule {
 }
 
 func userRequest(text string) *protocol.Request {
-	return &protocol.Request{Messages: []protocol.Message{{Role: protocol.RoleUser, Blocks: []protocol.Block{{Kind: protocol.KindText, Text: text}}}}}
+	return &protocol.Request{Items: []protocol.Item{protocol.MessageItem(protocol.RoleUser, text)}}
 }
 
 func stream(restorer *redact.Restorer, text string, chunk int) string {
@@ -229,7 +229,7 @@ func TestCollidingShortPlaceholdersUpgradeBothValues(t *testing.T) {
 	if _, err := scope.ApplyRequest(request); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	redacted := request.Messages[0].Blocks[0].Text
+	redacted := request.Items[0].Parts[0].Text
 	tokens := strings.Fields(redacted)
 	if tokens[0] == tokens[1] || tokens[0] != tokens[2] {
 		t.Fatalf("colliding values must get distinct stable placeholders: %q", redacted)
@@ -371,20 +371,18 @@ func TestApplyRequestCoversEveryTextPosition(t *testing.T) {
 		PromptCacheKey: "cache-" + address,
 		Metadata:       map[string]string{"owner-" + address: "value " + address, "plain": "p"},
 		ResponseFormat: &protocol.ResponseFormat{Kind: "json_schema", Name: "answer", Description: "desc " + address, Schema: []byte(`{"title":"` + address + `"}`)},
-		Extras:         protocol.Extras{Fields: map[string]json.RawMessage{"x": json.RawMessage(`{"a":"` + address + `"}`)}},
-		Messages: []protocol.Message{
-			{Role: protocol.RoleDeveloper, Blocks: []protocol.Block{{Kind: protocol.KindText, Text: "dev " + address}}},
-			{Role: protocol.RoleUser, Extras: protocol.Extras{Fields: map[string]json.RawMessage{"m": json.RawMessage(`"` + address + `"`)}}, Blocks: []protocol.Block{
-				{Kind: protocol.KindText, Text: "hi " + address, Extras: protocol.Extras{Fields: map[string]json.RawMessage{"b": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "cited " + address, Title: "title " + address}}},
-				{Kind: protocol.KindMedia, Media: &protocol.Media{Kind: "document", MIMEType: "text/plain", Data: mediaData}, Extras: protocol.Extras{Fields: map[string]json.RawMessage{"e": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "media " + address}}},
-				{Kind: protocol.KindToolResult, ToolResult: &protocol.ToolResult{CallID: "c1", Content: []protocol.Block{{Kind: protocol.KindText, Text: "result " + address}}}},
+		Raw:            &protocol.Raw{Format: protocol.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`{"a":"` + address + `"}`)}},
+		Items: []protocol.Item{
+			{Kind: protocol.ItemMessage, Role: protocol.RoleDeveloper, Parts: []protocol.Part{{Kind: protocol.PartText, Text: "dev " + address}}, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"m": json.RawMessage(`"` + address + `"`)}}},
+			{Kind: protocol.ItemMessage, Role: protocol.RoleUser, Parts: []protocol.Part{
+				{Kind: protocol.PartText, Text: "hi " + address, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"b": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "cited " + address, Title: "title " + address}}},
+				{Kind: protocol.PartMedia, Media: &protocol.Media{Kind: "document", MIMEType: "text/plain", Data: mediaData}, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"e": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "media " + address}}},
 			}},
-			{Role: protocol.RoleAssistant, Blocks: []protocol.Block{
-				{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "c1", Name: "send", Arguments: `{"to":"` + address + `"}`}},
-				{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolCustom, ID: "c2", Name: "patch", Arguments: "raw " + address}},
-			}},
+			{Kind: protocol.ItemToolResult, Role: protocol.RoleTool, CallID: "c1", Parts: []protocol.Part{{Kind: protocol.PartText, Text: "result " + address}}},
+			{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "c1", Name: "send", Arguments: `{"to":"` + address + `"}`}},
+			{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolCustom, ID: "c2", Name: "patch", Arguments: "raw " + address}},
 		},
-		Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "send", Description: "tool " + address, Parameters: []byte(`{"description":"` + address + `"}`), Extras: protocol.Extras{Fields: map[string]json.RawMessage{"t": json.RawMessage(`"` + address + `"`)}}}},
+		Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "send", Description: "tool " + address, Parameters: []byte(`{"description":"` + address + `"}`), Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"t": json.RawMessage(`"` + address + `"`)}}}},
 	}
 	scope := compiled.NewScope()
 	result, err := scope.ApplyRequest(request)
@@ -405,17 +403,17 @@ func TestApplyRequestCoversEveryTextPosition(t *testing.T) {
 		t.Fatalf("metadata keys were not rewritten consistently: %+v", request.Metadata)
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(request.Messages[1].Blocks[1].Media.Data)
+	decoded, err := base64.StdEncoding.DecodeString(request.Items[1].Parts[1].Media.Data)
 	if err != nil {
 		t.Fatalf("media data must stay base64: %v", err)
 	}
 	if got := scope.Restore(string(decoded)); got != "note: "+address {
 		t.Fatalf("media round trip failed: %q", got)
 	}
-	if got := scope.Restore(request.Messages[2].Blocks[1].ToolCall.Arguments); got != "raw "+address {
+	if got := scope.Restore(request.Items[4].ToolCall.Arguments); got != "raw "+address {
 		t.Fatalf("custom tool arguments must be redacted as text: %q", got)
 	}
-	if got := stream(scope.JSONRestorer(), request.Messages[2].Blocks[0].ToolCall.Arguments, 4); got != `{"to":"`+address+`"}` {
+	if got := stream(scope.JSONRestorer(), request.Items[3].ToolCall.Arguments, 4); got != `{"to":"`+address+`"}` {
 		t.Fatalf("function tool arguments round trip failed: %q", got)
 	}
 }
@@ -424,8 +422,8 @@ func TestApplyRequestMediaEdgeCases(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
 	binary := base64.StdEncoding.EncodeToString([]byte("a@example.com"))
 	untouched := userRequest("")
-	untouched.Messages[0].Blocks = []protocol.Block{{Kind: protocol.KindMedia, Media: &protocol.Media{Kind: "image", MIMEType: "image/png", Data: binary}}}
-	if _, err := compiled.NewScope().ApplyRequest(untouched); err != nil || untouched.Messages[0].Blocks[0].Media.Data != binary {
+	untouched.Items[0].Parts = []protocol.Part{{Kind: protocol.PartMedia, Media: &protocol.Media{Kind: "image", MIMEType: "image/png", Data: binary}}}
+	if _, err := compiled.NewScope().ApplyRequest(untouched); err != nil || untouched.Items[0].Parts[0].Media.Data != binary {
 		t.Fatalf("binary media must not be touched: %v", err)
 	}
 
@@ -435,7 +433,7 @@ func TestApplyRequestMediaEdgeCases(t *testing.T) {
 		{Kind: "document", Filename: "a@example.com.txt"},
 	} {
 		request := userRequest("")
-		request.Messages[0].Blocks = []protocol.Block{{Kind: protocol.KindMedia, Media: media}}
+		request.Items[0].Parts = []protocol.Part{{Kind: protocol.PartMedia, Media: media}}
 		if _, err := compiled.NewScope().ApplyRequest(request); !errors.Is(err, redact.ErrImmutablePosition) {
 			t.Fatalf("expected immutable position for %+v, got %v", media, err)
 		}
@@ -445,7 +443,7 @@ func TestApplyRequestMediaEdgeCases(t *testing.T) {
 func TestApplyRequestRejectsImmutablePositions(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
 	call := func(id, name string) *protocol.Request {
-		return &protocol.Request{Messages: []protocol.Message{{Role: protocol.RoleAssistant, Blocks: []protocol.Block{{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: id, Name: name, Arguments: "{}"}}}}}}
+		return &protocol.Request{Items: []protocol.Item{{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: id, Name: name, Arguments: "{}"}}}}
 	}
 	cases := map[string]*protocol.Request{
 		"tool call id":   call("a@example.com", "read"),
@@ -455,7 +453,7 @@ func TestApplyRequestRejectsImmutablePositions(t *testing.T) {
 		"tool choice":    {ToolChoice: &protocol.ToolChoice{Mode: "tool", Names: []string{"a@example.com"}}},
 		"schema name":    {ResponseFormat: &protocol.ResponseFormat{Kind: "json_schema", Name: "a@example.com"}},
 		"json key":       {Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "t", Parameters: []byte(`{"a@example.com":1}`)}}},
-		"json number":    {Extras: protocol.Extras{Fields: map[string]json.RawMessage{"x": json.RawMessage(`13812345678`)}}},
+		"json number":    {Raw: &protocol.Raw{Format: protocol.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`13812345678`)}}},
 	}
 	numeric := engine(t, builtin("email", "EMAIL"), builtin("cn_mobile", "PHONE"))
 	for name, request := range cases {
@@ -483,14 +481,14 @@ func TestApplyRequestBlockedAndEmpty(t *testing.T) {
 	blocking := engine(t, redact.Rule{Kind: redact.KindBuiltin, Detector: "email", Label: "EMAIL", Action: redact.ActionBlock, Enabled: true})
 	request := userRequest("write to a@example.com")
 	result, err := blocking.NewScope().ApplyRequest(request)
-	if err != nil || !result.Blocked || len(result.Hits) != 1 || strings.Contains(request.Messages[0].Blocks[0].Text, "example") {
+	if err != nil || !result.Blocked || len(result.Hits) != 1 || strings.Contains(request.Items[0].Parts[0].Text, "example") {
 		t.Fatalf("blocked request must report the hit and clear the text: %v %+v", err, result)
 	}
 
 	empty := engine(t)
 	request = userRequest("a@example.com")
 	result, err = empty.NewScope().ApplyRequest(request)
-	if err != nil || result.Blocked || len(result.Hits) != 0 || request.Messages[0].Blocks[0].Text != "a@example.com" {
+	if err != nil || result.Blocked || len(result.Hits) != 0 || request.Items[0].Parts[0].Text != "a@example.com" {
 		t.Fatalf("an empty engine must leave the request alone: %v %+v", err, result)
 	}
 }
@@ -499,23 +497,23 @@ func TestReasoningSignatureSurvivesRedactionOfTheTextItWasIssuedFor(t *testing.T
 	compiled := engine(t, builtin("email", "EMAIL"))
 	build := func(text, digest string) *protocol.Request {
 		request := userRequest("")
-		request.Messages[0].Blocks = []protocol.Block{{Kind: protocol.KindReasoning, Text: text, Reasoning: &protocol.Reasoning{Visibility: "full", Signature: &protocol.Signature{Blob: "b", TextDigest: digest}}}}
+		request.Items = []protocol.Item{{Kind: protocol.ItemReasoning, Role: protocol.RoleAssistant, Parts: []protocol.Part{{Kind: protocol.PartReasoningText, Text: text}}, Reasoning: &protocol.Reasoning{Visibility: "full", Signature: &protocol.Signature{Blob: "b", TextDigest: digest}}}}
 		return request
 	}
 	shown := "mail a@example.com"
 	issued := build(shown, protocol.TextDigest(shown))
-	if _, err := compiled.NewScope().ApplyRequest(issued); err != nil || issued.Messages[0].Blocks[0].Reasoning.Signature == nil {
+	if _, err := compiled.NewScope().ApplyRequest(issued); err != nil || issued.Items[0].Reasoning.Signature == nil {
 		t.Fatalf("re-redacting the shown text restores the provider's text, so the signature stays: %v", err)
 	}
-	if strings.Contains(issued.Messages[0].Blocks[0].Text, "a@example.com") {
-		t.Fatalf("the reasoning text must still be redacted: %q", issued.Messages[0].Blocks[0].Text)
+	if strings.Contains(issued.Items[0].Text(), "a@example.com") {
+		t.Fatalf("the reasoning text must still be redacted: %q", issued.Items[0].Text())
 	}
 	unproven := build(shown, "stale")
-	if _, err := compiled.NewScope().ApplyRequest(unproven); err != nil || unproven.Messages[0].Blocks[0].Reasoning.Signature != nil {
+	if _, err := compiled.NewScope().ApplyRequest(unproven); err != nil || unproven.Items[0].Reasoning.Signature != nil {
 		t.Fatalf("a rewritten text without proof of origin loses its signature: %v", err)
 	}
 	unchanged := build("nothing to hide", "stale")
-	if _, err := compiled.NewScope().ApplyRequest(unchanged); err != nil || unchanged.Messages[0].Blocks[0].Reasoning.Signature == nil {
+	if _, err := compiled.NewScope().ApplyRequest(unchanged); err != nil || unchanged.Items[0].Reasoning.Signature == nil {
 		t.Fatalf("an untouched reasoning text keeps its signature: %v", err)
 	}
 }

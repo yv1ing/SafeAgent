@@ -1,12 +1,13 @@
 package format
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 )
 
-func decodeCitations(entry map[string]any) []protocol.Citation {
+func DecodeCitations(entry map[string]any) []protocol.Citation {
 	var citations []protocol.Citation
 	for _, item := range protocol.Array(entry["citations"]) {
 		if object := protocol.Object(item); object != nil {
@@ -22,7 +23,16 @@ func decodeCitations(entry map[string]any) []protocol.Citation {
 }
 
 func DecodeCitation(kind protocol.Format, object map[string]any) protocol.Citation {
-	citation := protocol.Citation{Kind: protocol.String(object["type"]), CitedText: protocol.String(object["cited_text"]), URL: protocol.String(object["url"]), Title: protocol.String(object["title"]), Extras: nativeExtras(kind, object)}
+	if kind == protocol.Chat {
+		if nested := protocol.Object(object["url_citation"]); nested != nil {
+			object = nested
+		}
+	}
+	citation := protocol.Citation{
+		Kind: protocol.String(object["type"]), CitedText: protocol.String(object["cited_text"]),
+		URL: protocol.String(object["url"]), Title: protocol.String(object["title"]),
+		Raw: &protocol.Raw{Format: kind, Fields: map[string]json.RawMessage{"native": protocol.Marshal(object)}},
+	}
 	start, end := object["start_char_index"], object["end_char_index"]
 	if kind == protocol.Responses || kind == protocol.Chat {
 		start, end = object["start_index"], object["end_index"]
@@ -51,13 +61,26 @@ func encodeCitations(citations []protocol.Citation, target protocol.Format) ([]a
 
 // EncodeCitation returns nil, with the reason in the losses, when the target has no equivalent.
 func EncodeCitation(citation protocol.Citation, target protocol.Format) (map[string]any, []protocol.Loss) {
-	if target != protocol.Messages && target != protocol.Responses {
-		return nil, []protocol.Loss{{Path: "", Code: protocol.LossCitationDropped, Detail: "target has no citation field", To: target}}
-	}
-	if native := nativeObject(citation.Extras, target); native != nil {
+	if native := RawObject(citation.Raw, target); native != nil {
 		return native, nil
 	}
-	if target == protocol.Responses && citation.URL != "" {
+	switch target {
+	case protocol.Messages:
+		if citation.URL != "" {
+			entry := map[string]any{"type": "web_search_result_location", "url": citation.URL, "title": citation.Title, "cited_text": citation.CitedText}
+			return entry, nil
+		}
+		if citation.Start != nil && citation.End != nil {
+			entry := map[string]any{
+				"type": "char_location", "document_index": 0, "document_title": citation.Title,
+				"start_char_index": *citation.Start, "end_char_index": *citation.End, "cited_text": citation.CitedText,
+			}
+			return entry, nil
+		}
+	case protocol.Responses:
+		if citation.URL == "" {
+			break
+		}
 		annotation := map[string]any{"type": "url_citation", "url": citation.URL, "title": citation.Title}
 		if citation.Start != nil {
 			annotation["start_index"] = *citation.Start
@@ -66,6 +89,38 @@ func EncodeCitation(citation protocol.Citation, target protocol.Format) (map[str
 			annotation["end_index"] = *citation.End
 		}
 		return annotation, nil
+	case protocol.Gemini:
+		if citation.URL == "" {
+			break
+		}
+		web := map[string]any{"uri": citation.URL}
+		if citation.Title != "" {
+			web["title"] = citation.Title
+		}
+		return map[string]any{"web": web}, nil
+	case protocol.Chat:
+		if citation.URL == "" {
+			break
+		}
+		annotation := map[string]any{"type": "url_citation", "url_citation": map[string]any{"url": citation.URL, "title": citation.Title}}
+		if citation.Start != nil {
+			annotation["url_citation"].(map[string]any)["start_index"] = *citation.Start
+		}
+		if citation.End != nil {
+			annotation["url_citation"].(map[string]any)["end_index"] = *citation.End
+		}
+		return annotation, nil
 	}
-	return nil, []protocol.Loss{{Path: "", Code: protocol.LossCitationDropped, Detail: "citation has no equivalent in the target format", From: citation.Extras.Format, To: target}}
+	detail := "citation has no equivalent in the target format"
+	if citation.URL == "" {
+		detail = "the target carries only URL citations"
+	}
+	return nil, []protocol.Loss{{Path: "", Code: protocol.LossCitationMapped, Class: protocol.LossDegraded, Detail: detail, From: citationFormat(citation), To: target}}
+}
+
+func citationFormat(citation protocol.Citation) protocol.Format {
+	if citation.Raw != nil {
+		return citation.Raw.Format
+	}
+	return ""
 }

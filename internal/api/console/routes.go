@@ -15,10 +15,11 @@ type RouteView struct {
 }
 
 type RouteTarget struct {
-	ChannelID     string `json:"channel_id" required:"true"`
-	UpstreamModel string `json:"upstream_model" required:"true"`
-	Priority      int    `json:"priority" required:"true" description:"Lower values are tried first"`
-	Weight        int    `json:"weight" required:"true" description:"Relative share among targets of the same priority"`
+	ChannelID       string `json:"channel_id" required:"true"`
+	UpstreamModel   string `json:"upstream_model" required:"true"`
+	Priority        int    `json:"priority" required:"true" description:"Lower values are tried first"`
+	Weight          int    `json:"weight" required:"true" description:"Relative share among targets of the same priority"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty" description:"Applied to an Anthropic Messages upstream when the client omits a limit and the channel has no default"`
 }
 
 type RouteInput struct {
@@ -45,7 +46,7 @@ type updateRouteInput struct {
 func routeView(value *entity.Route) RouteView {
 	targets := make([]RouteTarget, 0, len(value.Targets))
 	for _, target := range value.Targets {
-		targets = append(targets, RouteTarget{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight})
+		targets = append(targets, RouteTarget{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens})
 	}
 	return RouteView{ID: value.ID, Name: value.Name, Targets: targets, Version: value.Version, CreatedAt: stamp(value.CreatedAt)}
 }
@@ -53,7 +54,7 @@ func routeView(value *entity.Route) RouteView {
 func (input RouteInput) service() service.RouteInput {
 	targets := make([]entity.Target, 0, len(input.Targets))
 	for _, target := range input.Targets {
-		targets = append(targets, entity.Target{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight})
+		targets = append(targets, entity.Target{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens})
 	}
 	return service.RouteInput{Name: input.Name, Targets: targets, Version: input.Version}
 }

@@ -9,6 +9,8 @@
 export interface ConsoleUpdateProjectInput {
   concurrency: number;
   daily_token_quota: number;
+  /** Applied to an Anthropic Messages upstream when the client omits a limit */
+  default_max_output_tokens?: number;
   name: string;
   requests_per_minute: number;
   retention_days: number;

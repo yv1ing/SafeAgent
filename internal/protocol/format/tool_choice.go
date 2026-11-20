@@ -19,7 +19,7 @@ func RestrictTools(tools []protocol.Tool, choice *protocol.ToolChoice) []protoco
 	}
 	restricted := make([]protocol.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Kind == protocol.ToolServer || allowed[tool.Name] {
+		if allowed[tool.Name] {
 			restricted = append(restricted, tool)
 		}
 	}

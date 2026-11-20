@@ -146,7 +146,7 @@ func (writer *EventWriter) settle(callID string, failure error) {
 
 // Seal terminates a call: it waits for the call's in-flight batches, then writes the remaining
 // events, the final call row and its tool call index in one transaction. When the transaction fails the events go back
-// to the queue so the caller may retry or abandon the call.
+// to the queue so the caller can abandon the call and mark it failed.
 func (writer *EventWriter) Seal(ctx context.Context, call *entity.Call, toolCallIDs []string, analysis entity.SealAnalysis) error {
 	owned, err := writer.claim(ctx, call.ID)
 	if err != nil {

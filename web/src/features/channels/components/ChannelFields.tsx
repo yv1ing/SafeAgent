@@ -121,6 +121,35 @@ export function ChannelFields({
               />
             )}
           </Field>
+          <Field label={t.channels.defaultMaxOutput} hint={t.channels.defaultMaxOutputHint}>
+            {(id) => (
+              <IntegerInput
+                id={id}
+                value={draft.default_max_output_tokens ?? 0}
+                onValueChange={(default_max_output_tokens) => set({ default_max_output_tokens })}
+              />
+            )}
+          </Field>
+          <Field
+            label={t.channels.forwardHeaders}
+            hint={t.channels.forwardHeadersHint}
+            className="md:col-span-2"
+          >
+            {(id) => (
+              <Input
+                id={id}
+                value={(draft.forward_headers ?? []).join(', ')}
+                onChange={(event) =>
+                  set({
+                    forward_headers: event.target.value
+                      .split(',')
+                      .map((name) => name.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            )}
+          </Field>
           <label className="flex items-center gap-2 text-sm">
             <Switch
               checked={draft.enabled ?? false}

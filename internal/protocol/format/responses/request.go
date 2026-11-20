@@ -1,45 +1,41 @@
-// Package responses implements the OpenAI Responses request and response codecs.
 package responses
 
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
-type Codec struct{}
-
-func New() Codec { return Codec{} }
-
-func (Codec) Format() protocol.Format { return protocol.Responses }
-
-// store and include are fixed by EncodeRequest: the gateway never lets an upstream keep state, and
-// it needs the encrypted reasoning content to replay reasoning.
-var requestKeys = []string{"model", "previous_response_id", "stream", "instructions", "input", "max_output_tokens", "temperature", "top_p", "parallel_tool_calls", "tools", "reasoning.effort", "reasoning.summary", "text.format", "text.verbosity", "user", "metadata", "service_tier", "prompt_cache_key", "store", "include", "truncation", "max_tool_calls", "safety_identifier", "prompt_cache_retention", "logprobs", "top_logprobs", "logit_bias", "modalities", "background", "conversation"}
-
-var itemKeys = []string{"type", "role", "content"}
-
-func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*protocol.Request, error) {
+func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*protocol.Request, []protocol.Loss, error) {
 	root, err := protocol.DecodeObject(body)
 	if err != nil {
-		return nil, errors.New("request must be a JSON object")
+		return nil, nil, errors.New("request must be a JSON object")
 	}
-	request := &protocol.Request{Model: protocol.String(root["model"]), PreviousResponseID: protocol.String(root["previous_response_id"])}
+	request := &protocol.Request{
+		Source: protocol.Responses, Model: protocol.String(root["model"]),
+		PreviousResponseID: protocol.String(root["previous_response_id"]), Instructions: protocol.String(root["instructions"]),
+	}
 	if request.Model == "" {
-		return nil, errors.New("model is required")
+		return nil, nil, errors.New("model is required")
 	}
-	if root["background"] == true || root["conversation"] != nil {
-		return nil, errors.New("background responses and provider conversation state are unsupported")
+	if err := format.DecodeScalars(request, root, "max_output_tokens"); err != nil {
+		return nil, nil, err
 	}
-	if value, ok := root["store"].(bool); ok {
-		request.Store = &value
+	format.DecodeOpenAISampling(request, root)
+	request.Store, err = booleanField(root, "store")
+	if err != nil {
+		return nil, nil, err
 	}
-	for _, item := range protocol.Array(root["include"]) {
-		if text := protocol.String(item); text != "" {
+	request.Background, err = booleanField(root, "background")
+	if err != nil {
+		return nil, nil, err
+	}
+	request.Conversation = protocol.String(root["conversation"])
+	for _, value := range protocol.Array(root["include"]) {
+		if text := protocol.String(value); text != "" {
 			request.Include = append(request.Include, text)
 		}
 	}
@@ -47,8 +43,9 @@ func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*
 	request.MaxToolCalls = protocol.OptionalInteger(root["max_tool_calls"])
 	request.SafetyIdentifier = protocol.String(root["safety_identifier"])
 	request.PromptCacheRetention = protocol.String(root["prompt_cache_retention"])
-	if value, ok := root["logprobs"].(bool); ok {
-		request.Logprobs = &value
+	request.Logprobs, err = booleanField(root, "logprobs")
+	if err != nil {
+		return nil, nil, err
 	}
 	request.TopLogprobs = protocol.OptionalInteger(root["top_logprobs"])
 	if bias := protocol.Object(root["logit_bias"]); bias != nil {
@@ -59,33 +56,32 @@ func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*
 			}
 		}
 	}
-	for _, item := range protocol.Array(root["modalities"]) {
-		if text := protocol.String(item); text != "" {
+	for _, value := range protocol.Array(root["modalities"]) {
+		if text := protocol.String(value); text != "" {
 			request.Modalities = append(request.Modalities, text)
 		}
 	}
-	if err := format.DecodeScalars(request, root, "max_output_tokens"); err != nil {
-		return nil, err
-	}
-	format.DecodeOpenAISampling(request, root)
-	if instructions := protocol.String(root["instructions"]); instructions != "" {
-		request.Messages = append(request.Messages, protocol.Message{Role: protocol.RoleSystem, Blocks: []protocol.Block{{Kind: protocol.KindText, Text: instructions}}})
-	}
 	if text, ok := root["input"].(string); ok {
-		request.Messages = append(request.Messages, protocol.Message{Role: protocol.RoleUser, Blocks: []protocol.Block{{Kind: protocol.KindText, Text: text}}})
-	} else {
-		messages, err := decodeItems(protocol.Array(root["input"]))
-		if err != nil {
-			return nil, err
+		if text != "" {
+			request.Items = append(request.Items, protocol.MessageItem(protocol.RoleUser, text))
 		}
-		request.Messages = append(request.Messages, messages...)
+	} else {
+		items, err := format.DecodeContentItems(protocol.Responses, protocol.RoleUser, root["input"], peer)
+		if err != nil {
+			return nil, nil, err
+		}
+		request.Items = items
+	}
+	format.AssignCallIDs(request.Items, format.NewCallIDs(peer))
+	if len(request.Items) == 0 && request.Instructions == "" {
+		return nil, nil, errors.New("input is required")
 	}
 	if request.Tools, err = format.DecodeTools(protocol.Responses, protocol.Array(root["tools"])); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	choice, err := format.ParseToolChoice(protocol.Responses, root["tool_choice"])
-	if err != nil && !namesProviderTool(root["tool_choice"]) {
-		return nil, err
+	choice, choiceErr := format.ParseToolChoice(protocol.Responses, root["tool_choice"])
+	if choiceErr != nil && !namesProviderTool(root["tool_choice"]) {
+		return nil, nil, choiceErr
 	}
 	request.ToolChoice = choice
 	if reasoning := protocol.Object(root["reasoning"]); reasoning != nil {
@@ -93,90 +89,32 @@ func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*
 	}
 	if text := protocol.Object(root["text"]); text != nil {
 		if request.ResponseFormat, err = format.ParseResponseFormat(text["format"]); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		request.Verbosity = protocol.String(text["verbosity"])
 	}
-	request.Extras = format.UnmodelledFields(protocol.Responses, root, requestKeys...)
-	if request.ToolChoice != nil || root["tool_choice"] == nil {
-		delete(request.Extras.Fields, "tool_choice")
-	} else {
-		request.Extras = withField(request.Extras, "tool_choice", root["tool_choice"])
+	request.Raw = format.CaptureRaw(protocol.Responses, root, requestKeys...)
+	if choiceErr != nil {
+		if request.Raw == nil {
+			request.Raw = &protocol.Raw{Format: protocol.Responses}
+		}
+		if request.Raw.Fields == nil {
+			request.Raw.Fields = map[string]json.RawMessage{}
+		}
+		request.Raw.Fields["tool_choice"] = protocol.Marshal(root["tool_choice"])
 	}
-	return request, nil
+	for index := range request.Items {
+		request.Items[index].Ordinal = index
+	}
+	return request, nil, nil
 }
 
-// namesProviderTool reports a tool choice that selects a provider-executed tool; the canonical
-// choice can only name functions, so such a choice travels as an extra.
 func namesProviderTool(value any) bool {
 	switch protocol.String(protocol.Object(value)["type"]) {
 	case "", "function", "custom", "allowed_tools":
 		return false
 	}
 	return true
-}
-
-func withField(extras protocol.Extras, key string, value any) protocol.Extras {
-	if extras.Fields == nil {
-		extras = protocol.Extras{Format: protocol.Responses, Fields: map[string]json.RawMessage{}}
-	}
-	extras.Fields[key] = protocol.Marshal(value)
-	return extras
-}
-
-// decodeItems turns Responses items into messages: a message item is one message, every other item
-// is a single block of an assistant message, or of a tool message for outputs.
-func decodeItems(items []any) ([]protocol.Message, error) {
-	messages := make([]protocol.Message, 0, len(items))
-	// A Responses turn is a flat sequence of items, while every other protocol attaches reasoning
-	// and tool calls to one assistant message. Consecutive assistant items are therefore grouped;
-	// a tool output ends the group because it belongs to the next user turn.
-	assistant := -1
-	for _, item := range items {
-		entry := protocol.Object(item)
-		if entry == nil {
-			return nil, errors.New("input items must be objects")
-		}
-		if kind := protocol.String(entry["type"]); kind == "message" || kind == "" {
-			blocks, err := format.DecodeContent(protocol.Responses, entry["content"])
-			if err != nil {
-				return nil, err
-			}
-			role := protocol.Role(protocol.String(entry["role"]))
-			switch role {
-			case protocol.RoleSystem, protocol.RoleDeveloper, protocol.RoleUser, protocol.RoleAssistant:
-			default:
-				return nil, errors.New("unsupported message role")
-			}
-			if role == protocol.RoleAssistant && assistant >= 0 {
-				messages[assistant].Blocks = append(messages[assistant].Blocks, blocks...)
-				continue
-			}
-			messages = append(messages, protocol.Message{Role: role, Blocks: blocks, Extras: format.UnmodelledFields(protocol.Responses, entry, itemKeys...)})
-			if role == protocol.RoleAssistant {
-				assistant = len(messages) - 1
-			} else {
-				assistant = -1
-			}
-			continue
-		}
-		block, err := format.DecodeBlock(protocol.Responses, entry)
-		if err != nil {
-			return nil, err
-		}
-		if block.Kind == protocol.KindToolResult {
-			messages = append(messages, protocol.Message{Role: protocol.RoleTool, Blocks: []protocol.Block{block}})
-			assistant = -1
-			continue
-		}
-		if assistant >= 0 {
-			messages[assistant].Blocks = append(messages[assistant].Blocks, block)
-			continue
-		}
-		messages = append(messages, protocol.Message{Role: protocol.RoleAssistant, Blocks: []protocol.Block{block}})
-		assistant = len(messages) - 1
-	}
-	return messages, nil
 }
 
 func (Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([]byte, http.Header, []protocol.Loss, error) {
@@ -187,9 +125,8 @@ func (Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([]byte,
 		}
 	}
 	root := map[string]any{"model": peer.Model, "stream": request.Stream, "store": false, "include": include}
-	var stateLosses []protocol.Loss
-	if request.Store != nil && *request.Store {
-		stateLosses = append(stateLosses, protocol.Loss{Path: "store", Code: protocol.LossFieldDropped, Detail: "the gateway replays history itself and never relies on upstream state", To: protocol.Responses})
+	if request.Instructions != "" {
+		root["instructions"] = request.Instructions
 	}
 	if request.Truncation != "" {
 		root["truncation"] = request.Truncation
@@ -204,23 +141,26 @@ func (Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([]byte,
 		root["prompt_cache_retention"] = request.PromptCacheRetention
 	}
 	var losses []protocol.Loss
-	context := format.NewPartContext(protocol.Responses, peer)
-	input := make([]any, 0, len(request.Messages))
-	instructions, messages := leadingInstructions(request)
-	for index, message := range messages {
-		message.Blocks = format.DropBlank(message.Blocks)
-		items, nested, err := encodeItems(message, context, "messages["+strconv.Itoa(index)+"]")
+	toolKinds := map[string]protocol.ToolKind{}
+	for index := range request.Items {
+		item := &request.Items[index]
+		if item.ToolCall != nil {
+			toolKinds[item.ToolCall.ID] = item.ToolCall.Kind
+		}
+	}
+	input := make([]any, 0, len(request.Items))
+	for index := range request.Items {
+		item := &request.Items[index]
+		encoded, nested, err := encodeItem(item, index, format.PartContext{Target: protocol.Responses, Peer: peer, Role: item.Role, ToolKinds: toolKinds})
 		if err != nil {
 			return nil, nil, losses, err
 		}
 		losses = append(losses, nested...)
-		input = append(input, items...)
+		if encoded != nil {
+			input = append(input, encoded)
+		}
 	}
 	root["input"] = input
-	losses = append(losses, stateLosses...)
-	if instructions != "" {
-		root["instructions"] = instructions
-	}
 	if len(request.Tools) > 0 {
 		tools, nested, err := format.EncodeTools(request.Tools, protocol.Responses)
 		if err != nil {
@@ -231,109 +171,198 @@ func (Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([]byte,
 			root["tools"] = tools
 		}
 	}
-	if request.PreviousResponseID != "" {
-		losses = append(losses, protocol.Loss{Path: "previous_response_id", Code: protocol.LossFieldDropped, Detail: "upstream state is never used; the history is replayed in full", To: protocol.Responses})
-	}
 	nested, err := format.EncodeParams(request, protocol.Responses, root)
 	if err != nil {
 		return nil, nil, losses, err
 	}
 	losses = append(losses, nested...)
-	losses = append(losses, format.ApplyExtras(root, request.Extras, protocol.Responses, "extras")...)
+	losses = append(losses, format.RawFields(root, request.Raw, protocol.Responses, "raw")...)
 	return protocol.Marshal(root), nil, losses, nil
 }
 
-// leadingInstructions moves the text-only system messages at the head of the request into the
-// instructions field, where Responses keeps them, and returns the messages that remain.
-func leadingInstructions(request *protocol.Request) (string, []protocol.Message) {
-	instructions := request.Instructions
-	messages := request.Messages
-	for len(messages) > 0 && messages[0].Role == protocol.RoleSystem && len(messages[0].Extras.Fields) == 0 {
-		text, plain := plainText(messages[0].Blocks)
-		if !plain {
-			break
-		}
-		if instructions != "" && text != "" {
-			instructions += "\n\n"
-		}
-		instructions += text
-		messages = messages[1:]
-	}
-	return instructions, messages
-}
-
-func plainText(blocks []protocol.Block) (string, bool) {
-	text := ""
-	for _, block := range blocks {
-		if block.Kind != protocol.KindText || block.CacheControl != nil || len(block.Citations) > 0 || len(block.Extras.Fields) > 0 {
-			return "", false
-		}
-		if text != "" {
-			text += "\n\n"
-		}
-		text += block.Text
-	}
-	return text, true
-}
-
-// encodeItems returns the items of one message: adjacent content parts share a message item, and
-// every other block interrupts it.
-func encodeItems(message protocol.Message, context format.PartContext, path string) ([]any, []protocol.Loss, error) {
-	var items, parts []any
+// encodeItem writes one canonical item in Responses' flat input shape.
+func encodeItem(item *protocol.Item, ordinal int, context format.PartContext) (map[string]any, []protocol.Loss, error) {
 	var losses []protocol.Loss
-	context.Role = message.Role
-	role := string(message.Role)
-	if message.Role == protocol.RoleTool {
-		role = string(protocol.RoleUser)
-	}
-	extras := message.Extras
-	flush := func() {
-		if len(parts) == 0 {
-			return
-		}
-		item := map[string]any{"type": "message", "role": role, "content": parts}
-		losses = append(losses, format.ApplyExtras(item, extras, protocol.Responses, path+".extras")...)
-		extras = protocol.Extras{}
-		items, parts = append(items, item), nil
-	}
-	for index, block := range message.Blocks {
-		context.Track(block)
-		blockPath := path + ".blocks[" + strconv.Itoa(index) + "]"
-		part, nested, err := format.EncodePart(block, context)
+	switch item.Kind {
+	case protocol.ItemMessage:
+		parts, losses, err := encodeMessageParts(item, true, context)
 		if err != nil {
-			return nil, losses, errors.New(blockPath + ": " + err.Error())
+			return nil, losses, err
 		}
-		losses = append(losses, prefixed(nested, blockPath)...)
-		switch {
-		case part == nil:
-		case isContentPart(block, part):
-			parts = append(parts, part)
-		default:
-			flush()
-			items = append(items, part)
+		if len(parts) == 0 {
+			return nil, losses, nil
 		}
+		role := string(item.Role)
+		if role == "" {
+			role = "user"
+		}
+		entry := map[string]any{"type": "message", "role": role, "content": parts}
+		if item.ID != "" {
+			entry["id"] = item.ID
+		}
+		if item.Status != "" {
+			entry["status"] = item.Status
+		}
+		losses = append(losses, format.RawFields(entry, item.Raw, protocol.Responses, "raw")...)
+		return entry, losses, nil
+	case protocol.ItemReasoning:
+		return encodeReasoningItem(item, context)
+	case protocol.ItemToolCall:
+		if item.ToolCall == nil || item.ToolCall.Kind == protocol.ToolServer {
+			return nil, []protocol.Loss{format.Degraded("item", "provider-executed tool call cannot be replayed as a client tool call", protocol.Responses)}, nil
+		}
+		entry := map[string]any{"type": "function_call", "call_id": item.ToolCall.ID, "name": item.ToolCall.Name, "arguments": format.EmptyObjectIfBlank(item.ToolCall.Arguments)}
+		if item.ToolCall.Kind == protocol.ToolCustom {
+			entry = map[string]any{"type": "custom_tool_call", "call_id": item.ToolCall.ID, "name": item.ToolCall.Name, "input": item.ToolCall.Arguments}
+		}
+		if applyItemID(entry, item, protocol.ItemToolCall, ordinal) {
+			losses = append(losses, protocol.Loss{Path: "id", Code: protocol.LossItemIDMapped, Class: protocol.LossDegraded, Detail: "the source item id was replaced by a Responses id", To: protocol.Responses})
+		}
+		losses = append(losses, format.RawFields(entry, item.Raw, protocol.Responses, "raw")...)
+		if item.ToolCall.Signature != nil {
+			losses = append(losses, format.Degraded("signature", "Responses has no tool call signature", protocol.Responses))
+		}
+		return entry, losses, nil
+	case protocol.ItemToolResult:
+		if item.IsError {
+			losses = append(losses, format.Degraded("item", "Responses cannot mark a function output as an error", protocol.Responses))
+		}
+		output, outputLosses, err := encodeToolOutput(item, context)
+		if err != nil {
+			return nil, outputLosses, err
+		}
+		losses = append(losses, outputLosses...)
+		outputType := "function_call_output"
+		if context.ToolKinds[item.CallID] == protocol.ToolCustom {
+			outputType = "custom_tool_call_output"
+			var text string
+			for _, part := range item.Parts {
+				if part.Kind != protocol.PartText {
+					losses = append(losses, format.Degraded("item", "custom tool output carries text only", protocol.Responses))
+					continue
+				}
+				text += part.Text
+			}
+			output = text
+		}
+		entry := map[string]any{"type": outputType, "call_id": item.CallID, "output": output}
+		if item.Name != "" {
+			entry["name"] = item.Name
+		}
+		if applyItemID(entry, item, protocol.ItemToolResult, ordinal) {
+			losses = append(losses, protocol.Loss{Path: "id", Code: protocol.LossItemIDMapped, Class: protocol.LossDegraded, Detail: "the source item id was replaced by a Responses id", To: protocol.Responses})
+		}
+		losses = append(losses, format.RawFields(entry, item.Raw, protocol.Responses, "raw")...)
+		return entry, losses, nil
+	case protocol.ItemServerToolCall, protocol.ItemServerToolResult, protocol.ItemNative:
+		if native := format.RawObject(item.Raw, protocol.Responses); native != nil {
+			return native, nil, nil
+		}
+		return nil, []protocol.Loss{format.Degraded("item", "provider-private item cannot be replayed across protocols", protocol.Responses)}, nil
 	}
-	flush()
-	return items, losses, nil
+	return nil, nil, errors.New("unsupported item kind " + string(item.Kind))
 }
 
-func isContentPart(block protocol.Block, part map[string]any) bool {
-	switch block.Kind {
-	case protocol.KindText, protocol.KindRefusal, protocol.KindMedia:
-		return true
-	case protocol.KindReasoning:
-		return part["type"] == "output_text"
+func applyItemID(entry map[string]any, item *protocol.Item, kind protocol.ItemKind, ordinal int) bool {
+	material := item.ID
+	if material == "" && item.ToolCall != nil {
+		material = item.ToolCall.ID
 	}
-	return false
+	id, changed := protocol.ItemID(protocol.Responses, kind, item.ID, material, ordinal)
+	if id != "" {
+		entry["id"] = id
+	}
+	return changed
 }
 
-func prefixed(losses []protocol.Loss, path string) []protocol.Loss {
-	for index := range losses {
-		if losses[index].Path == "" {
-			losses[index].Path = path
-		} else {
-			losses[index].Path = path + "." + losses[index].Path
+func encodeMessageParts(item *protocol.Item, input bool, context format.PartContext) ([]any, []protocol.Loss, error) {
+	var losses []protocol.Loss
+	parts := make([]any, 0, len(item.Parts))
+	context.Output = !input
+	for index := range item.Parts {
+		part := &item.Parts[index]
+		if !input && part.Kind == protocol.PartMedia {
+			losses = append(losses, format.Degraded("parts", "Responses cannot return generated media", protocol.Responses))
+			continue
+		}
+		encoded, nested, err := format.EncodePart(*part, item, context, "parts")
+		if err != nil {
+			return nil, losses, err
+		}
+		losses = append(losses, nested...)
+		if encoded != nil {
+			parts = append(parts, encoded)
 		}
 	}
-	return losses
+	return parts, losses, nil
+}
+
+func encodeReasoningItem(item *protocol.Item, context format.PartContext) (map[string]any, []protocol.Loss, error) {
+	entry := map[string]any{"type": "reasoning"}
+	var summary, content []any
+	var losses []protocol.Loss
+	for index := range item.Parts {
+		part := &item.Parts[index]
+		switch part.Kind {
+		case protocol.PartReasoningSummary:
+			summary = append(summary, map[string]any{"type": "summary_text", "text": part.Text})
+		case protocol.PartReasoningText:
+			content = append(content, map[string]any{"type": "reasoning_text", "text": part.Text})
+		case protocol.PartRedactedReasoning:
+			losses = append(losses, format.Degraded("parts", "redacted reasoning cannot be replayed by Responses", protocol.Responses))
+		}
+	}
+	if summary != nil {
+		entry["summary"] = summary
+	} else {
+		entry["summary"] = []any{}
+	}
+	if content != nil {
+		entry["content"] = content
+	}
+	if item.Reasoning != nil && item.Reasoning.Signature != nil {
+		if blob := context.Peer.WireSignature(item.Reasoning.Signature, item.Text()); blob != "" {
+			entry["encrypted_content"] = blob
+		}
+	}
+	if applyItemID(entry, item, protocol.ItemReasoning, item.Ordinal) {
+		losses = append(losses, protocol.Loss{Path: "id", Code: protocol.LossItemIDMapped, Class: protocol.LossDegraded, Detail: "the source item id was replaced by a Responses id", To: protocol.Responses})
+	}
+	losses = append(losses, format.RawFields(entry, item.Raw, protocol.Responses, "raw")...)
+	return entry, losses, nil
+}
+
+func encodeToolOutput(item *protocol.Item, context format.PartContext) (any, []protocol.Loss, error) {
+	var losses []protocol.Loss
+	if len(item.Parts) == 1 && item.Parts[0].Kind == protocol.PartText {
+		return item.Parts[0].Text, nil, nil
+	}
+	if len(item.Parts) == 0 {
+		return "", nil, nil
+	}
+	parts := make([]any, 0, len(item.Parts))
+	for index := range item.Parts {
+		part := &item.Parts[index]
+		encoded, nested, err := format.EncodePart(*part, item, format.PartContext{Target: protocol.Responses, Peer: context.Peer, Role: protocol.RoleTool}, "parts")
+		if err != nil {
+			return nil, losses, err
+		}
+		losses = append(losses, nested...)
+		if encoded != nil {
+			parts = append(parts, encoded)
+		}
+	}
+	return parts, losses, nil
+}
+
+func booleanField(root map[string]any, key string) (*bool, error) {
+	value, exists := root[key]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	flag, ok := value.(bool)
+	if !ok {
+		return nil, errors.New(key + " must be boolean")
+	}
+	return &flag, nil
 }

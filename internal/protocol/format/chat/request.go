@@ -1,8 +1,6 @@
-// Package chat implements OpenAI Chat Completions request and response codecs.
 package chat
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,28 +9,18 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
-type Codec struct{}
-
-func New() Codec { return Codec{} }
-
-func (Codec) Format() protocol.Format { return protocol.Chat }
-
-var requestKeys = []string{"model", "messages", "stream", "stream_options", "n", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stop", "tools", "tool_choice", "parallel_tool_calls", "reasoning_effort", "metadata", "user", "service_tier", "prompt_cache_key", "seed", "frequency_penalty", "presence_penalty", "response_format"}
-
-var messageKeys = []string{"role", "content", "reasoning_content", "reasoning", "refusal", "tool_calls", "tool_call_id"}
-
-func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*protocol.Request, error) {
+func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*protocol.Request, []protocol.Loss, error) {
 	root, err := protocol.DecodeObject(body)
 	if err != nil {
-		return nil, errors.New("request must be a JSON object")
+		return nil, nil, errors.New("request must be a JSON object")
 	}
-	request := &protocol.Request{Model: protocol.String(root["model"])}
+	request := &protocol.Request{Source: protocol.Chat, Model: protocol.String(root["model"])}
 	if request.Model == "" {
-		return nil, errors.New("model is required")
+		return nil, nil, errors.New("model is required")
 	}
 	if root["n"] != nil {
 		if count, ok := protocol.Integer(root["n"]); !ok || count != 1 {
-			return nil, errors.New("multiple candidates are not supported")
+			return nil, nil, protocol.UnsupportedFeature("unsupported_multi_choice", "Multiple candidates are not supported.")
 		}
 	}
 	limitKey := "max_completion_tokens"
@@ -40,142 +28,217 @@ func (Codec) DecodeRequest(body []byte, header http.Header, peer format.Peer) (*
 		limitKey = "max_tokens"
 	}
 	if err := format.DecodeScalars(request, root, limitKey); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	format.DecodeOpenAISampling(request, root)
-	for _, item := range protocol.Array(root["messages"]) {
-		message, err := decodeMessage(protocol.Object(item))
-		if err != nil {
-			return nil, err
-		}
-		request.Messages = append(request.Messages, message)
+	if options := protocol.Object(root["stream_options"]); options != nil {
+		request.StreamOptions = &protocol.StreamOptions{IncludeUsage: options["include_usage"] == true}
 	}
-	if len(request.Messages) == 0 {
-		return nil, errors.New("at least one message is required")
+	request.Logprobs, err = booleanField(root, "logprobs")
+	if err != nil {
+		return nil, nil, err
+	}
+	request.TopLogprobs = protocol.OptionalInteger(root["top_logprobs"])
+	if bias := protocol.Object(root["logit_bias"]); bias != nil {
+		request.LogitBias = map[string]float64{}
+		for key, value := range bias {
+			if number, ok := protocol.Float(value); ok {
+				request.LogitBias[key] = number
+			}
+		}
+	}
+	for _, modality := range protocol.Array(root["modalities"]) {
+		request.Modalities = append(request.Modalities, protocol.String(modality))
+	}
+	request.Store, err = booleanField(root, "store")
+	if err != nil {
+		return nil, nil, err
+	}
+	request.Background, err = booleanField(root, "background")
+	if err != nil {
+		return nil, nil, err
+	}
+	request.Conversation = protocol.String(root["conversation"])
+	request.PreviousResponseID = protocol.String(root["previous_response_id"])
+	request.SafetyIdentifier = protocol.String(root["safety_identifier"])
+
+	for _, value := range protocol.Array(root["messages"]) {
+		items, err := decodeMessage(protocol.Object(value), peer)
+		if err != nil {
+			return nil, nil, err
+		}
+		request.Items = append(request.Items, items...)
+	}
+	if len(request.Items) == 0 {
+		return nil, nil, errors.New("at least one message is required")
 	}
 	if request.Stop, err = format.ParseStop(root["stop"]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if request.Tools, err = format.DecodeTools(protocol.Chat, protocol.Array(root["tools"])); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if request.ToolChoice, err = format.ParseToolChoice(protocol.Chat, root["tool_choice"]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if request.ResponseFormat, err = format.ParseResponseFormat(root["response_format"]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if effort := protocol.String(root["reasoning_effort"]); effort != "" {
 		request.Reasoning = &protocol.ReasoningConfig{Effort: effort}
 	}
-	request.Extras = format.UnmodelledFields(protocol.Chat, root, requestKeys...)
-	return request, nil
+	if thinking := protocol.Object(root["thinking"]); thinking != nil {
+		switch protocol.String(thinking["type"]) {
+		case "disabled":
+			request.Reasoning = &protocol.ReasoningConfig{Effort: "none"}
+		case "enabled":
+			if request.Reasoning == nil {
+				request.Reasoning = &protocol.ReasoningConfig{Effort: "high"}
+			}
+		}
+	}
+	request.Raw = format.CaptureRaw(protocol.Chat, root, requestKeys...)
+	format.AssignCallIDs(request.Items, format.NewCallIDs(peer))
+	format.PairAnonymousResults(request.Items)
+	normalizeOrdinals(request.Items)
+	return request, nil, nil
 }
 
-func decodeMessage(entry map[string]any) (protocol.Message, error) {
+func normalizeOrdinals(items []protocol.Item) {
+	for index := range items {
+		items[index].Ordinal = index
+	}
+}
+
+func decodeMessage(entry map[string]any, peer format.Peer) ([]protocol.Item, error) {
 	if entry == nil {
-		return protocol.Message{}, errors.New("messages must be objects")
+		return nil, errors.New("messages must be objects")
 	}
 	role := protocol.Role(protocol.String(entry["role"]))
-	message := protocol.Message{Role: role, Extras: format.UnmodelledFields(protocol.Chat, entry, messageKeys...)}
 	switch role {
 	case protocol.RoleSystem, protocol.RoleDeveloper, protocol.RoleUser, protocol.RoleAssistant:
-	case protocol.RoleTool:
-		content, err := format.DecodeToolResultContent(protocol.Chat, entry["content"])
+	case protocol.RoleTool, "function":
+		parts, err := format.DecodeToolResultParts(protocol.Chat, entry["content"])
 		if err != nil {
-			return message, err
+			return nil, err
 		}
-		message.Blocks = []protocol.Block{{Kind: protocol.KindToolResult, ToolResult: &protocol.ToolResult{CallID: protocol.String(entry["tool_call_id"]), Content: content}}}
-		return message, nil
+		return []protocol.Item{{
+			Kind: protocol.ItemToolResult, Role: protocol.RoleTool, CallID: protocol.String(entry["tool_call_id"]), Name: protocol.String(entry["name"]), Parts: parts,
+			Raw: format.CaptureRaw(protocol.Chat, entry, messageKeys...),
+		}}, nil
 	default:
-		return message, errors.New("unsupported message role")
+		return nil, errors.New("unsupported message role")
 	}
-	blocks, err := format.DecodeContent(protocol.Chat, entry["content"])
+	items, err := format.DecodeContentItems(protocol.Chat, role, entry["content"], peer)
 	if err != nil {
-		return message, err
+		return nil, err
 	}
-	reasoning := protocol.String(entry["reasoning_content"])
-	if reasoning == "" {
-		reasoning = protocol.String(entry["reasoning"])
-	}
-	if reasoning != "" {
-		blocks = append([]protocol.Block{{Kind: protocol.KindReasoning, Text: reasoning, Reasoning: &protocol.Reasoning{Visibility: "full"}}}, blocks...)
+	raw := format.CaptureRaw(protocol.Chat, entry, messageKeys...)
+	if reasoning := firstNonEmpty(protocol.String(entry["reasoning_content"]), protocol.String(entry["reasoning"])); reasoning != "" {
+		items = append([]protocol.Item{{
+			Kind: protocol.ItemReasoning, Role: role, Parts: []protocol.Part{{Kind: protocol.PartReasoningText, Text: reasoning}},
+			Reasoning: &protocol.Reasoning{Visibility: "full"},
+		}}, items...)
 	}
 	if refusal := protocol.String(entry["refusal"]); refusal != "" {
-		blocks = append(blocks, protocol.Block{Kind: protocol.KindRefusal, Text: refusal})
+		items = append(items, protocol.Item{Kind: protocol.ItemMessage, Role: role, Parts: []protocol.Part{{Kind: protocol.PartRefusal, Text: refusal}}})
 	}
-	for _, item := range protocol.Array(entry["tool_calls"]) {
-		block, err := decodeToolCall(protocol.Object(item), true)
+	for _, value := range protocol.Array(entry["tool_calls"]) {
+		item, err := decodeToolCall(protocol.Object(value), true)
 		if err != nil {
-			return message, err
+			return nil, err
 		}
-		blocks = append(blocks, block)
+		items = append(items, item)
 	}
-	if role == protocol.RoleAssistant {
-		blocks = attachMessageAnnotations(blocks, entry)
+	if legacy := protocol.Object(entry["function_call"]); legacy != nil {
+		arguments := protocol.String(legacy["arguments"])
+		if arguments != "" && !validJSON(arguments) {
+			return nil, errors.New("tool arguments must be valid JSON")
+		}
+		items = append(items, protocol.Item{
+			Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant,
+			ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, Name: protocol.String(legacy["name"]), Arguments: format.EmptyObjectIfBlank(arguments)},
+		})
 	}
-	message.Blocks = blocks
-	return message, nil
+	if len(protocol.Array(entry["annotations"])) > 0 {
+		attachAnnotations(items, entry)
+	}
+	return attachMessageRaw(items, raw, role), nil
 }
 
-// attachMessageAnnotations lifts Chat's message-level web-search annotations onto the last text
-// block, which is where every other protocol stores citations.
-func attachMessageAnnotations(blocks []protocol.Block, entry map[string]any) []protocol.Block {
-	annotations := protocol.Array(entry["annotations"])
-	if len(annotations) == 0 {
-		return blocks
+// attachMessageRaw keeps wire fields of the enclosing Chat message. A message whose content is
+// empty but whose tool calls are modeled separately still needs a container for those fields.
+func attachMessageRaw(items []protocol.Item, raw *protocol.Raw, role protocol.Role) []protocol.Item {
+	if raw == nil {
+		return items
 	}
-	position := -1
-	for index := len(blocks) - 1; index >= 0; index-- {
-		if blocks[index].Kind == protocol.KindText {
-			position = index
-			break
+	for index := range items {
+		if items[index].Kind == protocol.ItemMessage {
+			items[index].Raw = raw
+			return items
 		}
 	}
-	if position < 0 {
-		return blocks
-	}
-	for _, item := range annotations {
-		if object := protocol.Object(item); object != nil {
-			blocks[position].Citations = append(blocks[position].Citations, format.DecodeCitation(protocol.Chat, object))
-		}
-	}
-	return blocks
+	return append([]protocol.Item{{Kind: protocol.ItemMessage, Role: role, Raw: raw}}, items...)
 }
 
-func decodeToolCall(call map[string]any, validate bool) (protocol.Block, error) {
+func decodeToolCall(call map[string]any, validate bool) (protocol.Item, error) {
 	switch protocol.String(call["type"]) {
 	case "custom":
 		custom := protocol.Object(call["custom"])
-		return protocol.Block{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolCustom, ID: protocol.String(call["id"]), Name: protocol.String(custom["name"]), Arguments: protocol.String(custom["input"])}}, nil
+		return protocol.Item{
+			Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ID: protocol.String(call["id"]),
+			ToolCall: &protocol.ToolCall{Kind: protocol.ToolCustom, ID: protocol.String(call["id"]), Name: protocol.String(custom["name"]), Arguments: protocol.String(custom["input"])},
+			Raw:      format.CaptureRaw(protocol.Chat, call, "id", "type", "custom.name", "custom.input"),
+		}, nil
 	case "function", "":
 		function := protocol.Object(call["function"])
 		arguments := protocol.String(function["arguments"])
-		if validate && arguments != "" && !json.Valid([]byte(arguments)) {
-			return protocol.Block{}, errors.New("tool arguments must be valid JSON")
+		if validate && arguments != "" && !validJSON(arguments) {
+			return protocol.Item{}, errors.New("tool arguments must be valid JSON")
 		}
-		return protocol.Block{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: protocol.String(call["id"]), Name: protocol.String(function["name"]), Arguments: format.EmptyObjectIfBlank(arguments)}}, nil
+		return protocol.Item{
+			Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ID: protocol.String(call["id"]),
+			ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: protocol.String(call["id"]), Name: protocol.String(function["name"]), Arguments: format.EmptyObjectIfBlank(arguments)},
+			Raw:      format.CaptureRaw(protocol.Chat, call, "id", "type", "function.name", "function.arguments"),
+		}, nil
 	}
-	return protocol.Block{}, errors.New("unsupported tool call type")
+	return protocol.Item{}, errors.New("unsupported tool call type")
+}
+
+func attachAnnotations(items []protocol.Item, entry map[string]any) {
+	for itemIndex := len(items) - 1; itemIndex >= 0; itemIndex-- {
+		item := &items[itemIndex]
+		if item.Kind != protocol.ItemMessage {
+			continue
+		}
+		for partIndex := len(item.Parts) - 1; partIndex >= 0; partIndex-- {
+			if item.Parts[partIndex].Kind != protocol.PartText {
+				continue
+			}
+			for _, value := range protocol.Array(entry["annotations"]) {
+				if object := protocol.Object(value); object != nil {
+					item.Parts[partIndex].Citations = append(item.Parts[partIndex].Citations, format.DecodeCitation(protocol.Chat, object))
+				}
+			}
+			return
+		}
+	}
 }
 
 func (codec Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([]byte, http.Header, []protocol.Loss, error) {
 	root := map[string]any{"model": peer.Model, "stream": request.Stream}
+	context := format.PartContext{Target: protocol.Chat, Peer: peer}
 	var losses []protocol.Loss
-	context := format.NewPartContext(protocol.Chat, peer)
-	messages := make([]any, 0, len(request.Messages)+1)
+	messages := make([]any, 0, len(request.Items)+1)
 	if request.Instructions != "" {
 		messages = append(messages, map[string]any{"role": "system", "content": request.Instructions})
 	}
-	for index, message := range request.Messages {
-		path := "messages[" + strconv.Itoa(index) + "]"
-		encoded, nested, err := encodeMessage(message, context, path)
-		if err != nil {
-			return nil, nil, losses, err
-		}
-		losses = append(losses, nested...)
-		messages = append(messages, encoded...)
+	encoded, nested, err := encodeMessages(request.Items, context)
+	if err != nil {
+		return nil, nil, losses, err
 	}
+	losses = append(losses, nested...)
+	messages = append(messages, encoded...)
 	root["messages"] = messages
 	if len(request.Tools) > 0 {
 		tools, nested, err := format.EncodeTools(request.Tools, protocol.Chat)
@@ -187,7 +250,7 @@ func (codec Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([
 			root["tools"] = tools
 		}
 	}
-	nested, err := format.EncodeParams(request, protocol.Chat, root)
+	nested, err = format.EncodeParams(request, protocol.Chat, root)
 	if err != nil {
 		return nil, nil, losses, err
 	}
@@ -195,80 +258,186 @@ func (codec Codec) EncodeRequest(request *protocol.Request, peer format.Peer) ([
 	if request.Stream {
 		root["stream_options"] = map[string]any{"include_usage": true}
 	}
-	losses = append(losses, format.ApplyExtras(root, request.Extras, protocol.Chat, "extras")...)
+	losses = append(losses, format.RawFields(root, request.Raw, protocol.Chat, "raw")...)
 	return protocol.Marshal(root), nil, losses, nil
 }
 
-// encodeMessage returns the Chat messages for one canonical message: tool results become their own
-// "tool" messages placed before the remaining content.
-func encodeMessage(message protocol.Message, context format.PartContext, path string) ([]any, []protocol.Loss, error) {
-	var losses []protocol.Loss
-	var results, parts, toolCalls []any
-	var reasoning, refusal string
-	context.Role = message.Role
-	for index, block := range message.Blocks {
-		blockPath := path + ".blocks[" + strconv.Itoa(index) + "]"
-		context.Track(block)
-		if format.Blank(block) {
-			continue
-		}
-		switch {
-		case block.Kind == protocol.KindReasoning && message.Role == protocol.RoleAssistant:
-			reasoning += block.Text
-			if block.Reasoning != nil && block.Reasoning.Signature != nil {
-				losses = append(losses, protocol.Loss{Path: blockPath + ".signature", Code: protocol.LossSignatureStripped, Detail: "Chat has no field for reasoning signatures", To: protocol.Chat})
-			}
-			continue
-		case block.Kind == protocol.KindRefusal && message.Role == protocol.RoleAssistant:
-			refusal += block.Text
-			continue
-		}
-		part, nested, err := format.EncodePart(block, context)
-		if err != nil {
-			return nil, losses, errors.New(blockPath + ": " + err.Error())
-		}
-		losses = append(losses, prefixed(nested, blockPath)...)
-		switch {
-		case part == nil:
-		case block.Kind == protocol.KindToolResult:
-			results = append(results, part)
-		case block.Kind == protocol.KindToolCall:
-			toolCalls = append(toolCalls, part)
-		default:
-			parts = append(parts, part)
-		}
-	}
-	encoded := results
-	if message.Role == protocol.RoleTool && len(results) == 1 {
-		if result, ok := results[0].(map[string]any); ok {
-			losses = append(losses, format.ApplyExtras(result, message.Extras, protocol.Chat, path+".extras")...)
-		}
-	}
-	if len(parts) == 0 && len(toolCalls) == 0 && reasoning == "" && refusal == "" {
-		return encoded, losses, nil
-	}
-	role := string(message.Role)
-	if message.Role == protocol.RoleTool {
-		role = "user"
-	}
-	entry := map[string]any{"role": role, "content": contentOf(parts)}
-	if len(toolCalls) > 0 {
-		entry["tool_calls"] = toolCalls
-	}
-	if reasoning != "" {
-		entry["reasoning_content"] = reasoning
-	}
-	if refusal != "" {
-		entry["refusal"] = refusal
-	}
-	if message.Role != protocol.RoleTool {
-		losses = append(losses, format.ApplyExtras(entry, message.Extras, protocol.Chat, path+".extras")...)
-	}
-	return append(encoded, entry), losses, nil
+type chatMessage struct {
+	role       protocol.Role
+	parts      []any
+	toolCalls  []any
+	reasoning  string
+	refusal    string
+	citations  []protocol.Citation
+	raw        *protocol.Raw
+	hasContent bool
 }
 
-// contentOf keeps a lone plain text part as a string, the one shape every Chat-compatible provider
-// accepts; nil content is only legal next to tool calls.
+func (message *chatMessage) addPart(part any) {
+	message.parts = append(message.parts, part)
+	message.hasContent = true
+}
+
+func encodeMessages(items []protocol.Item, context format.PartContext) ([]any, []protocol.Loss, error) {
+	var losses []protocol.Loss
+	out := make([]any, 0, len(items))
+	var current *chatMessage
+	flush := func() {
+		if current == nil {
+			return
+		}
+		entry := map[string]any{"role": string(current.role)}
+		entry["content"] = contentOf(current.parts)
+		if len(current.toolCalls) > 0 {
+			entry["tool_calls"] = current.toolCalls
+		}
+		if current.reasoning != "" {
+			entry["reasoning_content"] = current.reasoning
+		}
+		if current.refusal != "" {
+			entry["refusal"] = current.refusal
+		}
+		if len(current.citations) > 0 {
+			annotations, _ := encodeChatCitations(current.citations)
+			entry["annotations"] = annotations
+		}
+		losses = append(losses, format.RawFields(entry, current.raw, protocol.Chat, "messages["+strconv.Itoa(len(out))+"]")...)
+		out = append(out, entry)
+		current = nil
+	}
+	start := func(role protocol.Role) {
+		if current != nil && current.role == role {
+			return
+		}
+		flush()
+		current = &chatMessage{role: role}
+	}
+
+	for index := range items {
+		item := &items[index]
+		path := "items[" + strconv.Itoa(index) + "]"
+		switch item.Kind {
+		case protocol.ItemMessage:
+			end := index
+			for end < len(items) && items[end].Kind == protocol.ItemMessage && items[end].Role == item.Role {
+				end++
+			}
+			role := item.Role
+			if role == "" {
+				role = protocol.RoleUser
+			}
+			start(role)
+			if current.raw == nil && item.Raw != nil {
+				current.raw = item.Raw
+			}
+			for position := index; position < end; position++ {
+				entry := &items[position]
+				for partIndex := range entry.Parts {
+					part := &entry.Parts[partIndex]
+					if context.Output && part.Kind == protocol.PartMedia {
+						losses = append(losses, format.Degraded(path, "Chat cannot return generated media", protocol.Chat))
+						continue
+					}
+					switch part.Kind {
+					case protocol.PartRefusal:
+						if entry.Role == protocol.RoleAssistant {
+							current.refusal += part.Text
+							continue
+						}
+					case protocol.PartReasoningText, protocol.PartReasoningSummary:
+						losses = append(losses, format.Degraded(path, "Chat messages carry no reasoning field for this role", protocol.Chat))
+						continue
+					case protocol.PartRedactedReasoning:
+						losses = append(losses, format.Degraded(path, "redacted reasoning cannot be replayed by Chat", protocol.Chat))
+						continue
+					}
+					partContext := context
+					partContext.Role = entry.Role
+					encoded, nested, err := format.EncodePart(*part, entry, partContext, path)
+					if err != nil {
+						return nil, losses, err
+					}
+					losses = append(losses, nested...)
+					if encoded != nil {
+						current.addPart(encoded)
+					}
+					current.citations = append(current.citations, part.Citations...)
+				}
+			}
+			index = end - 1
+		case protocol.ItemReasoning:
+			start(protocol.RoleAssistant)
+			for partIndex := range item.Parts {
+				part := &item.Parts[partIndex]
+				if part.Text != "" {
+					current.reasoning += part.Text
+				}
+			}
+			if item.Reasoning != nil && item.Reasoning.Signature != nil {
+				losses = append(losses, protocol.Loss{Path: path + ".signature", Code: protocol.LossSignatureStripped, Class: protocol.LossDegraded, Detail: "Chat has no field for reasoning signatures", To: protocol.Chat})
+			}
+		case protocol.ItemToolCall:
+			if item.ToolCall == nil || item.ToolCall.Kind == protocol.ToolServer {
+				losses = append(losses, format.Degraded(path, "provider-executed tool calls cannot be represented by Chat", protocol.Chat))
+				continue
+			}
+			start(protocol.RoleAssistant)
+			entry := map[string]any{"id": item.ToolCall.ID, "type": "function", "function": map[string]any{"name": item.ToolCall.Name, "arguments": item.ToolCall.Arguments}}
+			if item.ToolCall.Kind == protocol.ToolCustom {
+				entry = map[string]any{"id": item.ToolCall.ID, "type": "custom", "custom": map[string]any{"name": item.ToolCall.Name, "input": item.ToolCall.Arguments}}
+			}
+			losses = append(losses, format.RawFields(entry, item.Raw, protocol.Chat, path+".raw")...)
+			if item.ToolCall.Signature != nil {
+				losses = append(losses, protocol.Loss{Path: path + ".signature", Code: protocol.LossSignatureStripped, Class: protocol.LossDegraded, Detail: "Chat has no field for tool call signatures", To: protocol.Chat})
+			}
+			current.toolCalls = append(current.toolCalls, entry)
+		case protocol.ItemToolResult:
+			flush()
+			if item.IsError {
+				losses = append(losses, format.Degraded(path, "Chat cannot mark a tool result as an error", protocol.Chat))
+			}
+			entry := map[string]any{"role": "tool", "tool_call_id": item.CallID}
+			content, nested, err := encodeToolResultContent(item.Parts, path)
+			if err != nil {
+				return nil, losses, err
+			}
+			losses = append(losses, nested...)
+			entry["content"] = content
+			if item.Name != "" {
+				entry["name"] = item.Name
+			}
+			losses = append(losses, format.RawFields(entry, item.Raw, protocol.Chat, path+".raw")...)
+			out = append(out, entry)
+		case protocol.ItemServerToolCall, protocol.ItemServerToolResult, protocol.ItemNative:
+			losses = append(losses, format.Degraded(path, "provider-private item cannot be replayed by Chat", protocol.Chat))
+		}
+	}
+	flush()
+	return out, losses, nil
+}
+
+func encodeToolResultContent(parts []protocol.Part, path string) (any, []protocol.Loss, error) {
+	var losses []protocol.Loss
+	if len(parts) == 0 {
+		return "", nil, nil
+	}
+	if len(parts) == 1 && parts[0].Kind == protocol.PartText {
+		return parts[0].Text, nil, nil
+	}
+	encoded := make([]any, 0, len(parts))
+	for _, part := range parts {
+		entry, nested, err := format.EncodePart(part, nil, format.PartContext{Target: protocol.Chat, Role: protocol.RoleTool}, path)
+		if err != nil {
+			return nil, losses, err
+		}
+		losses = append(losses, nested...)
+		if entry != nil {
+			encoded = append(encoded, entry)
+		}
+	}
+	return encoded, losses, nil
+}
+
 func contentOf(parts []any) any {
 	if len(parts) == 0 {
 		return nil
@@ -281,9 +450,48 @@ func contentOf(parts []any) any {
 	return parts
 }
 
-func prefixed(losses []protocol.Loss, path string) []protocol.Loss {
+func encodeChatCitations(citations []protocol.Citation) ([]any, []protocol.Loss) {
+	var losses []protocol.Loss
+	var encoded []any
+	for index, citation := range citations {
+		entry, nested := format.EncodeCitation(citation, protocol.Chat)
+		losses = append(losses, prefix(nested, "citations["+strconv.Itoa(index)+"]")...)
+		if entry != nil {
+			encoded = append(encoded, entry)
+		}
+	}
+	return encoded, losses
+}
+
+func prefix(losses []protocol.Loss, path string) []protocol.Loss {
 	for index := range losses {
 		losses[index].Path = path + "." + losses[index].Path
 	}
 	return losses
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func validJSON(value string) bool {
+	_, err := protocol.DecodeJSON([]byte(value))
+	return err == nil
+}
+
+func booleanField(root map[string]any, key string) (*bool, error) {
+	value, exists := root[key]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	flag, ok := value.(bool)
+	if !ok {
+		return nil, errors.New(key + " must be boolean")
+	}
+	return &flag, nil
 }

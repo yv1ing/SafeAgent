@@ -16,73 +16,124 @@ fi
 # shellcheck disable=SC1091
 set -a; . "$lab/runtime/env"; set +a
 
-: "${SAFEAGENT_UPSTREAM_KEY:?set SAFEAGENT_UPSTREAM_KEY in testenv/.env or the environment}"
-: "${SAFEAGENT_MATRIX_KEY:?testenv/runtime/env is incomplete; run make lab-setup}"
-: "${SAFEAGENT_CHAT_MODEL:?testenv/runtime/env is incomplete; run make lab-setup}"
-: "${SAFEAGENT_UPSTREAM_CHAT_URL:?testenv/runtime/env is incomplete; run make lab-setup}"
-: "${SAFEAGENT_UPSTREAM_MODEL:?testenv/runtime/env is incomplete; run make lab-setup}"
-
 base=${SAFEAGENT_BASE_URL:-http://127.0.0.1:8080}
-direct_url=$SAFEAGENT_UPSTREAM_CHAT_URL
-direct_model=$SAFEAGENT_UPSTREAM_MODEL
-requests=${LOAD_REQUESTS:-300}
-concurrency=${LOAD_CONCURRENCY:-4}
-warmup=${LOAD_WARMUP:-3}
+requests=${LOAD_REQUESTS:-50}
+concurrency=${LOAD_CONCURRENCY:-2}
+warmup=${LOAD_WARMUP:-1}
 max_tokens=${LOAD_MAX_TOKENS:-16}
+cross_requests=${LOAD_CROSS_REQUESTS:-10}
 
 if ! curl -fsS "$base/health" >/dev/null; then
   echo "the gateway is not healthy at $base; run make lab-setup or make lab-restart" >&2
   exit 1
 fi
 
-pending="unknown"
-for _ in $(seq 1 60); do
-  pending=$(docker compose -f "$lab/docker-compose.yml" exec -T database \
-    psql -U safeagent -d safeagent -tAc \
-    "SELECT count(*) FROM analysis_jobs WHERE state IN ('pending','running')" 2>/dev/null | tr -d '[:space:]')
-  [ "$pending" = "0" ] && break
-  sleep 2
-done
-if [ "$pending" != "0" ]; then
-  echo "the analysis queue did not drain; wait for the worker before measuring performance" >&2
-  exit 1
-fi
+upstream() {
+  local format=$1 suffix=$2
+  local upper=${format^^}
+  local specific="SAFEAGENT_UPSTREAM_${upper}_${suffix}"
+  local value=${!specific:-}
+  if [ -z "$value" ]; then
+    case "$suffix" in
+      KEY|MODEL|VENDOR)
+        local shared="SAFEAGENT_UPSTREAM_${suffix}"
+        value=${!shared:-}
+        ;;
+    esac
+  fi
+  printf '%s' "$value"
+}
+
+wait_queue() {
+  local pending="unknown"
+  for _ in $(seq 1 60); do
+    pending=$(docker compose -f "$lab/docker-compose.yml" exec -T database \
+      psql -U safeagent -d safeagent -tAc \
+      "SELECT count(*) FROM analysis_jobs WHERE state IN ('pending','running')" 2>/dev/null | tr -d '[:space:]')
+    [ "$pending" = "0" ] && return 0
+    sleep 2
+  done
+  echo "the analysis queue did not drain; wait for the worker before measuring" >&2
+  return 1
+}
 
 mkdir -p "$out"
 cd "$root"
 GOFLAGS="${GOFLAGS:--buildvcs=false}" go build -trimpath -o "$out/loadgen" ./testenv/load
 
+gateway_endpoint() {
+  local format=$1 route=$2 stream=$3
+  case "$format" in
+    chat) printf '%s' "$base/v1/chat/completions" ;;
+    responses) printf '%s' "$base/v1/responses" ;;
+    messages) printf '%s' "$base/v1/messages" ;;
+    gemini)
+      if [ "$stream" = "true" ]; then
+        printf '%s' "$base/v1beta/models/$route:streamGenerateContent?alt=sse"
+      else
+        printf '%s' "$base/v1beta/models/$route:generateContent"
+      fi
+      ;;
+  esac
+}
+
 measure() {
-  local label=$1 endpoint=$2 model=$3 stream=$4 key=$5 report=$6
+  local label=$1 protocol=$2 endpoint=$3 model=$4 stream=$5 key=$6 report=$7 count=$8
   SAFEAGENT_LOAD_KEY="$key" "$out/loadgen" \
-    -label "$label" -endpoint "$endpoint" -model "$model" -stream="$stream" \
-    -requests "$requests" -concurrency "$concurrency" -warmup "$warmup" \
+    -label "$label" -protocol "$protocol" -endpoint "$endpoint" -model "$model" -stream="$stream" \
+    -requests "$count" -concurrency "$concurrency" -warmup "$warmup" \
     -max-tokens "$max_tokens" -report "$report"
 }
 
-printf 'profile: %d requests per run, concurrency %d, warm-up %d, max tokens %d\n' \
-  "$requests" "$concurrency" "$warmup" "$max_tokens"
+printf 'profile: %d requests per native run, concurrency %d, warm-up %d, max tokens %d; %d cross requests\n' \
+  "$requests" "$concurrency" "$warmup" "$max_tokens" "$cross_requests"
 
 status=0
-scenario() {
-  local stream=$1 name=$2 first=$3
-  local baseline="$out/baseline-chat-$name.json"
-  local gateway="$out/gateway-chat-$name.json"
-  printf '\n=== chat %s\n' "$name"
-  if [ "$first" = "gateway" ]; then
-    measure "gateway-chat-$name" "$base/v1/chat/completions" "$SAFEAGENT_CHAT_MODEL" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway"
-    measure "baseline-chat-$name" "$direct_url" "$direct_model" "$stream" "$SAFEAGENT_UPSTREAM_KEY" "$baseline"
-  else
-    measure "baseline-chat-$name" "$direct_url" "$direct_model" "$stream" "$SAFEAGENT_UPSTREAM_KEY" "$baseline"
-    measure "gateway-chat-$name" "$base/v1/chat/completions" "$SAFEAGENT_CHAT_MODEL" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway"
-  fi
-  if ! "$out/loadgen" compare "$baseline" "$gateway"; then
-    status=1
-  fi
-}
+formats=($SAFEAGENT_AVAILABLE_FORMATS)
+declare -A route
+for format in "${formats[@]}"; do
+  upper=${format^^}
+  var="SAFEAGENT_${upper}_ROUTE"
+  route[$format]=${!var}
+done
 
-scenario false non-stream direct
-scenario true stream gateway
+for format in "${formats[@]}"; do
+  upper=${format^^}
+  route_name=${route[$format]}
+  direct_url=$(upstream "$format" URL)
+  direct_model=$(upstream "$format" MODEL)
+  direct_key=$(upstream "$format" KEY)
+  for stream in false true; do
+    name=$format-$([ "$stream" = "true" ] && echo stream || echo json)
+    baseline="$out/baseline-$name.json"
+    gateway="$out/gateway-$name.json"
+    printf '\n=== %s native\n' "$name"
+    measure "baseline-$name" "$format" "$direct_url" "$direct_model" "$stream" "$direct_key" "$baseline" "$requests"
+    wait_queue
+    measure "gateway-$name" "$format" "$(gateway_endpoint "$format" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway" "$requests"
+    if ! "$out/loadgen" compare "$baseline" "$gateway"; then
+      status=1
+    fi
+  done
+done
+
+printf '\n=== cross-format sample\n'
+for client in chat responses messages gemini; do
+  for format in "${formats[@]}"; do
+    route_name=${route[$format]}
+    for stream in false true; do
+      report="$out/cross-$client-$format-$([ "$stream" = "true" ] && echo stream || echo json).json"
+      measure "cross-$client-$format" "$client" "$(gateway_endpoint "$client" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$report" "$cross_requests" >/dev/null
+      if jq -e '.failed == 0 and .succeeded == .requests' "$report" >/dev/null; then
+        printf 'PASS cross %s->%s %s\n' "$client" "$format" "$([ "$stream" = "true" ] && echo stream || echo json)"
+      else
+        printf 'FAIL cross %s->%s %s: %s\n' "$client" "$format" "$([ "$stream" = "true" ] && echo stream || echo json)" \
+          "$(jq -c '{succeeded,failed,error_counts}' "$report")"
+        status=1
+      fi
+    done
+  done
+done
 
 printf '\nreports written to %s\n' "$out"
 exit "$status"

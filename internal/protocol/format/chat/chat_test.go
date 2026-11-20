@@ -35,16 +35,18 @@ func encode(t *testing.T, events []protocol.Event) []format.Frame {
 
 func TestRequestKeepsContentOrder(t *testing.T) {
 	body := []byte(`{"model":"gpt-5","messages":[{"role":"system","content":"be brief"},{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"https://example.com/a.png"}}]},{"role":"assistant","content":"ok","reasoning_content":"thinking","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"/tmp\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"}],"tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object"}}}]}`)
-	request, err := chat.New().DecodeRequest(body, nil, client)
-	if err != nil {
-		t.Fatal(err)
+	request, losses, err := chat.New().DecodeRequest(body, nil, client)
+	if err != nil || len(losses) != 0 {
+		t.Fatalf("%v %+v", err, losses)
 	}
-	assistant := request.Messages[2]
-	if assistant.Blocks[0].Kind != protocol.KindReasoning || assistant.Blocks[1].Kind != protocol.KindText || assistant.Blocks[2].Kind != protocol.KindToolCall {
-		t.Fatalf("unexpected assistant blocks: %+v", assistant.Blocks)
+	if len(request.Items) != 6 {
+		t.Fatalf("unexpected items: %+v", request.Items)
 	}
-	if request.Messages[3].Blocks[0].ToolResult.CallID != "call_1" {
-		t.Fatalf("unexpected tool result: %+v", request.Messages[3].Blocks[0])
+	if request.Items[2].Kind != protocol.ItemReasoning || request.Items[3].Kind != protocol.ItemMessage || request.Items[4].Kind != protocol.ItemToolCall {
+		t.Fatalf("unexpected assistant items: %+v", request.Items[2:5])
+	}
+	if request.Items[5].CallID != "call_1" {
+		t.Fatalf("unexpected tool result: %+v", request.Items[5])
 	}
 	out, _, losses, err := chat.New().EncodeRequest(request, upstream)
 	if err != nil || len(losses) != 0 {
@@ -56,7 +58,7 @@ func TestRequestKeepsContentOrder(t *testing.T) {
 }
 
 func TestPlainTextStaysAString(t *testing.T) {
-	response := &protocol.Response{Blocks: []protocol.Block{{Kind: protocol.KindText, Text: "hi"}}, Finish: protocol.FinishStop}
+	response := &protocol.Response{Items: []protocol.Item{protocol.MessageItem(protocol.RoleAssistant, "hi")}, Finish: protocol.Finish{Kind: protocol.FinishStop}}
 	out, losses, err := chat.New().EncodeResponse(response, client)
 	if err != nil || len(losses) != 0 {
 		t.Fatalf("%v %+v", err, losses)
@@ -81,35 +83,27 @@ func TestChunksCarryFinishReasonOnlyAtTheEnd(t *testing.T) {
 	}
 }
 
-func TestStreamedToolArguments(t *testing.T) {
+func TestInterleavedParallelToolCallsKeepTheirPositions(t *testing.T) {
 	events := decode(t,
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":""}}]}}]}`,
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"p\":"}}]}}]}`,
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}}]}`,
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"now","arguments":""}}]}}]}`,
+		toolChunk(0, "call_a", "read", ""),
+		toolChunk(1, "call_b", "now", ""),
+		toolChunk(0, "", "", `{"p":`),
+		toolChunk(1, "", "", `{"z"`),
+		toolChunk(0, "", "", `1}`),
+		toolChunk(1, "", "", `:2}`),
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`)
 	response := testkit.Aggregate(events)
-	if len(response.Blocks) != 2 || response.Blocks[0].ToolCall.Arguments != `{"p":1}` || response.Finish != protocol.FinishToolCalls {
-		t.Fatalf("unexpected response: %+v", response)
+	if len(response.Items) != 2 || response.Finish.Kind != protocol.FinishToolCalls {
+		t.Fatalf("%+v", response)
+	}
+	first, second := response.Items[0].ToolCall, response.Items[1].ToolCall
+	if first.ID != "call_a" || first.Name != "read" || first.Arguments != `{"p":1}` || second.ID != "call_b" || second.Arguments != `{"z":2}` {
+		t.Fatalf("%+v %+v", first, second)
 	}
 	frames := encode(t, events)
 	text := joinData(frames)
 	if !strings.Contains(text, `"index":1`) || strings.Count(text, `"id":"call_`) != 2 {
 		t.Fatalf("tool calls must keep their positions: %s", text)
-	}
-}
-
-func TestToolCallWithoutArgumentsStreamsAnEmptyObject(t *testing.T) {
-	events := []protocol.Event{
-		{Kind: protocol.EventMessageStart, Meta: &protocol.ResponseMeta{ID: "c1", Model: "m"}},
-		{Kind: protocol.EventBlockStart, Index: 0, Block: &protocol.Block{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "call_1", Name: "now"}}},
-		{Kind: protocol.EventBlockStop, Index: 0, Block: &protocol.Block{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "call_1", Name: "now"}}},
-		{Kind: protocol.EventMessageDelta, Finish: protocol.FinishToolCalls},
-		{Kind: protocol.EventMessageStop},
-	}
-	response := testkit.Aggregate(decode(t, splitData(encode(t, events))...))
-	if len(response.Blocks) != 1 || response.Blocks[0].ToolCall.Arguments != "{}" {
-		t.Fatalf("a call without parameters must carry {}: %+v", response.Blocks)
 	}
 }
 
@@ -121,34 +115,186 @@ func TestInterleavedReasoningAndTextKeepTheirOrder(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"d"}}]}`,
 		`[DONE]`))
 	var order string
-	for _, block := range response.Blocks {
-		order += string(block.Kind[:1]) + block.Text
+	for _, item := range response.Items {
+		if item.Kind == protocol.ItemReasoning {
+			order += "r" + item.Text()
+		} else {
+			order += "t" + item.Text()
+		}
 	}
 	if order != "ra"+"tb"+"rc"+"td" {
 		t.Fatalf("unexpected order %q", order)
 	}
 }
 
-func TestUnknownFinishReasonDegradesToStop(t *testing.T) {
-	events := decode(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"brand_new"}]}`)
-	var delta protocol.Event
-	for _, event := range events {
-		if event.Kind == protocol.EventMessageDelta {
-			delta = event
-		}
+func TestToolCallWithoutArgumentsStreamsAnEmptyObject(t *testing.T) {
+	events := []protocol.Event{
+		{Kind: protocol.EventMessageStart, Meta: &protocol.ResponseMeta{ID: "c1", Model: "m"}},
+		{Kind: protocol.EventItemStart, ItemIndex: 0, Item: &protocol.Item{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "call_1", Name: "now"}}},
+		{Kind: protocol.EventItemStop, ItemIndex: 0, Item: &protocol.Item{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "call_1", Name: "now"}}},
+		{Kind: protocol.EventMessageDelta, Finish: &protocol.Finish{Kind: protocol.FinishToolCalls}},
+		{Kind: protocol.EventMessageStop},
 	}
-	if delta.Finish != protocol.FinishStop || len(delta.Losses) != 1 || delta.Losses[0].Code != protocol.LossFinishMapped {
-		t.Fatalf("%+v", delta)
+	response := testkit.Aggregate(decode(t, splitData(encode(t, events))...))
+	if len(response.Items) != 1 || response.Items[0].ToolCall.Arguments != "{}" {
+		t.Fatalf("a call without parameters must carry {}: %+v", response.Items)
 	}
 }
 
-func TestEmptyContentBlocksAreNotSent(t *testing.T) {
-	request := &protocol.Request{Model: "m", Messages: []protocol.Message{{Role: protocol.RoleUser, Blocks: []protocol.Block{{Kind: protocol.KindText, Text: ""}, {Kind: protocol.KindText, Text: "x"}}}}}
-	out, _, _, err := chat.New().EncodeRequest(request, upstream)
+func TestCustomToolInputIsBufferedVerbatim(t *testing.T) {
+	custom := func(input string, first bool) string {
+		call := map[string]any{"index": 0, "custom": map[string]any{"input": input}}
+		if first {
+			call = map[string]any{"index": 0, "id": "call_p", "type": "custom", "custom": map[string]any{"name": "apply_patch", "input": input}}
+		}
+		return string(protocol.Marshal(map[string]any{"id": "c1", "model": "m", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}}}}))
+	}
+	response := testkit.Aggregate(decode(t, custom("*** Begin", true), custom(" Patch\n", false), `{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
+	call := response.Items[0].ToolCall
+	if call.Kind != protocol.ToolCustom || call.Name != "apply_patch" || call.Arguments != "*** Begin Patch\n" {
+		t.Fatalf("%+v", call)
+	}
+}
+
+func TestLegacyFunctionRoleBecomesAToolResult(t *testing.T) {
+	request, _, err := chat.New().DecodeRequest([]byte(`{"model":"m","messages":[{"role":"assistant","function_call":{"name":"read","arguments":"{}"}},{"role":"function","name":"read","content":"done"}]}`), nil, client)
 	if err != nil {
 		t.Fatal(err)
 	}
-	testkit.AssertJSON(t, out, "messages.0.content", "x")
+	if len(request.Items) != 2 || request.Items[1].Kind != protocol.ItemToolResult || request.Items[1].CallID != request.Items[0].ToolCall.ID {
+		t.Fatalf("%+v", request.Items)
+	}
+}
+
+func TestAssistantMessageRawFieldsStayOnTheMessage(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"assistant","vendor_flag":true,"tool_calls":[{"id":"call_1","type":"function","vendor_call_flag":1,"function":{"name":"read","arguments":"{}"}}]}]}`)
+	request, _, err := chat.New().DecodeRequest(body, nil, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, _, err := chat.New().EncodeRequest(request, upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.AssertJSON(t, encoded, "messages.0.vendor_flag", true)
+	testkit.AssertJSON(t, encoded, "messages.0.tool_calls.0.vendor_call_flag", 1)
+}
+
+func TestNestedRawFieldsSurviveTheSameFormat(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}","vendor_flag":true}}]}]}`)
+	request, _, err := chat.New().DecodeRequest(body, nil, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, _, err := chat.New().EncodeRequest(request, upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.AssertJSON(t, encoded, "messages.0.tool_calls.0.function.vendor_flag", true)
+}
+
+func TestLegacyFunctionCallBecomesAToolCall(t *testing.T) {
+	request, _, err := chat.New().DecodeRequest([]byte(`{"model":"m","messages":[{"role":"assistant","function_call":{"name":"read","arguments":"{\"p\":1}"}}]}`), nil, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Items) != 1 || request.Items[0].ToolCall == nil || request.Items[0].ToolCall.Name != "read" {
+		t.Fatalf("%+v", request.Items)
+	}
+}
+
+func TestStreamWithoutTerminalFrameSynthesisesACleanEnd(t *testing.T) {
+	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
+	if _, _, err := decoder.Feed(format.Frame{Data: []byte(`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"complete"}}]}`)}); err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	events, _, err := decoder.End()
+	if err != nil {
+		t.Fatalf("a complete response followed by EOF is a clean end, got %v", err)
+	}
+	if len(events) == 0 || events[len(events)-1].Kind != protocol.EventMessageStop {
+		t.Fatalf("missing synthesised terminal events: %+v", events)
+	}
+}
+
+func TestStreamWithIncompleteToolArgumentsIsTruncated(t *testing.T) {
+	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
+	frame := `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"a\":"}}]}}]}`
+	if _, _, err := decoder.Feed(format.Frame{Data: []byte(frame)}); err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	if _, _, err := decoder.End(); !errors.Is(err, format.ErrTruncated) {
+		t.Fatalf("incomplete tool arguments must be truncated, got %v", err)
+	}
+}
+
+func TestTerminalFrameDoesNotMaskIncompleteToolArguments(t *testing.T) {
+	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
+	frames := []string{
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"a\":"}}]}}]}`,
+		`[DONE]`,
+	}
+	for _, frame := range frames[:2] {
+		if _, _, err := decoder.Feed(format.Frame{Data: []byte(frame)}); err != nil {
+			t.Fatalf("feed: %v", err)
+		}
+	}
+	events, _, err := decoder.Feed(format.Frame{Data: []byte(frames[2])})
+	if !errors.Is(err, format.ErrTruncated) {
+		t.Fatalf("a terminal frame must not hide incomplete arguments, got %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("no terminal events may precede a truncation: %+v", events)
+	}
+}
+
+func TestStreamWithTextAndIncompleteToolArgumentsIsTruncated(t *testing.T) {
+	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
+	frames := []string{
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"a\":"}}]}}]}`,
+	}
+	for _, frame := range frames {
+		if _, _, err := decoder.Feed(format.Frame{Data: []byte(frame)}); err != nil {
+			t.Fatalf("feed: %v", err)
+		}
+	}
+	if _, _, err := decoder.End(); !errors.Is(err, format.ErrTruncated) {
+		t.Fatalf("text followed by incomplete tool arguments must be truncated, got %v", err)
+	}
+}
+
+func TestUnknownFinishReasonDegradesToStop(t *testing.T) {
+	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
+	if _, _, err := decoder.Feed(format.Frame{Data: []byte(`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"brand_new"}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	_, losses, err := decoder.End()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(losses) != 1 || losses[0].Code != protocol.LossFinishMapped {
+		t.Fatalf("%+v", losses)
+	}
+}
+
+func TestToolCallsWithoutIndexArePlacedByID(t *testing.T) {
+	whole := func(id, arguments string) string {
+		call := map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "read", "arguments": arguments}}
+		return string(protocol.Marshal(map[string]any{"id": "c1", "model": "m", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}}}}))
+	}
+	response := testkit.Aggregate(decode(t, whole("call_a", `{"a":1}`), whole("call_b", `{"b":2}`), `[DONE]`))
+	if len(response.Items) != 2 || response.Items[0].ToolCall.Arguments != `{"a":1}` || response.Items[1].ToolCall.ID != "call_b" {
+		t.Fatalf("calls without index must not merge: %+v", response.Items)
+	}
+}
+
+func TestRequestRejectsMultipleChoices(t *testing.T) {
+	_, _, err := chat.New().DecodeRequest([]byte(`{"model":"m","n":2,"messages":[{"role":"user","content":"hi"}]}`), nil, client)
+	if err == nil {
+		t.Fatal("n>1 must be rejected")
+	}
 }
 
 func joinData(frames []format.Frame) string {
@@ -176,117 +322,4 @@ func toolChunk(index int, id, name, arguments string) string {
 	}
 	body := protocol.Marshal(map[string]any{"id": "c1", "model": "m", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}}}})
 	return string(body)
-}
-
-func TestInterleavedParallelToolCallsAreEmittedWholeInIndexOrder(t *testing.T) {
-	events := decode(t,
-		toolChunk(0, "call_a", "read", ""),
-		toolChunk(1, "call_b", "now", ""),
-		toolChunk(0, "", "", `{"p":`),
-		toolChunk(1, "", "", `{"z"`),
-		toolChunk(0, "", "", `1}`),
-		toolChunk(1, "", "", `:2}`),
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`)
-	response := testkit.Aggregate(events)
-	if len(response.Blocks) != 2 || response.Finish != protocol.FinishToolCalls {
-		t.Fatalf("%+v", response)
-	}
-	first, second := response.Blocks[0].ToolCall, response.Blocks[1].ToolCall
-	if first.ID != "call_a" || first.Name != "read" || first.Arguments != `{"p":1}` || second.ID != "call_b" || second.Arguments != `{"z":2}` {
-		t.Fatalf("%+v %+v", first, second)
-	}
-	deltas := 0
-	for _, event := range events {
-		if event.Kind == protocol.EventBlockDelta {
-			deltas++
-		}
-	}
-	if deltas != 2 {
-		t.Fatalf("each call must send its arguments once, got %d deltas", deltas)
-	}
-}
-
-func TestSequentialToolCallsAndLaterTextStayOrdered(t *testing.T) {
-	response := testkit.Aggregate(decode(t,
-		toolChunk(0, "call_a", "read", `{}`),
-		toolChunk(1, "call_b", "now", `{"x":1}`),
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"after"}}]}`,
-		toolChunk(2, "call_c", "later", `{}`),
-		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
-	var order []string
-	for _, block := range response.Blocks {
-		if block.ToolCall != nil {
-			order = append(order, block.ToolCall.ID)
-		} else {
-			order = append(order, block.Text)
-		}
-	}
-	if strings.Join(order, ",") != "call_a,call_b,after,call_c" {
-		t.Fatalf("%v", order)
-	}
-}
-
-func TestToolCallWithoutArgumentsDecodesToEmptyObject(t *testing.T) {
-	response := testkit.Aggregate(decode(t, toolChunk(0, "call_a", "now", ""), `{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
-	if len(response.Blocks) != 1 || response.Blocks[0].ToolCall.Arguments != "{}" {
-		t.Fatalf("%+v", response.Blocks)
-	}
-}
-
-func TestCustomToolInputIsBufferedVerbatim(t *testing.T) {
-	custom := func(input string, first bool) string {
-		call := map[string]any{"index": 0, "custom": map[string]any{"input": input}}
-		if first {
-			call = map[string]any{"index": 0, "id": "call_p", "type": "custom", "custom": map[string]any{"name": "apply_patch", "input": input}}
-		}
-		return string(protocol.Marshal(map[string]any{"id": "c1", "model": "m", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}}}}))
-	}
-	response := testkit.Aggregate(decode(t, custom("*** Begin", true), custom(" Patch\n", false), `{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
-	call := response.Blocks[0].ToolCall
-	if call.Kind != protocol.ToolCustom || call.Name != "apply_patch" || call.Arguments != "*** Begin Patch\n" {
-		t.Fatalf("%+v", call)
-	}
-}
-
-func TestToolCallsFlushOnDoneWithoutFinishReason(t *testing.T) {
-	response := testkit.Aggregate(decode(t, toolChunk(0, "call_a", "read", `{"a":1}`), `[DONE]`))
-	if len(response.Blocks) != 1 || response.Blocks[0].ToolCall.Arguments != `{"a":1}` {
-		t.Fatalf("%+v", response.Blocks)
-	}
-}
-
-func TestStreamWithoutTerminalFrameSynthesisesACleanEnd(t *testing.T) {
-	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
-	if _, err := decoder.Feed(format.Frame{Data: []byte(`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"complete"}}]}`)}); err != nil {
-		t.Fatalf("feed: %v", err)
-	}
-	events, err := decoder.End()
-	if err != nil {
-		t.Fatalf("a complete response followed by EOF is a clean end, got %v", err)
-	}
-	if len(events) == 0 || events[len(events)-1].Kind != protocol.EventMessageStop {
-		t.Fatalf("missing synthesised terminal events: %+v", events)
-	}
-}
-
-func TestStreamWithIncompleteToolArgumentsIsTruncated(t *testing.T) {
-	decoder := chat.Codec{}.NewStreamDecoder(format.Peer{Side: format.Upstream})
-	frame := `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"a\":"}}]}}]}`
-	if _, err := decoder.Feed(format.Frame{Data: []byte(frame)}); err != nil {
-		t.Fatalf("feed: %v", err)
-	}
-	if _, err := decoder.End(); !errors.Is(err, format.ErrTruncated) {
-		t.Fatalf("incomplete tool arguments must be truncated, got %v", err)
-	}
-}
-
-func TestToolCallsWithoutIndexArePlacedByID(t *testing.T) {
-	whole := func(id, arguments string) string {
-		call := map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "read", "arguments": arguments}}
-		return string(protocol.Marshal(map[string]any{"id": "c1", "model": "m", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}}}}))
-	}
-	response := testkit.Aggregate(decode(t, whole("call_a", `{"a":1}`), whole("call_b", `{"b":2}`), `[DONE]`))
-	if len(response.Blocks) != 2 || response.Blocks[0].ToolCall.Arguments != `{"a":1}` || response.Blocks[1].ToolCall.ID != "call_b" {
-		t.Fatalf("calls without index must not merge: %+v", response.Blocks)
-	}
 }

@@ -12,44 +12,82 @@ if [ -f .env ]; then
   set -a; . ./.env; set +a
 fi
 
-: "${SAFEAGENT_UPSTREAM_KEY:?set SAFEAGENT_UPSTREAM_KEY in testenv/.env or the environment}"
-: "${SAFEAGENT_UPSTREAM_MODEL:?set SAFEAGENT_UPSTREAM_MODEL in testenv/.env or the environment}"
-: "${SAFEAGENT_UPSTREAM_CHAT_URL:?set SAFEAGENT_UPSTREAM_CHAT_URL in testenv/.env or the environment}"
-: "${SAFEAGENT_UPSTREAM_RESPONSES_URL:?set SAFEAGENT_UPSTREAM_RESPONSES_URL in testenv/.env or the environment}"
-: "${SAFEAGENT_UPSTREAM_MESSAGES_URL:?set SAFEAGENT_UPSTREAM_MESSAGES_URL in testenv/.env or the environment}"
+upstream() {
+  local format=$1 suffix=$2
+  local upper=${format^^}
+  local specific="SAFEAGENT_UPSTREAM_${upper}_${suffix}"
+  local value=${!specific:-}
+  if [ -z "$value" ]; then
+    case "$suffix" in
+      KEY|MODEL|VENDOR)
+        local shared="SAFEAGENT_UPSTREAM_${suffix}"
+        value=${!shared:-}
+        ;;
+    esac
+  fi
+  printf '%s' "$value"
+}
+
+formats=(chat responses messages gemini)
+declare -A channel_format=([chat]=openai_chat [responses]=openai_responses [messages]=anthropic_messages [gemini]=google_gemini)
+declare -A default_vendor=([chat]=openai [responses]=openai [messages]=anthropic [gemini]=google)
+available=()
+declare -A channel_model channel_vendor channel_url channel_key
+
+for format in "${formats[@]}"; do
+  url=$(upstream "$format" URL)
+  [ -n "$url" ] || continue
+  key=$(upstream "$format" KEY)
+  model=$(upstream "$format" MODEL)
+  if [ -z "$key" ] || [ -z "$model" ]; then
+    echo "SAFEAGENT_UPSTREAM_${format^^}_URL is set but its key or model is missing" >&2
+    exit 1
+  fi
+  available+=("$format")
+  channel_url[$format]=$url
+  channel_key[$format]=$key
+  channel_model[$format]=$model
+  channel_vendor[$format]=$(upstream "$format" VENDOR)
+  channel_vendor[$format]=${channel_vendor[$format]:-${default_vendor[$format]}}
+done
+
+if [ ${#available[@]} -eq 0 ]; then
+  echo "set at least one SAFEAGENT_UPSTREAM_<FORMAT>_URL, KEY and MODEL" >&2
+  exit 1
+fi
+
 admin_password=${SAFEAGENT_ADMIN_PASSWORD:-"Ag1$(openssl rand -hex 12)"}
-upstream_model=$SAFEAGENT_UPSTREAM_MODEL
-chat_url=$SAFEAGENT_UPSTREAM_CHAT_URL
-responses_url=$SAFEAGENT_UPSTREAM_RESPONSES_URL
-messages_url=$SAFEAGENT_UPSTREAM_MESSAGES_URL
+lab_uid=${SAFEAGENT_LAB_UID:-$(id -u)}
+lab_gid=${SAFEAGENT_LAB_GID:-$(id -g)}
+if [ "$lab_uid" = "0" ]; then
+  lab_uid=1000
+  lab_gid=1000
+fi
+export SAFEAGENT_LAB_UID=$lab_uid SAFEAGENT_LAB_GID=$lab_gid
+mkdir -p "$runtime/workspace"/{claude,codex,gemini,pi} "$runtime/screenshots" "$runtime/logs" "$runtime/acceptance"
+for agent in claude codex gemini pi; do
+  printf 'bluebird\n' > "$runtime/workspace/$agent/hello.txt"
+done
+printf 'deep-' > "$runtime/workspace/claude/prefix.txt"
+printf 'deep-' > "$runtime/workspace/codex/prefix.txt"
+printf 'deep-' > "$runtime/workspace/gemini/prefix.txt"
+printf 'deep-' > "$runtime/workspace/pi/prefix.txt"
 
-mkdir -p "$runtime/workspace/claude" "$runtime/workspace/codex" "$runtime/workspace/gemini" "$runtime/workspace/pi" "$runtime/screenshots"
-printf 'bluebird\n' > "$runtime/workspace/claude/hello.txt"
-printf 'bluebird\n' > "$runtime/workspace/codex/hello.txt"
-printf 'bluebird\n' > "$runtime/workspace/gemini/hello.txt"
-printf 'bluebird\n' > "$runtime/workspace/pi/hello.txt"
-
-jq -n --arg model "$upstream_model" '{
+models_json=$runtime/pi-models.json
+jq -n --arg base "http://host.docker.internal:8080/v1" '{
   "$schema": "https://pi.dev/schemas/models.schema.json",
-  providers: {
-    safeagent: {
-      baseUrl: "http://host.docker.internal:8080/v1",
-      api: "openai-completions",
-      apiKey: "${SAFEAGENT_KEY}",
-      models: [
-        {id: ($model + "-via-chat"), name: ($model + " via chat"), reasoning: true, input: ["text"], contextWindow: 131072, maxTokens: 8192},
-        {id: ($model + "-via-responses"), name: ($model + " via responses"), reasoning: true, input: ["text"], contextWindow: 131072, maxTokens: 8192},
-        {id: ($model + "-via-messages"), name: ($model + " via messages"), reasoning: true, input: ["text"], contextWindow: 131072, maxTokens: 8192}
-      ]
-    }
-  }
-}' > "$runtime/pi-models.json"
-
-chown -R 1000:1000 "$runtime/workspace"
-chown 1000:1000 "$runtime/pi-models.json"
+  providers: {safeagent: {baseUrl: $base, api: "openai-completions", apiKey: "${SAFEAGENT_KEY}", models: []}}
+}' > "$models_json"
+for format in "${available[@]}"; do
+  route="lab-$format"
+  jq --arg id "$route" --arg name "$route" \
+    '.providers.safeagent.models += [{id:$id, name:$name, reasoning:true, input:["text"], contextWindow:131072, maxTokens:8192}]' \
+    "$models_json" > "$models_json.tmp"
+  mv "$models_json.tmp" "$models_json"
+done
 
 if [ "${FRESH:-0}" = "1" ]; then
-  docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose --profile agents --profile browser down --volumes --remove-orphans >/dev/null 2>&1 || true
 fi
 
 docker compose up -d database
@@ -98,34 +136,41 @@ post() {
 
 project=$(post /projects '{"name":"Protocol Lab","retention_days":30,"requests_per_minute":0,"concurrency":0,"daily_token_quota":0}' | jq -r .id)
 
-channel() {
-  local name=$1 format=$2 vendor=$3 endpoint=$4 body
-  body=$(jq -nc --arg name "$name" --arg format "$format" --arg vendor "$vendor" --arg endpoint "$endpoint" --arg model "$upstream_model" \
-    '{name:$name,format:$format,vendor:$vendor,endpoint:$endpoint,models:[{name:$model}],currency:"USD",enabled:true,allow_private_network:true}')
-  post /channels "$body" | jq -r .id
+channel_body() {
+  local format=$1
+  local headers count_tokens limit
+  headers=$(upstream "$format" HEADERS_JSON)
+  if [ -z "$headers" ]; then
+    headers='{}'
+  fi
+  jq -e 'type == "object"' <<<"$headers" >/dev/null || {
+    echo "SAFEAGENT_UPSTREAM_${format^^}_HEADERS_JSON must be a JSON object" >&2
+    exit 1
+  }
+  count_tokens=$(upstream "$format" COUNT_TOKENS_URL)
+  limit=$(upstream "$format" DEFAULT_MAX_OUTPUT_TOKENS)
+  jq -nc \
+    --arg name "Lab $format" \
+    --arg format "${channel_format[$format]}" \
+    --arg vendor "${channel_vendor[$format]}" \
+    --arg endpoint "${channel_url[$format]}" \
+    --arg model "${channel_model[$format]}" \
+    --arg count_tokens "$count_tokens" \
+    --argjson headers "$headers" \
+    --argjson limit "${limit:-0}" \
+    '{name:$name,format:$format,vendor:$vendor,endpoint:$endpoint,count_tokens_endpoint:$count_tokens,headers:$headers,default_max_output_tokens:$limit,models:[{name:$model}],currency:"USD",enabled:true,allow_private_network:true}'
 }
 
-chat=$(channel "Chat" openai_chat openai "$chat_url")
-responses=$(channel "Responses" openai_responses openai "$responses_url")
-messages=$(channel "Messages" anthropic_messages anthropic "$messages_url")
-
-for id in "$chat" "$responses" "$messages"; do
-  post "/channels/$id/keys" "$(jq -nc --arg secret "$SAFEAGENT_UPSTREAM_KEY" '{label:"lab",secret:$secret}')" >/dev/null
+declare -A channel_id route_name
+for format in "${available[@]}"; do
+  channel_id[$format]=$(post /channels "$(channel_body "$format")" | jq -r .id)
+  post "/channels/${channel_id[$format]}/keys" \
+    "$(jq -nc --arg secret "${channel_key[$format]}" '{label:"lab",secret:$secret}')" >/dev/null
+  route_name[$format]="lab-$format"
+  post "/projects/$project/routes" \
+    "$(jq -nc --arg name "${route_name[$format]}" --arg channel "${channel_id[$format]}" --arg model "${channel_model[$format]}" \
+      '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,priority:0,weight:1}]}')" >/dev/null
 done
-
-route() {
-  local name=$1 channel=$2 body
-  body=$(jq -nc --arg name "$name" --arg channel "$channel" --arg model "$upstream_model" \
-    '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,priority:0,weight:1}]}')
-  post "/projects/$project/routes" "$body" >/dev/null
-}
-
-chat_route="${upstream_model}-via-chat"
-responses_route="${upstream_model}-via-responses"
-messages_route="${upstream_model}-via-messages"
-route "$chat_route" "$chat"
-route "$responses_route" "$responses"
-route "$messages_route" "$messages"
 
 key() {
   local label=$1 body
@@ -138,32 +183,49 @@ codex_key=$(key codex)
 gemini_key=$(key gemini)
 pi_key=$(key pi)
 matrix_key=$(key matrix)
+security_key=$(key security)
+
+channels_json=$(jq -nc '{}')
+for format in "${available[@]}"; do
+  channels_json=$(jq -c --arg format "$format" --arg id "${channel_id[$format]}" --arg model "${channel_model[$format]}" \
+    '. + {($format): {id:$id, model:$model}}' <<<"$channels_json")
+done
+routes_json=$(jq -nc '{}')
+for format in "${available[@]}"; do
+  routes_json=$(jq -c --arg format "$format" --arg name "${route_name[$format]}" '. + {($format): $name}' <<<"$routes_json")
+done
 
 jq -n \
-  --arg base "$base" \
-  --arg project "$project" \
-  --arg chat "$chat_route" --arg responses "$responses_route" --arg messages "$messages_route" \
+  --arg base "$base" --arg project "$project" \
+  --argjson channels "$channels_json" --argjson routes "$routes_json" \
   --arg claude_key "$claude_key" --arg codex_key "$codex_key" --arg gemini_key "$gemini_key" \
-  --arg pi_key "$pi_key" --arg matrix_key "$matrix_key" \
-  --arg admin_password "$admin_password" --arg upstream_model "$upstream_model" \
-  '{base:$base,project:$project,models:{chat:$chat,responses:$responses,messages:$messages},keys:{claude:$claude_key,codex:$codex_key,gemini:$gemini_key,pi:$pi_key,matrix:$matrix_key},admin_password:$admin_password,upstream_model:$upstream_model}' \
+  --arg pi_key "$pi_key" --arg matrix_key "$matrix_key" --arg security_key "$security_key" \
+  --arg admin_password "$admin_password" \
+  '{base:$base,project:$project,channels:$channels,routes:$routes,keys:{claude:$claude_key,codex:$codex_key,gemini:$gemini_key,pi:$pi_key,matrix:$matrix_key,security:$security_key},admin_password:$admin_password}' \
   > "$runtime/state.json"
 
+available_list=${available[*]}
 cat > "$runtime/env" <<EOF
 SAFEAGENT_BASE_URL=$base
 SAFEAGENT_PROJECT=$project
-SAFEAGENT_CHAT_MODEL=$chat_route
-SAFEAGENT_RESPONSES_MODEL=$responses_route
-SAFEAGENT_MESSAGES_MODEL=$messages_route
-SAFEAGENT_UPSTREAM_MODEL=$upstream_model
-SAFEAGENT_UPSTREAM_CHAT_URL="$chat_url"
-SAFEAGENT_MATRIX_KEY=$matrix_key
+SAFEAGENT_AVAILABLE_FORMATS="$available_list"
 SAFEAGENT_CLAUDE_KEY=$claude_key
 SAFEAGENT_CODEX_KEY=$codex_key
 SAFEAGENT_GEMINI_KEY=$gemini_key
 SAFEAGENT_PI_KEY=$pi_key
+SAFEAGENT_MATRIX_KEY=$matrix_key
+SAFEAGENT_SECURITY_KEY=$security_key
 SAFEAGENT_ADMIN_PASSWORD=$admin_password
+SAFEAGENT_LAB_UID=$lab_uid
+SAFEAGENT_LAB_GID=$lab_gid
 EOF
+for format in "${available[@]}"; do
+  printf 'SAFEAGENT_%s_ROUTE=%s\n' "${format^^}" "${route_name[$format]}" >> "$runtime/env"
+done
+
+if [ "$(id -u)" = "0" ]; then
+  chown -R "$lab_uid:$lab_gid" "$runtime/workspace" "$models_json"
+fi
 
 echo "lab ready"
-jq '{project,models,keys:{claude:(.keys.claude[0:12]+"..."),codex:(.keys.codex[0:12]+"..."),gemini:(.keys.gemini[0:12]+"..."),pi:(.keys.pi[0:12]+"..."),matrix:(.keys.matrix[0:12]+"...")}}' "$runtime/state.json"
+jq '{project, channels, routes, keys:{claude:(.keys.claude[0:12]+"..."),codex:(.keys.codex[0:12]+"..."),gemini:(.keys.gemini[0:12]+"..."),pi:(.keys.pi[0:12]+"..."),matrix:(.keys.matrix[0:12]+"..."),security:(.keys.security[0:12]+"...")}}' "$runtime/state.json"

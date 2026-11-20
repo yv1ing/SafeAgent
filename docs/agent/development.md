@@ -21,9 +21,16 @@ make verify       # run check and test
 make build        # web build + embedded Go binary
 make integration  # repository tests against SAFEAGENT_TEST_DATABASE
 make lab-setup    # start the Docker acceptance lab; see testenv.md
+make lab-protocol # live conversion matrix
+make lab-agents   # four agent CLIs against every configured route
+make lab-policy   # request and tool-call enforcement
 make lab-analysis # asynchronous diagnosis and redaction acceptance
+make lab-security # authentication, quotas, isolation and console permissions
+make lab-faults   # failover, truncation, tool holds, headers and default limits
+make lab-browser  # desktop console CRUD and mobile page checks
 make lab-integration # repository tests on a separate database in the lab
-make lab-load     # compare gateway latency and throughput with a direct provider baseline
+make lab-load     # quick four-protocol performance smoke
+make lab-acceptance # every lab suite in order
 make security     # SBOM + govulncheck + npm audit
 ```
 
@@ -64,16 +71,16 @@ Response text is stored and checked for concealed Unicode asynchronously; it is 
 | `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by gateway tests, and idempotency by repository integration tests |
 | `internal/service/console` | permission rules, name bounds, password policy, policy member restrictions |
 | `internal/api/console` | project summary rendering and OpenAPI contract consistency |
-| `internal/protocol/format` | 4×4 conversion, AxonHub fixtures, clean EOF, truncation, media, citations |
+| `internal/protocol/format` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
 | `internal/app` | direct and transitive dependency boundaries |
 | `internal/storage/repository` | schema documentation consistency; integration tests require `SAFEAGENT_TEST_DATABASE` and are run by the operator |
-| `testenv/load` | SSE and JSON response validation, percentile calculation and the relative performance gate |
+| `testenv/load` | SSE and JSON response validation, percentile calculation and the performance smoke |
 
 Browser acceptance is automated by `make lab-browser`; see the [acceptance lab](testenv.md).
 
 ## Acceptance lab
 
-[`testenv/`](../../testenv/) is a disposable Docker lab for live functional and performance acceptance. PostgreSQL, Claude Code, Codex, Gemini CLI, Pi and the Playwright browser run in containers; the gateway runs on the host so a backend change can be rebuilt without an image build. The complete topology, suite expectations, performance model, thresholds and troubleshooting guide is [`testenv.md`](testenv.md). The functional workflow uses `make lab-setup`, `lab-restart`, `lab-protocol`, `lab-agents`, `lab-policy`, `lab-analysis`, `lab-browser`, `lab-integration` and `lab-down`; `make lab-load` is the manual performance gate. The lab is not part of the product deployment; its runtime directory and `testenv/.env` are ignored.
+[`testenv/`](../../testenv/) is a disposable Docker lab for live protocol, agent, security and console acceptance. PostgreSQL, Claude Code, Codex, Gemini CLI, Pi and the Playwright browser run in containers; the gateway and the fault upstream run on the host so a change can be rebuilt without an image build. The complete topology, provider contract, suite expectations, performance smoke and troubleshooting guide is [`testenv.md`](testenv.md). `make lab-acceptance` runs every suite in order; the individual targets are `lab-setup`, `lab-restart`, `lab-protocol`, `lab-agents`, `lab-policy`, `lab-analysis`, `lab-security`, `lab-faults`, `lab-browser`, `lab-integration`, `lab-load` and `lab-down`. The lab is not part of the product deployment; its runtime directory and `testenv/.env` are ignored.
 
 ## Contracts
 
@@ -89,7 +96,7 @@ Five contracts define what the rest of the system may rely on. Treat a change to
 
 The observation and audit contracts carry explicit version numbers. A stored event records the schema version it was written with. Startup checks the DDL fingerprint and refuses a database whose events carry a different `auditevent.SchemaVersion`; changing either contract therefore requires recreating the database. The console contract is generated from Go types: `make generate` rewrites `web/openapi.json` and `web/src/api/generated`, and `make check` fails when either is stale. Neither generated file is edited by hand.
 
-A protocol conversion that cannot carry a field must emit a `protocol.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture; a same-format passthrough is not an acceptable shortcut.
+A protocol conversion that cannot carry a field must emit a `protocol.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture. A same-format raw overlay may preserve the original bytes, but it does not replace a canonical mapping and an explicit loss for other targets.
 
 ## Conventions
 

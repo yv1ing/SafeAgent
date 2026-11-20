@@ -17,8 +17,9 @@ type Route struct {
 }
 
 type Target struct {
-	ChannelID     string `json:"channel_id"`
-	UpstreamModel string `json:"upstream_model"`
-	Priority      int    `json:"priority"`
-	Weight        int    `json:"weight"`
+	ChannelID       string `json:"channel_id"`
+	UpstreamModel   string `json:"upstream_model"`
+	Priority        int    `json:"priority"`
+	Weight          int    `json:"weight"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 }

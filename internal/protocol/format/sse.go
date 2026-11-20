@@ -10,8 +10,9 @@ import (
 )
 
 type Frame struct {
-	Event string
-	Data  []byte
+	Event   string
+	Data    []byte
+	Comment string
 }
 
 type Reader struct {
@@ -113,6 +114,13 @@ func splitLine(payload []byte, atEOF bool) (int, []byte, error) {
 		return len(payload), payload, nil
 	}
 	return 0, nil, nil
+}
+
+func (frame Frame) Encode() ([]byte, error) {
+	if frame.Comment != "" && len(frame.Data) == 0 {
+		return []byte(": " + frame.Comment + "\n\n"), nil
+	}
+	return EncodeFrame(frame.Event, string(frame.Data))
 }
 
 func EncodeFrame(event string, value any) ([]byte, error) {

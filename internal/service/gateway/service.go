@@ -281,7 +281,7 @@ func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName stri
 	var targets []routing.Target
 	for _, target := range route.Targets {
 		if resolved.byID[target.ChannelID] != nil {
-			targets = append(targets, routing.Target{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight})
+			targets = append(targets, routing.Target{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens})
 		}
 	}
 	secrets, err := pipeline.repository.EnabledChannelKeys(ctx)
@@ -306,11 +306,8 @@ func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName stri
 // be verified.
 func unsealRequest(peer format.Peer, request *protocol.Request) []protocol.Loss {
 	var losses []protocol.Loss
-	for index := range request.Messages {
-		blocks := request.Messages[index].Blocks
-		for position := range blocks {
-			losses = append(losses, peer.Unseal(&blocks[position])...)
-		}
+	for index := range request.Items {
+		losses = append(losses, peer.Unseal(&request.Items[index])...)
 	}
 	return losses
 }

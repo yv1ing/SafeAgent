@@ -10,9 +10,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 )
 
-var mediaKeys = []string{"type", "image_url", "source", "input_audio", "file", "data", "media_type", "detail", "file_id", "filename", "file_data", "file_url"}
-
-func decodeGeminiMedia(entry map[string]any) (*protocol.Media, error) {
+func DecodeGeminiMedia(entry map[string]any) (*protocol.Media, error) {
 	media := &protocol.Media{}
 	switch {
 	case entry["inlineData"] != nil:
@@ -25,10 +23,10 @@ func decodeGeminiMedia(entry map[string]any) (*protocol.Media, error) {
 		return nil, nil
 	}
 	media.Kind = mediaKind(media.MIMEType)
-	return media, validateMedia(media)
+	return media, ValidateMedia(media)
 }
 
-func decodeMedia(entry map[string]any) (*protocol.Media, error) {
+func DecodeMedia(entry map[string]any) (*protocol.Media, error) {
 	media := &protocol.Media{}
 	switch blockType := protocol.String(entry["type"]); blockType {
 	case "image_url":
@@ -66,10 +64,10 @@ func decodeMedia(entry map[string]any) (*protocol.Media, error) {
 	default:
 		return nil, nil
 	}
-	return media, validateMedia(media)
+	return media, ValidateMedia(media)
 }
 
-func validateMedia(media *protocol.Media) error {
+func ValidateMedia(media *protocol.Media) error {
 	if strings.HasPrefix(media.URL, "data:") {
 		media.Data, media.URL = media.URL, ""
 	}
@@ -122,10 +120,9 @@ func mediaKind(mime string) string {
 	return "document"
 }
 
-func encodeMedia(block protocol.Block, target protocol.Format) (map[string]any, error) {
-	media := block.Media
+func EncodeMedia(media *protocol.Media, target protocol.Format) (map[string]any, error) {
 	if media == nil {
-		return nil, errors.New("media block has no media")
+		return nil, errors.New("media part has no media")
 	}
 	if media.FileID != "" {
 		return encodeFileMedia(media, target)

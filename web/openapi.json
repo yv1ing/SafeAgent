@@ -599,6 +599,10 @@
           "currency": {
             "type": "string"
           },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -610,6 +614,12 @@
           },
           "format": {
             "type": "string"
+          },
+          "forward_headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "headers": {
             "additionalProperties": {
@@ -748,6 +758,10 @@
           "currency": {
             "type": "string"
           },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -759,6 +773,12 @@
           },
           "format": {
             "type": "string"
+          },
+          "forward_headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "headers": {
             "additionalProperties": {
@@ -1645,6 +1665,10 @@
       },
       "ConsoleLossView": {
         "properties": {
+          "class": {
+            "description": "fatal or degraded",
+            "type": "string"
+          },
           "code": {
             "type": "string"
           },
@@ -1652,6 +1676,9 @@
             "type": "string"
           },
           "from": {
+            "type": "string"
+          },
+          "item_key": {
             "type": "string"
           },
           "path": {
@@ -2172,6 +2199,11 @@
             "nullable": true,
             "type": "integer"
           },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "nullable": true,
+            "type": "integer"
+          },
           "name": {
             "type": "string"
           },
@@ -2209,6 +2241,10 @@
           },
           "daily_token_quota": {
             "description": "0 means unlimited",
+            "type": "integer"
+          },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
             "type": "integer"
           },
           "failure_rate": {
@@ -2441,6 +2477,10 @@
         "properties": {
           "channel_id": {
             "type": "string"
+          },
+          "max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit and the channel has no default",
+            "type": "integer"
           },
           "priority": {
             "description": "Lower values are tried first",
@@ -3047,6 +3087,10 @@
           "currency": {
             "type": "string"
           },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -3058,6 +3102,12 @@
           },
           "format": {
             "type": "string"
+          },
+          "forward_headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "headers": {
             "additionalProperties": {
@@ -3173,6 +3223,10 @@
             "type": "integer"
           },
           "daily_token_quota": {
+            "type": "integer"
+          },
+          "default_max_output_tokens": {
+            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
             "type": "integer"
           },
           "name": {

@@ -11,6 +11,11 @@ export interface ConsoleProjectCreate {
   concurrency?: number | null;
   /** @nullable */
   daily_token_quota?: number | null;
+  /**
+   * Applied to an Anthropic Messages upstream when the client omits a limit
+   * @nullable
+   */
+  default_max_output_tokens?: number | null;
   name: string;
   /** @nullable */
   requests_per_minute?: number | null;

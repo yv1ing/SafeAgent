@@ -12,7 +12,7 @@ func TestValidateStreamAcceptsTextAndTerminalEvent(t *testing.T) {
 		`data: [DONE]`,
 		``,
 	}, "\n")
-	got := validateStream(strings.NewReader(body))
+	got := validateStream("chat", strings.NewReader(body))
 	if !got.ok {
 		t.Fatalf("expected a valid stream, got %s: %s", got.kind, got.detail)
 	}
@@ -23,7 +23,7 @@ func TestValidateStreamAcceptsTextAndTerminalEvent(t *testing.T) {
 
 func TestValidateStreamRejectsMissingTerminalEvent(t *testing.T) {
 	body := `data: {"choices":[{"delta":{"content":"OK"},"finish_reason":null}]}` + "\n"
-	got := validateStream(strings.NewReader(body))
+	got := validateStream("chat", strings.NewReader(body))
 	if got.ok || got.kind != "protocol" {
 		t.Fatalf("expected a protocol failure, got %+v", got)
 	}
@@ -33,7 +33,7 @@ func TestValidateStreamRejectsMissingTerminalEvent(t *testing.T) {
 }
 
 func TestValidateStreamRejectsMalformedFrame(t *testing.T) {
-	got := validateStream(strings.NewReader("data: {not json}\n"))
+	got := validateStream("chat", strings.NewReader("data: {not json}\n"))
 	if got.ok || got.kind != "protocol" {
 		t.Fatalf("expected a protocol failure, got %+v", got)
 	}
@@ -41,7 +41,7 @@ func TestValidateStreamRejectsMalformedFrame(t *testing.T) {
 
 func TestValidateJSONRequiresText(t *testing.T) {
 	body := `{"choices":[{"message":{"content":""}}]}`
-	got := validateJSON(strings.NewReader(body))
+	got := validateJSON("chat", strings.NewReader(body))
 	if got.ok || got.kind != "protocol" {
 		t.Fatalf("expected a protocol failure, got %+v", got)
 	}

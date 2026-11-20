@@ -103,18 +103,16 @@ func (state *call) judge(admission routing.Admission, failure *protocol.Error) {
 type attemptResult int
 
 const (
-	// attemptFailed left the call open: another key or channel may still answer.
 	attemptFailed attemptResult = iota
-	// attemptEnded means the call already reached a terminal state with a failure.
 	attemptEnded
 	attemptCompleted
 )
 
-// attempt opens one upstream stream and drives it to the end.
+// attempt opens one upstream response and drives it to the end.
 func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate, key routing.Key) (attemptResult, *protocol.Error) {
 	ctx, cancel := attemptContext(state.ctx, channel)
 	defer cancel()
-	upstream, failure := state.pipeline.openUpstream(ctx, state.request, state.salt, channel, candidate, key)
+	upstream, failure := state.pipeline.openUpstream(ctx, state, channel, candidate, key)
 	if failure != nil {
 		if failure.Class == protocol.ClassCancelled {
 			state.finish(failure, "cancelled")
@@ -126,7 +124,21 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	record := state.recorder.Call()
 	record.ChannelID, record.UpstreamModel, record.Currency = channel.ID, candidate.Target.UpstreamModel, channel.Currency
 
+	state.targetFormat = protocol.Format(channel.Format)
 	sink := newResponseSink(state)
+	sink.losses = append(sink.losses, upstream.losses...)
+	if sink.streaming && !state.headersSent {
+		state.headersSent = true
+		header := state.writer.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("X-Accel-Buffering", "no")
+		state.writer.WriteHeader(http.StatusOK)
+		if state.kind != protocol.Gemini {
+			_, _ = state.writer.Write([]byte(": keepalive\n\n"))
+		}
+		state.writer.Flush()
+	}
 	if failure := state.consume(upstream, sink); failure != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) && state.ctx.Err() == nil {
 			failure = timedOut()
@@ -135,7 +147,7 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	}
 	response := sink.response()
 	switch {
-	case len(response.Blocks) == 0 && response.Failure == nil && response.Finish != protocol.FinishContentFilter:
+	case len(response.Items) == 0 && response.Failure == nil && response.Finish.Kind != protocol.FinishContentFilter:
 		return attemptFailed, transient("empty_response", "The upstream returned no content.")
 	case response.Failure != nil && !sink.committed():
 		return attemptFailed, transient("upstream_reported_failure", "The upstream reported a failed response.")
@@ -149,8 +161,6 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	return attemptEnded, nil
 }
 
-// attemptContext bounds one attempt by the channel's overall timeout, from connecting until the
-// last frame; the first-byte timeout is enforced separately by the channel's transport.
 func attemptContext(parent context.Context, channel *entity.Channel) (context.Context, context.CancelFunc) {
 	if channel.TimeoutSeconds > 0 {
 		return context.WithTimeout(parent, time.Duration(channel.TimeoutSeconds)*time.Second)
@@ -166,7 +176,7 @@ func failureOf(failure *protocol.Error) *protocol.Error {
 }
 
 // afterFailure decides what a failed attempt means. Before the first byte reaches the client it is
-// retryable; afterwards the call ends here.
+// retryable; afterwards the call ends here with a protocol-native error frame.
 func (state *call) afterFailure(sink *responseSink, upstream *upstreamCall, failure *protocol.Error) (attemptResult, *protocol.Error) {
 	switch {
 	case failure.Class == protocol.ClassPolicy:
@@ -192,14 +202,6 @@ func (state *call) sealFailed(sink *responseSink, upstream *upstreamCall, failur
 
 // consume feeds every upstream frame through the sink.
 func (state *call) consume(upstream *upstreamCall, sink *responseSink) *protocol.Error {
-	feed := func(events []protocol.Event) *protocol.Error {
-		for _, event := range events {
-			if failure := sink.forward(event); failure != nil {
-				return failure
-			}
-		}
-		return nil
-	}
 	for {
 		frame, err := upstream.reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -211,20 +213,22 @@ func (state *call) consume(upstream *upstreamCall, sink *responseSink) *protocol
 			}
 			return transient("upstream_stream_failed", "The upstream stream failed.")
 		}
-		events, err := upstream.decoder.Feed(frame)
+		events, losses, err := upstream.decoder.Feed(frame)
+		sink.losses = append(sink.losses, losses...)
 		if err != nil {
-			return transient("invalid_upstream_stream", "The upstream stream could not be decoded.")
+			return upstreamDecodeFailure(err)
 		}
-		if failure := feed(events); failure != nil {
+		if failure := sink.forward(events, &frame); failure != nil {
 			return failure
 		}
 	}
-	trailing, err := upstream.decoder.End()
+	trailing, losses, err := upstream.decoder.End()
+	sink.losses = append(sink.losses, losses...)
 	if errors.Is(err, format.ErrTruncated) {
 		return transient("upstream_stream_truncated", "The upstream stream ended before completion.")
 	}
 	if err != nil {
-		return transient("invalid_upstream_stream", "The upstream stream could not be decoded.")
+		return upstreamDecodeFailure(err)
 	}
-	return feed(trailing)
+	return sink.forward(trailing, nil)
 }

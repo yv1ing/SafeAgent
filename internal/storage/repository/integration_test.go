@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -430,5 +431,90 @@ func TestSavePolicyVersionActivatesImmediately(t *testing.T) {
 	active, err := database.ActivePolicy(ctx, seeded.project.ID)
 	if err != nil || active == nil || active.Version != 2 {
 		t.Fatalf("the newest saved version must be active: %+v %v", active, err)
+	}
+}
+
+func TestProjectAndChannelUpdatesPersistGatewayDefaults(t *testing.T) {
+	database := prepared(t)
+	ctx := context.Background()
+	project, err := database.CreateProject(ctx, &entity.Project{Name: "p", RetentionDays: 7}, nil, nil)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	project.Name = "p2"
+	project.DefaultMaxOutputTokens = 4321
+	updatedProject, err := database.UpdateProject(ctx, project.ID, *project, project.Version)
+	if err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	if updatedProject.DefaultMaxOutputTokens != 4321 {
+		t.Fatalf("project output limit = %d", updatedProject.DefaultMaxOutputTokens)
+	}
+
+	channel, err := database.CreateChannel(ctx, &entity.Channel{Name: "c", Format: "openai_chat", Vendor: "openai", Endpoint: "https://example.com/v1/chat/completions", Currency: "USD", Enabled: true})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	channel.ForwardHeaders = []string{"x-lab"}
+	channel.DefaultMaxOutputTokens = 1234
+	updatedChannel, err := database.UpdateChannel(ctx, channel.ID, *channel, channel.Version)
+	if err != nil {
+		t.Fatalf("update channel: %v", err)
+	}
+	if updatedChannel.DefaultMaxOutputTokens != 1234 || len(updatedChannel.ForwardHeaders) != 1 || updatedChannel.ForwardHeaders[0] != "x-lab" {
+		t.Fatalf("channel defaults were not persisted: %+v", updatedChannel)
+	}
+}
+
+func TestTrafficSeriesDoesNotDoubleCountRolledBuckets(t *testing.T) {
+	database := prepared(t)
+	seeded := seed(t, database, 30)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	start := now.Truncate(time.Hour).Add(-2 * time.Hour)
+	for index := range 2 {
+		call := seeded.call("rollup_"+strconv.Itoa(index), "session", start.Add(-time.Duration(index)*time.Hour))
+		call.State = "completed"
+		if err := database.CreateCall(ctx, call); err != nil {
+			t.Fatalf("create call: %v", err)
+		}
+	}
+	if err := database.Rollup(ctx, now); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	series, err := database.TrafficSeries(ctx, []string{seeded.project.ID}, "1h", now.Add(-6*time.Hour), now, time.Hour)
+	if err != nil {
+		t.Fatalf("traffic series: %v", err)
+	}
+	var requests int64
+	for _, bucket := range series {
+		requests += bucket.Requests
+	}
+	if requests != 2 {
+		t.Fatalf("rolled and live calls must be counted once, got %d in %+v", requests, series)
+	}
+}
+
+func TestRequestMessagesReturnsTheItemsTheCallAdded(t *testing.T) {
+	database := prepared(t)
+	seeded := seed(t, database, 30)
+	ctx := context.Background()
+	call := seeded.call("summary", "session", time.Now().UTC())
+	if err := database.CreateCall(ctx, call); err != nil {
+		t.Fatalf("create call: %v", err)
+	}
+	payload := []byte(`{"items":[{"kind":"message","role":"user","parts":[{"kind":"text","text":"hello"}]}],"params":{}}`)
+	if err := database.AppendEvent(&entity.Event{CallID: call.ID, Sequence: 1, ProjectID: seeded.project.ID, Kind: "request", SchemaVersion: auditevent.SchemaVersion, Payload: payload}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	if err := database.SealCall(ctx, call, "completed", "", nil, entity.SealAnalysis{}); err != nil {
+		t.Fatalf("seal call: %v", err)
+	}
+	events, err := database.RequestMessages(ctx, []string{call.ID})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("request messages: %+v %v", events, err)
+	}
+	if !strings.Contains(string(events[0].Payload), `"items"`) || !strings.Contains(string(events[0].Payload), `"hello"`) {
+		t.Fatalf("the summary payload must contain the item list: %s", events[0].Payload)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 )
 
-const AdapterVersion = "observe/2"
+const AdapterVersion = "observe/3"
 
 // Redactor returns the shown representation of one text and the raw ranges it masks. A nil
 // Redactor makes both views identical.
@@ -31,9 +31,9 @@ func (options Options) value(raw, path string) observation.Value {
 	return observation.NewValue(raw, shown, spans)
 }
 
-// Request builds the input side of a trace: instructions, declared tools and every message the
-// client sent. The result is deterministic, so the same request and redaction rules always hash to
-// the same observation.
+// Request builds the input side of a trace: instructions, declared tools and every item the client
+// sent. The result is deterministic, so the same request and redaction rules always hash to the same
+// observation.
 func Request(request *protocol.Request, options Options) *observation.Trace {
 	trace := &observation.Trace{ID: options.TraceID, Principal: options.Principal}
 	instructions := options.value(request.Instructions, "instructions")
@@ -60,18 +60,7 @@ func Request(request *protocol.Request, options Options) *observation.Trace {
 	for _, tool := range request.Tools {
 		trace.Tools = append(trace.Tools, ToolSpecOf(tool, options))
 	}
-	for position, message := range request.Messages {
-		turn := observation.Turn{Index: len(trace.Turns), Role: roleOf(message.Role)}
-		for blockIndex, block := range message.Blocks {
-			path := "messages[" + strconv.Itoa(position) + "].blocks[" + strconv.Itoa(blockIndex) + "]"
-			if item, ok := itemOf(block, path, message.Role, false, options); ok {
-				turn.Items = append(turn.Items, item)
-			}
-		}
-		if len(turn.Items) > 0 {
-			trace.Turns = append(trace.Turns, turn)
-		}
-	}
+	appendItems(trace, request.Items, false, options)
 	trace.RebuildSteps()
 	return trace
 }
@@ -81,28 +70,40 @@ func AppendResponse(trace *observation.Trace, response *protocol.Response, optio
 	if trace == nil || response == nil {
 		return
 	}
-	turn := observation.Turn{Index: len(trace.Turns), Role: observation.RoleAssistant}
-	for blockIndex, block := range response.Blocks {
-		path := "response.blocks[" + strconv.Itoa(blockIndex) + "]"
-		if item, ok := itemOf(block, path, protocol.RoleAssistant, true, options); ok {
-			turn.Items = append(turn.Items, item)
-		}
-	}
-	if len(turn.Items) > 0 {
-		trace.Turns = append(trace.Turns, turn)
-	}
-	trace.Outcome.Finish = string(response.Finish)
+	appendItems(trace, response.Items, true, options)
+	trace.Outcome.Finish = string(response.Finish.Kind)
 	if response.Failure != nil {
 		trace.Outcome.ErrorCode = response.Failure.Code
 	}
 	trace.RebuildSteps()
 }
 
+func appendItems(trace *observation.Trace, items []protocol.Item, response bool, options Options) {
+	for index := range items {
+		item := &items[index]
+		role := item.Role
+		if response {
+			role = protocol.RoleAssistant
+		}
+		path := "items[" + strconv.Itoa(index) + "]"
+		translated := translateItem(item, path, role, response, options)
+		if len(translated) == 0 {
+			continue
+		}
+		if count := len(trace.Turns); count > 0 && trace.Turns[count-1].Role == roleOf(role) {
+			trace.Turns[count-1].Items = append(trace.Turns[count-1].Items, translated...)
+			continue
+		}
+		trace.Turns = append(trace.Turns, observation.Turn{Index: len(trace.Turns), Role: roleOf(role), Items: translated})
+	}
+}
+
 // Stored rebuilds a trace from the persisted event payloads. It is the asynchronous and replay
 // path; the online path builds incrementally from the same item translation.
 func Stored(request auditevent.Request, response *auditevent.Response, options Options) *observation.Trace {
 	expanded := request.Params
-	expanded.Messages = request.Messages
+	expanded.Items = request.Items
+	expanded.Tools = nil
 	if len(request.Tools) > 0 {
 		expanded.Tools = request.Tools
 	}
@@ -120,21 +121,21 @@ type Ancestor struct {
 	Response *auditevent.Response
 }
 
-// History prepends the ancestor conversation to the messages a call added. The added bool reports
-// that an ancestor's request was missing, so the caller can mark the trace as truncated instead of
+// History prepends the ancestor conversation to the items a call added. The bool reports that an
+// ancestor's request was missing, so the caller can mark the trace as truncated instead of
 // presenting a partial conversation as complete.
 func History(request auditevent.Request, ancestors []Ancestor) (auditevent.Request, bool) {
-	history := make([]protocol.Message, 0, len(ancestors))
+	history := make([]protocol.Item, 0, len(ancestors))
 	for _, ancestor := range ancestors {
 		if !ancestor.Found {
 			return request, true
 		}
-		history = append(history, ancestor.Request.Messages...)
-		if ancestor.Response != nil && len(ancestor.Response.Response.Blocks) > 0 {
-			history = append(history, protocol.Message{Role: protocol.RoleAssistant, Blocks: ancestor.Response.Response.Blocks})
+		history = append(history, ancestor.Request.Items...)
+		if ancestor.Response != nil && len(ancestor.Response.Response.Items) > 0 {
+			history = append(history, ancestor.Response.Response.Items...)
 		}
 	}
-	request.Messages = append(history, request.Messages...)
+	request.Items = append(history, request.Items...)
 	return request, false
 }
 
@@ -176,25 +177,31 @@ func roleOf(role protocol.Role) observation.Role {
 	}
 }
 
-func itemOf(block protocol.Block, path string, role protocol.Role, response bool, options Options) (observation.Item, bool) {
-	origin, trust := originOf(role, response)
-	item := observation.Item{Origin: origin, Trust: trust, Locator: observation.Locator{Section: sectionOf(role, response), Path: path}}
-	switch block.Kind {
-	case protocol.KindText:
-		item.Kind = observation.ItemText
-		item.Text = options.value(block.Text, path+".text")
-	case protocol.KindRefusal:
-		item.Kind = observation.ItemRefusal
-		item.Text = options.value(block.Text, path+".text")
-	case protocol.KindReasoning:
-		item.Kind = observation.ItemReasoning
-		item.Text = options.value(block.Text, path+".text")
-	case protocol.KindToolCall:
-		if block.ToolCall == nil {
-			return item, false
+func translateItem(item *protocol.Item, path string, role protocol.Role, response bool, options Options) []observation.Item {
+	switch item.Kind {
+	case protocol.ItemMessage:
+		var items []observation.Item
+		for index := range item.Parts {
+			part := &item.Parts[index]
+			partPath := path + ".parts[" + strconv.Itoa(index) + "]"
+			if translated, ok := partItem(part, partPath, role, response, options); ok {
+				items = append(items, translated)
+			}
 		}
-		call := block.ToolCall
-		item.Kind, item.Origin, item.Trust = observation.ItemToolCall, observation.OriginAssistant, observation.Trusted
+		return items
+	case protocol.ItemReasoning:
+		origin, trust := originOf(role, response)
+		translated := observation.Item{
+			Kind: observation.ItemReasoning, Origin: origin, Trust: trust,
+			Text: options.value(item.Text(), path+".text"), Locator: observation.Locator{Section: sectionOf(role, response), Path: path},
+		}
+		return []observation.Item{translated}
+	case protocol.ItemToolCall:
+		if item.ToolCall == nil {
+			return nil
+		}
+		origin, trust := originOf(role, response)
+		call := item.ToolCall
 		arguments := options.value(call.Arguments, path+".tool_call.arguments")
 		input := parseInput(call.Arguments)
 		target := TargetOf(call.Name, input)
@@ -209,40 +216,108 @@ func itemOf(block protocol.Block, path string, role protocol.Role, response bool
 				toolCall.TargetShown = TargetOf(call.Name, shownInput)
 			}
 		}
-		item.ToolCall = toolCall
-		item.Locator.CallID = call.ID
-	case protocol.KindToolResult:
-		if block.ToolResult == nil {
-			return item, false
+		translated := observation.Item{
+			Kind: observation.ItemToolCall, Origin: origin, Trust: trust, ToolCall: toolCall,
+			Locator: observation.Locator{Section: sectionOf(role, response), Path: path, CallID: call.ID},
 		}
-		result := block.ToolResult
-		item.Kind, item.Origin, item.Trust = observation.ItemToolResult, observation.OriginToolResult, observation.Untrusted
-		item.Locator.CallID = result.CallID
-		item.ToolResult = &observation.ToolResult{CallID: result.CallID, Name: result.Name, IsError: result.IsError}
-		for index, nested := range result.Content {
-			if child, ok := itemOf(nested, path+".tool_result.content["+strconv.Itoa(index)+"]", protocol.RoleTool, response, options); ok {
-				item.ToolResult.Content = append(item.ToolResult.Content, child)
+		return []observation.Item{translated}
+	case protocol.ItemToolResult:
+		origin, trust := originOf(protocol.RoleTool, response)
+		result := &observation.ToolResult{CallID: item.CallID, Name: item.Name, IsError: item.IsError}
+		for index := range item.Parts {
+			part := &item.Parts[index]
+			partPath := path + ".parts[" + strconv.Itoa(index) + "]"
+			if translated, ok := partItem(part, partPath, protocol.RoleTool, response, options); ok {
+				result.Content = append(result.Content, translated)
 			}
 		}
-	case protocol.KindMedia:
-		if block.Media == nil {
+		return []observation.Item{{
+			Kind: observation.ItemToolResult, Origin: origin, Trust: trust, ToolResult: result,
+			Locator: observation.Locator{Section: sectionOf(protocol.RoleTool, response), Path: path, CallID: item.CallID},
+		}}
+	case protocol.ItemServerToolCall:
+		if item.ToolCall == nil {
+			return []observation.Item{{
+				Kind: observation.ItemNative, Origin: observation.OriginAssistant, Trust: observation.Trusted,
+				Attributes: map[string]any{"kind": "server_tool_call", "name": toolCallName(item)},
+				Locator:    observation.Locator{Section: sectionOf(role, response), Path: path},
+			}}
+		}
+		origin, trust := originOf(role, response)
+		call := item.ToolCall
+		arguments := options.value(call.Arguments, path+".tool_call.arguments")
+		input := parseInput(call.Arguments)
+		target := TargetOf(call.Name, input)
+		toolCall := &observation.ToolCall{
+			ID: call.ID, Name: call.Name, Kind: string(call.Kind), Arguments: arguments,
+			Input: input, Target: target, Capabilities: Capabilities(call.Name, target),
+			Sink: SinkOf(call.Name, target, input),
+		}
+		if arguments.Shown != arguments.Raw {
+			if shownInput := parseInput(arguments.Shown); shownInput != nil {
+				toolCall.InputShown = shownInput
+				toolCall.TargetShown = TargetOf(call.Name, shownInput)
+			}
+		}
+		return []observation.Item{{
+			Kind: observation.ItemToolCall, Origin: origin, Trust: trust, ToolCall: toolCall,
+			Locator: observation.Locator{Section: sectionOf(role, response), Path: path, CallID: call.ID},
+		}}
+	case protocol.ItemServerToolResult:
+		return []observation.Item{{
+			Kind: observation.ItemNative, Origin: observation.OriginToolResult, Trust: observation.Untrusted,
+			Attributes: map[string]any{"kind": "server_tool_result"},
+			Locator:    observation.Locator{Section: sectionOf(role, response), Path: path},
+		}}
+	case protocol.ItemNative:
+		return []observation.Item{{
+			Kind: observation.ItemNative, Origin: observation.OriginAssistant, Trust: TrustOf(role, response),
+			Attributes: map[string]any{"kind": "native"},
+			Locator:    observation.Locator{Section: sectionOf(role, response), Path: path},
+		}}
+	}
+	return nil
+}
+
+func partItem(part *protocol.Part, path string, role protocol.Role, response bool, options Options) (observation.Item, bool) {
+	origin, trust := originOf(role, response)
+	item := observation.Item{Origin: origin, Trust: trust, Locator: observation.Locator{Section: sectionOf(role, response), Path: path}}
+	switch part.Kind {
+	case protocol.PartText:
+		item.Kind = observation.ItemText
+		item.Text = options.value(part.Text, path+".text")
+	case protocol.PartRefusal:
+		item.Kind = observation.ItemRefusal
+		item.Text = options.value(part.Text, path+".text")
+	case protocol.PartMedia:
+		if part.Media == nil {
 			return item, false
 		}
 		item.Kind = observation.ItemMedia
-		item.Media = &observation.Media{Kind: block.Media.Kind, MIMEType: block.Media.MIMEType, Filename: block.Media.Filename, Size: len(block.Media.Data)}
-	case protocol.KindRedacted:
+		item.Media = &observation.Media{Kind: part.Media.Kind, MIMEType: part.Media.MIMEType, Filename: part.Media.Filename, Size: len(part.Media.Data)}
+	case protocol.PartNative:
 		item.Kind = observation.ItemNative
-		item.Attributes = map[string]any{"kind": string(protocol.KindRedacted), "provider": string(block.Extras.Format)}
+		item.Attributes = map[string]any{"kind": "native"}
 	default:
 		item.Kind = observation.ItemNative
-		item.Attributes = map[string]any{"kind": string(block.Kind)}
+		item.Attributes = map[string]any{"kind": string(part.Kind)}
 	}
 	return item, true
+}
+
+func toolCallName(item *protocol.Item) string {
+	if item.ToolCall != nil {
+		return item.ToolCall.Name
+	}
+	return ""
 }
 
 // originOf classifies content by who produced it. External observations are always untrusted: they
 // are data, even when their text says otherwise.
 func originOf(role protocol.Role, response bool) (observation.Origin, observation.Trust) {
+	if role == protocol.RoleTool {
+		return observation.OriginToolResult, observation.Untrusted
+	}
 	if response || role == protocol.RoleAssistant {
 		return observation.OriginAssistant, observation.Trusted
 	}
@@ -251,18 +326,18 @@ func originOf(role protocol.Role, response bool) (observation.Origin, observatio
 		return observation.OriginSystem, observation.Trusted
 	case protocol.RoleDeveloper:
 		return observation.OriginDeveloper, observation.Trusted
-	case protocol.RoleTool:
-		return observation.OriginToolResult, observation.Untrusted
 	}
 	return observation.OriginUser, observation.Trusted
+}
+
+func TrustOf(role protocol.Role, response bool) observation.Trust {
+	_, trust := originOf(role, response)
+	return trust
 }
 
 func sectionOf(role protocol.Role, response bool) string {
 	if response {
 		return "response"
-	}
-	if role == protocol.RoleAssistant {
-		return "message"
 	}
 	return "message"
 }
@@ -278,10 +353,14 @@ func parseInput(arguments string) any {
 	return value
 }
 
-// BlockItem translates one response block for online phase evaluation. The online path shares this
+// ItemOf translates one response item for online phase evaluation. The online path shares this
 // translation with the replay path; only the surrounding trace differs.
-func BlockItem(block protocol.Block, path string, options Options) (observation.Item, bool) {
-	return itemOf(block, path, protocol.RoleAssistant, true, options)
+func ItemOf(item protocol.Item, path string, options Options) (observation.Item, bool) {
+	translated := translateItem(&item, path, protocol.RoleAssistant, true, options)
+	if len(translated) == 0 {
+		return observation.Item{}, false
+	}
+	return translated[0], true
 }
 
 // AddAssistantItem appends an item to the last assistant turn, creating the turn when the trace

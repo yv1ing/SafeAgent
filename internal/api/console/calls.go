@@ -45,11 +45,13 @@ type CallView struct {
 }
 
 type LossView struct {
-	Path   string `json:"path" required:"true"`
-	Code   string `json:"code" required:"true"`
-	Detail string `json:"detail" required:"true"`
-	From   string `json:"from" required:"true"`
-	To     string `json:"to" required:"true"`
+	Path    string `json:"path" required:"true"`
+	Code    string `json:"code" required:"true"`
+	Class   string `json:"class,omitempty" description:"fatal or degraded"`
+	Detail  string `json:"detail" required:"true"`
+	From    string `json:"from" required:"true"`
+	To      string `json:"to" required:"true"`
+	ItemKey string `json:"item_key,omitempty"`
 }
 
 type CallPage struct {
@@ -319,7 +321,7 @@ type FindingChangeView struct {
 func callView(value *entity.Call) CallView {
 	losses := make([]LossView, 0, len(value.Losses))
 	for _, loss := range value.Losses {
-		losses = append(losses, LossView{Path: loss.Path, Code: loss.Code, Detail: loss.Detail, From: loss.From, To: loss.To})
+		losses = append(losses, LossView{Path: loss.Path, Code: loss.Code, Class: loss.Class, Detail: loss.Detail, From: loss.From, To: loss.To, ItemKey: loss.ItemKey})
 	}
 	return CallView{
 		ID: value.ID, AgentKeyID: value.AgentKeyID, ClientFormat: value.ClientFormat, PublicModel: value.PublicModel,

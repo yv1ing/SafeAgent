@@ -8,6 +8,8 @@
 
 export interface ConsoleRouteTarget {
   channel_id: string;
+  /** Applied to an Anthropic Messages upstream when the client omits a limit and the channel has no default */
+  max_output_tokens?: number;
   /** Lower values are tried first */
   priority: number;
   upstream_model: string;

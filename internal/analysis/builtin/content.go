@@ -66,6 +66,16 @@ var (
 	}
 )
 
+var injectionMatchers = compileMatchers(injectionPhrases)
+
+func compileMatchers(phrases []string) []*regexp.Regexp {
+	matchers := make([]*regexp.Regexp, 0, len(phrases))
+	for _, phrase := range phrases {
+		matchers = append(matchers, regexp.MustCompile("(?i)"+regexp.QuoteMeta(phrase)))
+	}
+	return matchers
+}
+
 func evaluateContent(ctx context.Context, trace *observation.Trace) []analysis.Finding {
 	findings := []analysis.Finding{}
 	for _, ref := range trace.ItemRefs() {
@@ -106,11 +116,10 @@ func inspectText(ref observation.ItemRef, item observation.Item, value observati
 	findings := []analysis.Finding{}
 	prose := item.Origin != observation.OriginAssistant
 	if prose {
-		lower := strings.ToLower(text)
-		for _, phrase := range injectionPhrases {
-			if index := strings.Index(lower, phrase); index >= 0 {
+		for _, matcher := range injectionMatchers {
+			if match := matcher.FindStringIndex(text); match != nil {
 				findings = append(findings, makeFinding("content", analysis.CodePromptInjection, ref, item.Origin, observation.SinkNone,
-					"message", "text", value, index, index+len(phrase), 0))
+					"message", "text", value, match[0], match[1], 0))
 				break
 			}
 		}
@@ -152,10 +161,13 @@ func inspectActionText(ref observation.ItemRef, origin observation.Origin, sink 
 			"message", "text", value, match[0], match[1], index))
 	}
 	for _, word := range commandSeparators.Split(text, -1) {
-		if sensitive, found := sensitivePath(word); found {
-			start := strings.Index(strings.ToLower(text), sensitive)
+		if _, found := sensitivePath(word); found {
+			start := strings.Index(text, word)
+			if start < 0 {
+				start = 0
+			}
 			findings = append(findings, makeFinding("content", analysis.CodeSensitivePath, ref, origin, sink,
-				"message", "text", value, start, start+len(sensitive), 0))
+				"message", "text", value, start, start+len(word), 0))
 			break
 		}
 	}

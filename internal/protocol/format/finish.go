@@ -23,7 +23,7 @@ func FinishLoss(reason protocol.FinishReason, target protocol.Format) bool {
 
 // FinishMappedLoss describes an unknown provider finish reason that was decoded as a plain stop.
 func FinishMappedLoss(value string, from protocol.Format) protocol.Loss {
-	return protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: "unknown finish reason " + value + " treated as stop", From: from}
+	return protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: "unknown finish reason " + value + " treated as stop", From: from}
 }
 
 func ParseChatFinish(value string) (protocol.FinishReason, bool) {

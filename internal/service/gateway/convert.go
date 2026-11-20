@@ -54,12 +54,70 @@ func saturatingAdd(left, right int64) int64 {
 	return left + right
 }
 
+func mergeLosses(prior, current []protocol.Loss) []protocol.Loss {
+	seen := make(map[protocol.Loss]bool, len(prior)+len(current))
+	merged := make([]protocol.Loss, 0, len(prior)+len(current))
+	for _, group := range [][]protocol.Loss{prior, current} {
+		for _, item := range group {
+			if seen[item] {
+				continue
+			}
+			seen[item] = true
+			merged = append(merged, item)
+		}
+	}
+	return merged
+}
+
+func mergeRepairs(prior, current []protocol.Repair) []protocol.Repair {
+	seen := make(map[protocol.Repair]bool, len(prior)+len(current))
+	merged := make([]protocol.Repair, 0, len(prior)+len(current))
+	for _, group := range [][]protocol.Repair{prior, current} {
+		for _, item := range group {
+			if seen[item] {
+				continue
+			}
+			seen[item] = true
+			merged = append(merged, item)
+		}
+	}
+	return merged
+}
+
+func convertRepairs(repairs []protocol.Repair) []entity.Repair {
+	converted := make([]entity.Repair, 0, len(repairs))
+	for _, item := range repairs {
+		converted = append(converted, entity.Repair{Kind: item.Kind, Path: item.Path, Detail: item.Detail, ItemKey: item.ItemKey})
+	}
+	return converted
+}
+
 func convertLosses(losses []protocol.Loss) []entity.Loss {
 	converted := make([]entity.Loss, 0, len(losses))
 	for _, item := range losses {
-		converted = append(converted, entity.Loss{Path: item.Path, Code: string(item.Code), Detail: item.Detail, From: string(item.From), To: string(item.To)})
+		converted = append(converted, entity.Loss{Path: item.Path, Code: string(item.Code), Class: string(item.Class), Detail: item.Detail, From: string(item.From), To: string(item.To), ItemKey: item.ItemKey})
 	}
 	return converted
+}
+
+// writeStreamFailure ends an already-committed SSE response with a protocol-native error frame.
+func writeStreamFailure(writer Writer, codecs format.Registry, kind protocol.Format, failure *protocol.Error) {
+	codec, found := codecs.Get(kind)
+	if !found {
+		return
+	}
+	_, body := codec.EncodeError(failure, true)
+	event := ""
+	if kind == protocol.Messages || kind == protocol.Responses {
+		event = "error"
+	}
+	if frame, err := format.EncodeFrame(event, string(body)); err == nil {
+		_, _ = writer.Write(frame)
+	}
+	if kind == protocol.Chat {
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}
+	writer.Flush()
 }
 
 func writeError(writer Writer, codecs format.Registry, kind protocol.Format, failure *protocol.Error) {

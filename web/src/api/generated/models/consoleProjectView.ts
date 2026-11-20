@@ -15,6 +15,8 @@ export interface ConsoleProjectView {
   created_at: string;
   /** 0 means unlimited */
   daily_token_quota: number;
+  /** Applied to an Anthropic Messages upstream when the client omits a limit */
+  default_max_output_tokens?: number;
   failure_rate?: string;
   id: string;
   last_activity_at?: string;

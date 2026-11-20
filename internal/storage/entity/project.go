@@ -7,17 +7,18 @@ import (
 )
 
 type Project struct {
-	bun.BaseModel       `bun:"table:projects,alias:p"`
-	ID                  string    `bun:",pk" json:"id" required:"true"`
-	Name                string    `json:"name" required:"true"`
-	RetentionDays       int       `json:"retention_days"`
-	RequestsPerMinute   int       `json:"requests_per_minute"`
-	Concurrency         int       `json:"concurrency"`
-	DailyTokenQuota     int64     `json:"daily_token_quota"`
-	RulesVersion        int64     `json:"rules_version"`
-	ActivePolicyVersion int64     `json:"active_policy_version"`
-	Version             int64     `json:"version"`
-	CreatedAt           time.Time `json:"created_at"`
+	bun.BaseModel          `bun:"table:projects,alias:p"`
+	ID                     string    `bun:",pk" json:"id" required:"true"`
+	Name                   string    `json:"name" required:"true"`
+	RetentionDays          int       `json:"retention_days"`
+	RequestsPerMinute      int       `json:"requests_per_minute"`
+	Concurrency            int       `json:"concurrency"`
+	DailyTokenQuota        int64     `json:"daily_token_quota"`
+	DefaultMaxOutputTokens int       `json:"default_max_output_tokens"`
+	RulesVersion           int64     `json:"rules_version"`
+	ActivePolicyVersion    int64     `json:"active_policy_version"`
+	Version                int64     `json:"version"`
+	CreatedAt              time.Time `json:"created_at"`
 }
 
 type AgentKey struct {

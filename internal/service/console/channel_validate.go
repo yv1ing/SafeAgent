@@ -136,6 +136,33 @@ func (input ChannelInput) normalize() (ChannelInput, error) {
 	if input.Headers, err = validateHeaders(input.Headers); err != nil {
 		return input, err
 	}
+	if input.ForwardHeaders, err = validateForwardHeaders(input.ForwardHeaders); err != nil {
+		return input, err
+	}
+	if input.DefaultMaxOutputTokens < 0 || input.DefaultMaxOutputTokens > MaximumOutputTokens {
+		return input, Invalid("invalid_limit")
+	}
 	input.Models, err = validateModels(input.Models)
 	return input, err
+}
+
+func validateForwardHeaders(names []string) ([]string, error) {
+	if len(names) > MaximumHeaders {
+		return nil, Invalid("invalid_header")
+	}
+	seen := map[string]bool{}
+	clean := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if !headerNamePattern.MatchString(name) || reservedHeaders[strings.ToLower(name)] {
+			return nil, Invalid("invalid_header")
+		}
+		lower := strings.ToLower(name)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		clean = append(clean, lower)
+	}
+	return clean, nil
 }

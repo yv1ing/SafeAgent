@@ -5,21 +5,35 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
+type encodePartState struct {
+	kind      protocol.PartKind
+	streamed  bool
+	text      string
+	citations []protocol.Citation
+}
+
+type encodeItemState struct {
+	kind     protocol.ItemKind
+	role     protocol.Role
+	tool     *protocol.ToolCall
+	position int
+	isTool   bool
+	parts    map[int]*encodePartState
+	sentArgs bool
+}
+
 type streamEncoder struct {
-	meta     protocol.ResponseMeta
-	blocks   map[int]*protocol.Block
-	position map[int]int
-	streamed map[int]bool
-	tools    int
-	usage    *protocol.Usage
-	finish   protocol.FinishReason
-	stop     string
-	failure  *protocol.Error
-	stopped  bool
+	meta    protocol.ResponseMeta
+	items   map[int]*encodeItemState
+	tools   int
+	usage   *protocol.Usage
+	finish  protocol.FinishReason
+	failure *protocol.Error
+	stopped bool
 }
 
 func (Codec) NewStreamEncoder(meta protocol.ResponseMeta, peer format.Peer) format.StreamEncoder {
-	return &streamEncoder{meta: meta, blocks: map[int]*protocol.Block{}, position: map[int]int{}, streamed: map[int]bool{}}
+	return &streamEncoder{meta: meta, items: map[int]*encodeItemState{}}
 }
 
 func (encoder *streamEncoder) Encode(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
@@ -29,108 +43,191 @@ func (encoder *streamEncoder) Encode(event protocol.Event) ([]format.Frame, []pr
 			encoder.meta = *event.Meta
 		}
 		return encoder.delta(map[string]any{"role": "assistant", "content": ""}), nil, nil
-	case protocol.EventBlockStart:
-		if event.Block == nil {
-			return nil, nil, nil
-		}
-		block := protocol.CloneBlock(*event.Block)
-		encoder.blocks[event.Index] = &block
-		return encoder.startBlock(event.Index, &block)
-	case protocol.EventBlockDelta:
-		block := encoder.blocks[event.Index]
-		if block == nil || event.Text == "" {
-			return nil, nil, nil
-		}
-		encoder.streamed[event.Index] = true
-		return encoder.blockDelta(event.Index, block, event.Text), nil, nil
-	case protocol.EventBlockStop:
-		return encoder.stopBlock(event)
+	case protocol.EventItemStart:
+		return encoder.startItem(event)
+	case protocol.EventPartStart:
+		return encoder.startPart(event)
+	case protocol.EventPartDelta:
+		return encoder.partDelta(event)
+	case protocol.EventPartStop:
+		return encoder.stopPart(event)
+	case protocol.EventItemStop:
+		return encoder.stopItem(event)
 	case protocol.EventMessageDelta:
-		encoder.usage, encoder.finish, encoder.stop, encoder.failure = event.Usage, event.Finish, event.Stop, event.Failure
+		encoder.usage, encoder.failure = event.Usage, event.Failure
+		if event.Finish != nil {
+			encoder.finish = event.Finish.Kind
+		}
 		var losses []protocol.Loss
-		if format.FinishLoss(event.Finish, protocol.Chat) {
-			losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Detail: string(event.Finish), To: protocol.Chat})
+		if format.FinishLoss(encoder.finish, protocol.Chat) {
+			losses = append(losses, protocol.Loss{Path: "finish", Code: protocol.LossFinishMapped, Class: protocol.LossDegraded, Detail: string(encoder.finish), To: protocol.Chat})
 		}
 		return nil, losses, nil
 	case protocol.EventMessageStop:
+		return encoder.terminal(), format.UsageLosses(encoder.usage, protocol.Chat), nil
+	case protocol.EventError:
+		encoder.failure = event.Failure
 		return encoder.terminal(), nil, nil
+	case protocol.EventPing:
+		return []format.Frame{{Comment: "keepalive"}}, nil, nil
 	}
 	return nil, nil, nil
 }
+
+func (encoder *streamEncoder) Resume(priorItems, priorParts int, priorSequence int64) {}
 
 func (encoder *streamEncoder) Finish() ([]format.Frame, []protocol.Loss, error) {
 	return encoder.terminal(), nil, nil
 }
 
-func (encoder *streamEncoder) startBlock(index int, block *protocol.Block) ([]format.Frame, []protocol.Loss, error) {
-	switch block.Kind {
-	case protocol.KindToolCall:
-		call := block.ToolCall
-		if call == nil || call.Kind == protocol.ToolServer {
-			return nil, []protocol.Loss{{Path: "tool_call", Code: protocol.LossFieldDropped, Detail: "provider-executed tool call cannot be represented by Chat", To: protocol.Chat}}, nil
+func (encoder *streamEncoder) Fail(failure *protocol.Error) ([]format.Frame, []protocol.Loss, error) {
+	encoder.failure = failure
+	return encoder.terminal(), nil, nil
+}
+
+func (encoder *streamEncoder) startItem(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	if event.Item == nil {
+		return nil, nil, nil
+	}
+	state := &encodeItemState{kind: event.Item.Kind, role: event.Item.Role, parts: map[int]*encodePartState{}, position: -1}
+	encoder.items[event.ItemIndex] = state
+	if event.Item.Kind == protocol.ItemReasoning && event.Item.Reasoning != nil && event.Item.Reasoning.Signature != nil {
+		return nil, []protocol.Loss{protocol.Loss{Path: "signature", Code: protocol.LossSignatureStripped, Class: protocol.LossDegraded, Detail: "Chat has no field for reasoning signatures", To: protocol.Chat}}, nil
+	}
+	if event.Item.Kind == protocol.ItemToolCall || event.Item.Kind == protocol.ItemServerToolCall {
+		if event.Item.ToolCall == nil || event.Item.ToolCall.Kind == protocol.ToolServer {
+			return nil, []protocol.Loss{format.Degraded("tool_call", "provider-executed tool call cannot be represented by Chat", protocol.Chat)}, nil
 		}
-		encoder.position[index] = encoder.tools
+		state.isTool = true
+		state.tool = event.Item.ToolCall
+		state.position = encoder.tools
 		encoder.tools++
-		entry := map[string]any{"index": encoder.position[index], "id": call.ID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": ""}}
-		if call.Kind == protocol.ToolCustom {
-			entry["type"], entry["custom"] = "custom", map[string]any{"name": call.Name, "input": ""}
-			delete(entry, "function")
+		var losses []protocol.Loss
+		if state.tool.Signature != nil {
+			losses = append(losses, protocol.Loss{Path: "signature", Code: protocol.LossSignatureStripped, Class: protocol.LossDegraded, Detail: "Chat has no field for tool call signatures", To: protocol.Chat})
 		}
-		return encoder.delta(map[string]any{"tool_calls": []any{entry}}), nil, nil
-	case protocol.KindText, protocol.KindReasoning, protocol.KindRefusal:
-		return nil, nil, nil
+		entry := map[string]any{"index": state.position, "id": state.tool.ID, "type": "function", "function": map[string]any{"name": state.tool.Name, "arguments": ""}}
+		if state.tool.Kind == protocol.ToolCustom {
+			entry = map[string]any{"index": state.position, "id": state.tool.ID, "type": "custom", "custom": map[string]any{"name": state.tool.Name, "input": ""}}
+		}
+		return encoder.delta(map[string]any{"tool_calls": []any{entry}}), losses, nil
 	}
-	return nil, []protocol.Loss{{Path: "block", Code: protocol.LossFieldDropped, Detail: "Chat streams only carry text, reasoning, refusals and tool calls", To: protocol.Chat}}, nil
+	return nil, nil, nil
 }
 
-func (encoder *streamEncoder) blockDelta(index int, block *protocol.Block, text string) []format.Frame {
-	switch block.Kind {
-	case protocol.KindToolCall:
-		position, known := encoder.position[index]
-		if !known {
-			return nil
-		}
-		field := map[string]any{"arguments": text}
-		key := "function"
-		if block.ToolCall.Kind == protocol.ToolCustom {
-			field, key = map[string]any{"input": text}, "custom"
-		}
-		return encoder.delta(map[string]any{"tool_calls": []any{map[string]any{"index": position, key: field}}})
-	case protocol.KindReasoning:
-		return encoder.delta(map[string]any{"reasoning_content": text})
-	case protocol.KindRefusal:
-		return encoder.delta(map[string]any{"refusal": text})
-	case protocol.KindText:
-		return encoder.delta(map[string]any{"content": text})
-	}
-	return nil
-}
-
-func (encoder *streamEncoder) stopBlock(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
-	block := encoder.blocks[event.Index]
-	if block == nil {
+func (encoder *streamEncoder) startPart(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.items[event.ItemIndex]
+	if state == nil || event.Part == nil {
 		return nil, nil, nil
 	}
-	if event.Block != nil {
-		final := protocol.CloneBlock(*event.Block)
-		block = &final
+	part := &encodePartState{kind: event.Part.Kind, citations: event.Part.Citations, text: protocol.StreamedContent(*event.Part)}
+	state.parts[event.PartIndex] = part
+	switch part.kind {
+	case protocol.PartMedia:
+		return nil, []protocol.Loss{format.Degraded("media", "Chat cannot stream generated media", protocol.Chat)}, nil
+	case protocol.PartNative, protocol.PartRedactedReasoning:
+		return nil, []protocol.Loss{format.Degraded("part", "the provider part cannot be represented by Chat", protocol.Chat)}, nil
+	}
+	return nil, nil, nil
+}
+
+func (encoder *streamEncoder) partDelta(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.items[event.ItemIndex]
+	if state == nil || event.Delta == "" {
+		return nil, nil, nil
+	}
+	part := state.parts[event.PartIndex]
+	if part == nil {
+		return nil, nil, nil
+	}
+	part.streamed = true
+	part.text += event.Delta
+	return encoder.deltaFor(state, part, event.Delta), nil, nil
+}
+
+func (encoder *streamEncoder) stopPart(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.items[event.ItemIndex]
+	if state == nil {
+		return nil, nil, nil
+	}
+	part := state.parts[event.PartIndex]
+	if part == nil {
+		return nil, nil, nil
+	}
+	if event.Part != nil {
+		if len(event.Part.Citations) > 0 {
+			part.citations = event.Part.Citations
+		}
+		if content := protocol.StreamedContent(*event.Part); content != "" && !part.streamed {
+			part.text = content
+		}
+	}
+	var frames []format.Frame
+	var losses []protocol.Loss
+	if part.kind == protocol.PartToolArguments && !part.streamed && part.text != "" {
+		frames = append(frames, encoder.deltaFor(state, part, part.text)...)
+		part.streamed = true
+		state.sentArgs = true
+	}
+	if part.kind == protocol.PartToolArguments && part.streamed {
+		state.sentArgs = true
+	}
+	if len(part.citations) > 0 && state.isTool == false {
+		if annotations, nested := encodeChatCitations(part.citations); len(annotations) > 0 {
+			frames = append(frames, encoder.delta(map[string]any{"annotations": annotations})...)
+			losses = append(losses, nested...)
+		} else {
+			losses = append(losses, nested...)
+		}
+	}
+	return frames, losses, nil
+}
+
+func (encoder *streamEncoder) stopItem(event protocol.Event) ([]format.Frame, []protocol.Loss, error) {
+	state := encoder.items[event.ItemIndex]
+	if state == nil {
+		return nil, nil, nil
 	}
 	var losses []protocol.Loss
-	if block.Kind == protocol.KindReasoning && block.Reasoning != nil && block.Reasoning.Signature != nil {
-		losses = append(losses, protocol.Loss{Path: "signature", Code: protocol.LossSignatureStripped, Detail: "Chat has no field for reasoning signatures", To: protocol.Chat})
+	if event.Item != nil && event.Item.Reasoning != nil && event.Item.Reasoning.Signature != nil {
+		losses = append(losses, protocol.Loss{Path: "signature", Code: protocol.LossSignatureStripped, Class: protocol.LossDegraded, Detail: "Chat has no field for reasoning signatures", To: protocol.Chat})
 	}
-	if _, isTool := encoder.position[event.Index]; !isTool || encoder.streamed[event.Index] {
-		return nil, losses, nil
+	if state.isTool && !state.sentArgs {
+		arguments := ""
+		if event.Item != nil && event.Item.ToolCall != nil {
+			arguments = event.Item.ToolCall.Arguments
+		}
+		if state.tool != nil && state.tool.Kind != protocol.ToolCustom {
+			arguments = format.EmptyObjectIfBlank(arguments)
+		}
+		if arguments != "" {
+			part := &encodePartState{kind: protocol.PartToolArguments}
+			return encoder.deltaFor(state, part, arguments), losses, nil
+		}
 	}
-	encoder.streamed[event.Index] = true
-	arguments := format.EmptyObjectIfBlank(block.ToolCall.Arguments)
-	if block.ToolCall.Kind == protocol.ToolCustom {
-		arguments = block.ToolCall.Arguments
+	return nil, losses, nil
+}
+
+func (encoder *streamEncoder) deltaFor(state *encodeItemState, part *encodePartState, text string) []format.Frame {
+	if !state.isTool {
+		switch part.kind {
+		case protocol.PartReasoningText, protocol.PartReasoningSummary:
+			return encoder.delta(map[string]any{"reasoning_content": text})
+		case protocol.PartRefusal:
+			return encoder.delta(map[string]any{"refusal": text})
+		case protocol.PartText:
+			return encoder.delta(map[string]any{"content": text})
+		}
+		return nil
 	}
-	if arguments == "" {
-		return nil, losses, nil
+	if state.position < 0 {
+		return nil
 	}
-	return encoder.blockDelta(event.Index, block, arguments), losses, nil
+	field, key := map[string]any{"arguments": text}, "function"
+	if state.tool != nil && state.tool.Kind == protocol.ToolCustom {
+		field, key = map[string]any{"input": text}, "custom"
+	}
+	return encoder.delta(map[string]any{"tool_calls": []any{map[string]any{"index": state.position, key: field}}})
 }
 
 func (encoder *streamEncoder) terminal() []format.Frame {
@@ -142,7 +239,11 @@ func (encoder *streamEncoder) terminal() []format.Frame {
 		_, body := Codec{}.EncodeError(encoder.failure, true)
 		return []format.Frame{{Data: body}, {Data: []byte("[DONE]")}}
 	}
-	finish := format.ChatFinish(encoder.finish)
+	finishKind := encoder.finish
+	if (finishKind == "" || finishKind == protocol.FinishStop) && encoder.tools > 0 {
+		finishKind = protocol.FinishToolCalls
+	}
+	finish := format.ChatFinish(finishKind)
 	if finish == "" {
 		finish = "stop"
 	}

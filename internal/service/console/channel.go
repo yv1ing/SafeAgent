@@ -18,6 +18,7 @@ const (
 	MaximumModels                  = 200
 	MaximumModelNameLength         = 200
 	MaximumHeaders                 = 32
+	MaximumOutputTokens            = 1 << 20
 	MaximumHeaderValueLength       = 4096
 	MaximumSecretLength            = 4096
 	MaximumEndpointLength          = 2048
@@ -61,6 +62,8 @@ type ChannelInput struct {
 	Endpoint                string
 	CountTokensEndpoint     string
 	Headers                 map[string]string
+	ForwardHeaders          []string
+	DefaultMaxOutputTokens  int
 	Models                  []entity.ChannelModel
 	Currency                string
 	TimeoutSeconds          int
@@ -71,7 +74,7 @@ type ChannelInput struct {
 }
 
 func (input ChannelInput) entity() entity.Channel {
-	return entity.Channel{Name: input.Name, Format: input.Format, Vendor: input.Vendor, Endpoint: input.Endpoint, CountTokensEndpoint: input.CountTokensEndpoint, Headers: input.Headers, Models: input.Models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled}
+	return entity.Channel{Name: input.Name, Format: input.Format, Vendor: input.Vendor, Endpoint: input.Endpoint, CountTokensEndpoint: input.CountTokensEndpoint, Headers: input.Headers, ForwardHeaders: input.ForwardHeaders, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Models: input.Models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled}
 }
 
 func (service *ChannelService) List(ctx context.Context, actor Actor) ([]entity.Channel, error) {

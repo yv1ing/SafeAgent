@@ -125,15 +125,12 @@ func DeriveVerdict(findings []Finding, coverage Coverage, model *ModelLabels, mo
 	if highest == SeverityHigh {
 		return Verdict{Value: VerdictUnsafe, Confidence: 0.95, Reason: "high_severity_finding"}
 	}
-	if incomplete {
+	if incomplete || !coverage.Complete {
 		return Verdict{Value: VerdictUnknown, Confidence: 0, Reason: "coverage_incomplete"}
 	}
 	if model != nil && model.Unsafe && model.Probability >= 0.7 &&
 		(!model.ConfidenceKnown || model.Confidence >= 0.6) {
 		return Verdict{Value: VerdictUnsafe, Confidence: model.Probability, Reason: "decision_model_unsafe"}
-	}
-	if !coverage.Complete {
-		return Verdict{Value: VerdictUnknown, Confidence: 0, Reason: "coverage_incomplete"}
 	}
 	if modelState == ModelFailed || modelState == ModelBudgetExceeded {
 		return Verdict{Value: VerdictUnknown, Confidence: 0, Reason: modelState}

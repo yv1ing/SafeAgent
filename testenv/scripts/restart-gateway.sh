@@ -18,8 +18,13 @@ if [ -f "$runtime/gateway.pid" ]; then
       kill -0 "$pid" 2>/dev/null || break
       sleep 0.2
     done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid"
+      sleep 0.2
+    fi
   fi
 fi
+rm -f "$runtime/gateway.pid"
 
 cd "$root"
 nohup ./build/bin/safeagent -config "$lab/runtime/config.toml" serve >> "$runtime/gateway.log" 2>&1 < /dev/null &
@@ -28,6 +33,11 @@ disown "$gateway_pid" 2>/dev/null || true
 echo "$gateway_pid" > "$runtime/gateway.pid"
 
 for _ in $(seq 1 50); do
+  if ! kill -0 "$gateway_pid" 2>/dev/null; then
+    echo "the gateway exited during startup" >&2
+    tail -20 "$runtime/gateway.log" >&2
+    exit 1
+  fi
   if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
     exit 0
   fi

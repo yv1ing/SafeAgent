@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -9,49 +10,65 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol/format"
 )
 
-// pendingCall buffers one streamed tool call. Providers such as vLLM interleave the deltas of
-// parallel calls, so a call is only emitted, whole, once nothing can extend it any more.
 type pendingCall struct {
-	block     protocol.Block
-	arguments strings.Builder
+	call protocol.ToolCall
+	args strings.Builder
+}
+
+type openText struct {
+	itemIndex int
+	partIndex int
+	kind      protocol.PartKind
 }
 
 type streamDecoder struct {
-	blocks    *format.BlockStream
+	ids       *format.CallIDs
+	stream    *format.ItemStream
 	started   bool
 	done      bool
+	finished  bool
 	pending   map[int]*pendingCall
 	emitted   map[int]bool
 	positions map[string]int
 	last      int
-	finish    protocol.FinishReason
-	finished  bool
+	open      *openText
+	finish    protocol.Finish
 	usage     *protocol.Usage
 	losses    []protocol.Loss
 }
 
 func (Codec) NewStreamDecoder(peer format.Peer) format.StreamDecoder {
-	return &streamDecoder{blocks: format.NewBlockStream(), pending: map[int]*pendingCall{}, emitted: map[int]bool{}, positions: map[string]int{}, finish: protocol.FinishStop}
+	return &streamDecoder{
+		ids:    format.NewCallIDs(peer),
+		stream: format.NewItemStream(), pending: map[int]*pendingCall{}, emitted: map[int]bool{},
+		positions: map[string]int{}, finish: protocol.Finish{Kind: protocol.FinishStop},
+	}
 }
 
-func (decoder *streamDecoder) Feed(frame format.Frame) ([]protocol.Event, error) {
+func (decoder *streamDecoder) Feed(frame format.Frame) ([]protocol.Event, []protocol.Loss, error) {
 	if decoder.done {
-		return nil, nil
+		return nil, nil, nil
 	}
 	payload := strings.TrimSpace(string(frame.Data))
 	if payload == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if payload == "[DONE]" {
-		decoder.finished = true
-		return decoder.finishEvents(), nil
+		if !decoder.pendingClean() {
+			return nil, nil, format.ErrTruncated
+		}
+		events, err := decoder.finishEvents()
+		return events, decoder.takeLosses(), err
 	}
 	root, err := protocol.DecodeObject(frame.Data)
 	if err != nil {
-		return nil, errors.New("stream chunk must be a JSON object")
+		return nil, nil, errors.New("stream chunk must be a JSON object")
 	}
 	if failure := protocol.Object(root["error"]); failure != nil {
-		return nil, &format.StreamError{Code: protocol.String(failure["code"]), Message: protocol.String(failure["message"])}
+		return nil, nil, &format.StreamError{
+			Code: protocol.String(failure["code"]), Type: protocol.String(failure["type"]),
+			Message: protocol.String(failure["message"]), Status: int(protocol.IntegerOrZero(failure["status"])),
+		}
 	}
 	var events []protocol.Event
 	if !decoder.started {
@@ -65,14 +82,14 @@ func (decoder *streamDecoder) Feed(frame format.Frame) ([]protocol.Event, error)
 	if usage := format.ParseChatUsage(root); usage != nil {
 		decoder.usage = usage
 	}
-	for _, item := range protocol.Array(root["choices"]) {
-		choice := protocol.Object(item)
+	for _, value := range protocol.Array(root["choices"]) {
+		choice := protocol.Object(value)
 		if index, _ := protocol.Integer(choice["index"]); index != 0 {
-			return nil, errors.New("multiple choices are not supported")
+			return nil, nil, protocol.UnsupportedFeature("unsupported_multi_choice", "Multiple choices are not supported.")
 		}
 		nested, err := decoder.deltaEvents(protocol.Object(choice["delta"]))
 		if err != nil {
-			return nil, err
+			return events, nil, err
 		}
 		events = append(events, nested...)
 		if finish := protocol.String(choice["finish_reason"]); finish != "" {
@@ -80,29 +97,36 @@ func (decoder *streamDecoder) Feed(frame format.Frame) ([]protocol.Event, error)
 			if !known {
 				decoder.losses = append(decoder.losses, format.FinishMappedLoss(finish, protocol.Chat))
 			}
-			decoder.finish, decoder.finished = reason, true
-			events = append(events, decoder.flushTools()...)
+			decoder.finish = protocol.Finish{Kind: reason, Raw: finish}
+			decoder.finished = true
+			flushed, err := decoder.flushTools()
+			if err != nil {
+				return events, nil, err
+			}
+			events = append(events, flushed...)
 		}
 	}
-	return events, nil
+	return events, nil, nil
 }
 
 func (decoder *streamDecoder) deltaEvents(delta map[string]any) ([]protocol.Event, error) {
+	if delta == nil {
+		return nil, nil
+	}
 	var events []protocol.Event
-	if annotations := protocol.Array(delta["annotations"]); len(annotations) > 0 {
-		if index, open := decoder.blocks.Open(); open {
-			decoder.blocks.Update(index, func(block *protocol.Block) {
-				for _, item := range annotations {
-					if object := protocol.Object(item); object != nil {
-						block.Citations = append(block.Citations, format.DecodeCitation(protocol.Chat, object))
-					}
-				}
-			})
+	if len(protocol.Array(delta["annotations"])) > 0 && decoder.open != nil {
+		for _, value := range protocol.Array(delta["annotations"]) {
+			if object := protocol.Object(value); object != nil {
+				citation := format.DecodeCitation(protocol.Chat, object)
+				decoder.stream.UpdatePart(decoder.open.itemIndex, decoder.open.partIndex, func(part *protocol.Part) {
+					part.Citations = append(part.Citations, citation)
+				})
+			}
 		}
 	}
 	for _, key := range []string{"reasoning_content", "reasoning"} {
 		if text := protocol.String(delta[key]); text != "" {
-			nested, err := decoder.textDelta(protocol.KindReasoning, text)
+			nested, err := decoder.textDelta(protocol.PartReasoningText, text, protocol.ItemReasoning)
 			if err != nil {
 				return nil, err
 			}
@@ -111,7 +135,7 @@ func (decoder *streamDecoder) deltaEvents(delta map[string]any) ([]protocol.Even
 		}
 	}
 	if text := protocol.String(delta["refusal"]); text != "" {
-		nested, err := decoder.textDelta(protocol.KindRefusal, text)
+		nested, err := decoder.textDelta(protocol.PartRefusal, text, protocol.ItemMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -120,52 +144,95 @@ func (decoder *streamDecoder) deltaEvents(delta map[string]any) ([]protocol.Even
 	switch content := delta["content"].(type) {
 	case string:
 		if content != "" {
-			nested, err := decoder.textDelta(protocol.KindText, content)
+			nested, err := decoder.textDelta(protocol.PartText, content, protocol.ItemMessage)
 			if err != nil {
 				return nil, err
 			}
 			events = append(events, nested...)
 		}
 	case []any:
-		for _, part := range content {
-			block, err := format.DecodeBlock(protocol.Chat, protocol.Object(part))
+		items, err := format.DecodeContentItems(protocol.Chat, protocol.RoleAssistant, content, format.Peer{})
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			nested, err := decoder.emitWhole(item)
 			if err != nil {
 				return nil, err
 			}
-			events = append(events, decoder.flushTools()...)
-			index, started := decoder.blocks.Start(block)
-			events = append(events, started...)
-			events = append(events, decoder.blocks.Stop(index)...)
+			events = append(events, nested...)
 		}
 	}
-	for _, item := range protocol.Array(delta["tool_calls"]) {
-		if err := decoder.toolDelta(protocol.Object(item)); err != nil {
+	for _, value := range protocol.Array(delta["tool_calls"]) {
+		if err := decoder.toolDelta(protocol.Object(value)); err != nil {
+			return nil, err
+		}
+	}
+	if legacy := protocol.Object(delta["function_call"]); legacy != nil {
+		if err := decoder.toolDelta(map[string]any{"index": 0, "type": "function", "function": legacy}); err != nil {
 			return nil, err
 		}
 	}
 	return events, nil
 }
 
-// textDelta continues the open block of the same kind; a different kind opens a new block, so
-// alternating reasoning and text stay in their original order.
-func (decoder *streamDecoder) textDelta(kind protocol.BlockKind, text string) ([]protocol.Event, error) {
-	events := decoder.flushTools()
-	index, open := decoder.blocks.Open()
-	if !open || decoder.blocks.Block(index).Kind != kind {
-		block := protocol.Block{Kind: kind}
-		if kind == protocol.KindReasoning {
-			block.Reasoning = &protocol.Reasoning{Visibility: "full"}
+func (decoder *streamDecoder) textDelta(partKind protocol.PartKind, text string, itemKind protocol.ItemKind) ([]protocol.Event, error) {
+	var events []protocol.Event
+	if decoder.open != nil && (decoder.open.kind != partKind || decoder.open.itemIndex < 0) {
+		stopped, err := decoder.stopOpenText()
+		if err != nil {
+			return nil, err
 		}
-		var started []protocol.Event
-		index, started = decoder.blocks.Start(block)
-		events = append(events, started...)
+		events = append(events, stopped...)
 	}
-	nested, err := decoder.blocks.Delta(index, text)
+	if decoder.open == nil {
+		flushed, err := decoder.flushTools()
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, flushed...)
+		item, stopped, err := decoder.startTextItem(itemKind, partKind)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, stopped...)
+		_ = item
+	}
+	nested, err := decoder.stream.Delta(decoder.open.itemIndex, decoder.open.partIndex, text)
 	return append(events, nested...), err
 }
 
-// position places a tool call delta. Some providers omit index and send each call whole with its
-// id, so an id seen before keeps its place and a new id takes the next one.
+func (decoder *streamDecoder) startTextItem(itemKind protocol.ItemKind, partKind protocol.PartKind) (protocol.Item, []protocol.Event, error) {
+	item := protocol.Item{Kind: itemKind, Role: protocol.RoleAssistant}
+	if itemKind == protocol.ItemReasoning {
+		item.Reasoning = &protocol.Reasoning{Visibility: "full"}
+	}
+	itemIndex, events := decoder.stream.StartItem(item)
+	part := protocol.Part{Kind: partKind}
+	partIndex, started, err := decoder.stream.StartPart(itemIndex, part)
+	if err != nil {
+		return item, events, err
+	}
+	decoder.open = &openText{itemIndex: itemIndex, partIndex: partIndex, kind: partKind}
+	return item, append(events, started...), nil
+}
+
+func (decoder *streamDecoder) stopOpenText() ([]protocol.Event, error) {
+	if decoder.open == nil {
+		return nil, nil
+	}
+	partEvents, err := decoder.stream.StopPart(decoder.open.itemIndex, decoder.open.partIndex)
+	if err != nil {
+		return nil, err
+	}
+	itemEvents, err := decoder.stream.StopItem(decoder.open.itemIndex, nil)
+	decoder.open = nil
+	if err != nil {
+		return partEvents, err
+	}
+	return append(partEvents, itemEvents...), nil
+}
+
 func (decoder *streamDecoder) position(call map[string]any) int {
 	if index, ok := protocol.Integer(call["index"]); ok {
 		decoder.last = int(index)
@@ -199,10 +266,10 @@ func (decoder *streamDecoder) toolDelta(call map[string]any) error {
 		if protocol.String(call["type"]) == "custom" || custom != nil {
 			kind = protocol.ToolCustom
 		}
-		pending = &pendingCall{block: protocol.Block{Kind: protocol.KindToolCall, ToolCall: &protocol.ToolCall{Kind: kind}}}
+		pending = &pendingCall{call: protocol.ToolCall{Kind: kind}}
 		decoder.pending[position] = pending
 	}
-	stored := pending.block.ToolCall
+	stored := &pending.call
 	named := function
 	if custom != nil {
 		named = custom
@@ -213,15 +280,14 @@ func (decoder *streamDecoder) toolDelta(call map[string]any) error {
 	if name := protocol.String(named["name"]); name != "" {
 		stored.Name = name
 	}
-	pending.arguments.WriteString(protocol.String(function["arguments"]))
-	pending.arguments.WriteString(protocol.String(custom["input"]))
+	pending.args.WriteString(protocol.String(function["arguments"]))
+	pending.args.WriteString(protocol.String(custom["input"]))
 	return nil
 }
 
-// flushTools emits the buffered calls in index order, each with its complete arguments.
-func (decoder *streamDecoder) flushTools() []protocol.Event {
+func (decoder *streamDecoder) flushTools() ([]protocol.Event, error) {
 	if len(decoder.pending) == 0 {
-		return nil
+		return nil, nil
 	}
 	positions := make([]int, 0, len(decoder.pending))
 	for position := range decoder.pending {
@@ -231,50 +297,149 @@ func (decoder *streamDecoder) flushTools() []protocol.Event {
 	var events []protocol.Event
 	for _, position := range positions {
 		pending := decoder.pending[position]
-		block := pending.block
-		block.ToolCall.Arguments = ""
-		index, started := decoder.blocks.Start(block)
-		events = append(events, started...)
-		arguments := pending.arguments.String()
-		if block.ToolCall.Kind == protocol.ToolFunction {
+		if decoder.open != nil {
+			stopped, err := decoder.stopOpenText()
+			if err != nil {
+				return events, err
+			}
+			events = append(events, stopped...)
+		}
+		arguments := pending.args.String()
+		if pending.call.Kind == protocol.ToolFunction {
 			arguments = format.EmptyObjectIfBlank(arguments)
 		}
-		delta, _ := decoder.blocks.Delta(index, arguments)
-		events = append(events, delta...)
-		events = append(events, decoder.blocks.Stop(index)...)
+		if pending.call.ID == "" {
+			pending.call.ID = decoder.ids.Assign(pending.call.Name, arguments)
+		}
+		item := protocol.Item{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &pending.call}
+		itemIndex, started := decoder.stream.StartItem(item)
+		events = append(events, started...)
+		partIndex, partStarted, err := decoder.stream.StartPart(itemIndex, protocol.Part{Kind: protocol.PartToolArguments})
+		if err != nil {
+			return events, err
+		}
+		events = append(events, partStarted...)
+		if arguments != "" {
+			nested, err := decoder.stream.Delta(itemIndex, partIndex, arguments)
+			if err != nil {
+				return events, err
+			}
+			events = append(events, nested...)
+		}
+		if nested, err := decoder.stream.StopPart(itemIndex, partIndex); err != nil {
+			return events, err
+		} else {
+			events = append(events, nested...)
+		}
+		if nested, err := decoder.stream.StopItem(itemIndex, nil); err != nil {
+			return events, err
+		} else {
+			events = append(events, nested...)
+		}
 		decoder.emitted[position] = true
 	}
 	decoder.pending = map[int]*pendingCall{}
-	return events
+	return events, nil
 }
 
-func (decoder *streamDecoder) finishEvents() []protocol.Event {
+func (decoder *streamDecoder) emitWhole(item protocol.Item) ([]protocol.Event, error) {
+	var events []protocol.Event
+	if decoder.open != nil {
+		stopped, err := decoder.stopOpenText()
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, stopped...)
+	}
+	flushed, err := decoder.flushTools()
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, flushed...)
+	itemIndex, started := decoder.stream.StartItem(item)
+	events = append(events, started...)
+	for partIndex := range item.Parts {
+		part := item.Parts[partIndex]
+		index, started, err := decoder.stream.StartPart(itemIndex, part)
+		if err != nil {
+			return events, err
+		}
+		events = append(events, started...)
+		content := protocol.StreamedContent(part)
+		if part.Kind != protocol.PartToolArguments && content != "" {
+			nested, err := decoder.stream.Delta(itemIndex, index, content)
+			if err != nil {
+				return events, err
+			}
+			events = append(events, nested...)
+		}
+		if nested, err := decoder.stream.StopPart(itemIndex, index); err != nil {
+			return events, err
+		} else {
+			events = append(events, nested...)
+		}
+	}
+	if nested, err := decoder.stream.StopItem(itemIndex, &item); err != nil {
+		return events, err
+	} else {
+		events = append(events, nested...)
+	}
+	return events, nil
+}
+
+func (decoder *streamDecoder) finishEvents() ([]protocol.Event, error) {
 	if decoder.done {
-		return nil
+		return nil, nil
 	}
 	decoder.done = true
-	events := decoder.flushTools()
-	events = append(events, decoder.blocks.StopAll()...)
-	finish := decoder.finish
-	if finish == protocol.FinishStop && decoder.blocks.HasToolCall() {
-		finish = protocol.FinishToolCalls
+	flushed, err := decoder.flushTools()
+	if err != nil {
+		return nil, err
 	}
-	return append(events,
-		protocol.Event{Kind: protocol.EventMessageDelta, Usage: decoder.usage, Finish: finish, Losses: decoder.losses},
+	stopped, err := decoder.stream.StopAll()
+	if err != nil {
+		return nil, err
+	}
+	events := append(flushed, stopped...)
+	finish := decoder.finish
+	if finish.Kind == protocol.FinishStop && decoder.stream.HasToolCall() {
+		finish.Kind = protocol.FinishToolCalls
+	}
+	events = append(events,
+		protocol.Event{Kind: protocol.EventMessageDelta, Usage: decoder.usage, Finish: &finish},
 		protocol.Event{Kind: protocol.EventMessageStop})
+	return events, nil
 }
 
-// End synthesises a clean terminator when the provider closed the connection after delivering a
-// complete response; an incomplete response is still reported as truncated.
-func (decoder *streamDecoder) End() ([]protocol.Event, error) {
+func (decoder *streamDecoder) End() ([]protocol.Event, []protocol.Loss, error) {
 	if !decoder.finished {
-		flushed := decoder.flushTools()
-		if !format.CleanEOF(decoder.blocks) {
-			return nil, format.ErrTruncated
+		if !decoder.pendingClean() || !format.CleanEOF(decoder.stream) {
+			return nil, nil, format.ErrTruncated
 		}
 		decoder.finished = true
-		decoder.losses = append(decoder.losses, protocol.Loss{Code: protocol.LossCleanEOF, Detail: "the provider closed the stream without a terminal frame", From: protocol.Chat})
-		return append(flushed, decoder.finishEvents()...), nil
+		decoder.losses = append(decoder.losses, protocol.Loss{Code: protocol.LossCleanEOF, Class: protocol.LossDegraded, Detail: "the provider closed the stream without a terminal frame", From: protocol.Chat})
 	}
-	return decoder.finishEvents(), nil
+	events, err := decoder.finishEvents()
+	return events, decoder.takeLosses(), err
+}
+
+// pendingClean reports whether every buffered tool call has a complete argument object.
+// CleanEOF inspects ItemStream only, so pending calls must be checked before they are flushed.
+func (decoder *streamDecoder) pendingClean() bool {
+	for _, pending := range decoder.pending {
+		if pending.call.Kind == protocol.ToolCustom {
+			continue
+		}
+		arguments := pending.args.String()
+		if arguments != "" && !json.Valid([]byte(arguments)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (decoder *streamDecoder) takeLosses() []protocol.Loss {
+	losses := decoder.losses
+	decoder.losses = nil
+	return losses
 }

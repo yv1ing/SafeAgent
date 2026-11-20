@@ -6,13 +6,12 @@ import (
 	"errors"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 )
 
-// EmptyObjectIfBlank normalizes the empty and "null" argument encodings every provider emits for a call that
-// takes no parameters.
+// EmptyObjectIfBlank normalizes the empty and "null" argument encodings every provider emits for a
+// call that takes no parameters.
 func EmptyObjectIfBlank(arguments string) string {
 	if arguments == "" || arguments == "null" {
 		return "{}"
@@ -148,9 +147,8 @@ func decodeTool(kind protocol.Format, entry map[string]any) (protocol.Tool, erro
 	if strict, ok := declaration["strict"].(bool); ok {
 		tool.Strict = &strict
 	}
-	tool.CacheControl = decodeCacheControl(entry["cache_control"])
-	known := functionToolKeys[kind]
-	tool.Extras = UnmodelledFields(kind, entry, known...)
+	tool.CacheControl = DecodeCacheControl(entry["cache_control"])
+	tool.Raw = CaptureRaw(kind, entry, functionToolKeys[kind]...)
 	return tool, nil
 }
 
@@ -163,9 +161,9 @@ func decodeCustomTool(kind protocol.Format, definition, entry map[string]any) (p
 		tool.Format = protocol.Marshal(grammar)
 	}
 	if kind == protocol.Chat {
-		tool.Extras = UnmodelledFields(kind, entry, "type", "custom.name", "custom.description", "custom.format")
+		tool.Raw = CaptureRaw(kind, entry, "type", "custom.name", "custom.description", "custom.format")
 	} else {
-		tool.Extras = UnmodelledFields(kind, entry, "type", "name", "description", "format")
+		tool.Raw = CaptureRaw(kind, entry, "type", "name", "description", "format")
 	}
 	return tool, nil
 }
@@ -177,41 +175,6 @@ func serverTool(kind protocol.Format, blockType, name string, entry map[string]a
 	return protocol.Tool{Kind: protocol.ToolServer, Name: name, Server: &protocol.ServerTool{Format: kind, Type: blockType, Config: protocol.Marshal(entry)}}
 }
 
-// Provider-executed tools are portable by capability only; everything else needs the same format.
-type capability string
-
-const (
-	capabilityWebSearch     capability = "web_search"
-	capabilityCodeExecution capability = "code_execution"
-)
-
-func serverCapability(server *protocol.ServerTool) capability {
-	switch server.Format {
-	case protocol.Responses:
-		switch {
-		case strings.HasPrefix(server.Type, "web_search"):
-			return capabilityWebSearch
-		case server.Type == "code_interpreter":
-			return capabilityCodeExecution
-		}
-	case protocol.Messages:
-		switch {
-		case strings.HasPrefix(server.Type, "web_search_"):
-			return capabilityWebSearch
-		case strings.HasPrefix(server.Type, "code_execution_"):
-			return capabilityCodeExecution
-		}
-	case protocol.Gemini:
-		switch server.Type {
-		case "googleSearch":
-			return capabilityWebSearch
-		case "codeExecution":
-			return capabilityCodeExecution
-		}
-	}
-	return ""
-}
-
 func encodeServerTool(tool protocol.Tool, target protocol.Format, path string) (any, []protocol.Loss) {
 	server := tool.Server
 	if server == nil {
@@ -221,14 +184,14 @@ func encodeServerTool(tool protocol.Tool, target protocol.Format, path string) (
 		return protocol.DecodeJSONOrNil(server.Config), nil
 	}
 	var mapped any
-	switch serverCapability(server) {
-	case capabilityWebSearch:
+	switch protocol.ServerCapability(server) {
+	case "web_search":
 		mapped = map[protocol.Format]any{
 			protocol.Responses: map[string]any{"type": "web_search"},
 			protocol.Messages:  map[string]any{"type": "web_search_20250305", "name": "web_search"},
 			protocol.Gemini:    map[string]any{"googleSearch": map[string]any{}},
 		}[target]
-	case capabilityCodeExecution:
+	case "code_execution":
 		mapped = map[protocol.Format]any{
 			protocol.Responses: map[string]any{"type": "code_interpreter", "container": map[string]any{"type": "auto"}},
 			protocol.Messages:  map[string]any{"type": "code_execution_20250825", "name": "code_execution"},
@@ -236,9 +199,9 @@ func encodeServerTool(tool protocol.Tool, target protocol.Format, path string) (
 		}[target]
 	}
 	if mapped == nil {
-		return nil, []protocol.Loss{{Path: path, Code: protocol.LossFieldDropped, Detail: "provider-executed tool " + server.Type + " has no equivalent in the target format", From: server.Format, To: target}}
+		return nil, []protocol.Loss{{Path: path, Code: protocol.LossFieldDropped, Class: protocol.LossDegraded, Detail: "provider-executed tool " + server.Type + " has no equivalent in the target format", From: server.Format, To: target}}
 	}
-	return mapped, []protocol.Loss{{Path: path, Code: protocol.LossToolKindMapped, Detail: "provider-executed tool " + server.Type + " mapped by capability; its configuration was not carried over", From: server.Format, To: target}}
+	return mapped, []protocol.Loss{{Path: path, Code: protocol.LossToolKindMapped, Class: protocol.LossDegraded, Detail: "provider-executed tool " + server.Type + " mapped by capability; its configuration was not carried over", From: server.Format, To: target}}
 }
 
 func parametersOf(tool protocol.Tool, orEmpty bool) (any, error) {
@@ -302,7 +265,7 @@ func encodeFunctionTool(tool protocol.Tool, target protocol.Format, path string)
 	var losses []protocol.Loss
 	custom := tool.Kind == protocol.ToolCustom
 	if custom && target != protocol.Chat && target != protocol.Responses {
-		losses = append(losses, protocol.Loss{Path: path, Code: protocol.LossToolKindMapped, Detail: "a custom tool became a function taking one string input", To: target})
+		losses = append(losses, protocol.Loss{Path: path, Code: protocol.LossToolKindMapped, Class: protocol.LossDegraded, Detail: "a custom tool became a function taking one string input", To: target})
 		if tool.Format != nil {
 			losses = append(losses, dropped(path+".format", "target has no tool grammar", target))
 		}
@@ -363,7 +326,7 @@ func encodeFunctionTool(tool protocol.Tool, target protocol.Format, path string)
 			entry["strict"] = *tool.Strict
 		}
 		if tool.CacheControl != nil {
-			entry["cache_control"] = encodeCacheControl(tool.CacheControl)
+			entry["cache_control"] = EncodeCacheControl(tool.CacheControl)
 		}
 	case protocol.Gemini:
 		parameters, err := parametersOf(tool, false)
@@ -381,6 +344,6 @@ func encodeFunctionTool(tool protocol.Tool, target protocol.Format, path string)
 	if tool.CacheControl != nil && target != protocol.Messages {
 		losses = append(losses, dropped(path+".cache_control", "target has no prompt cache markers", target))
 	}
-	losses = append(losses, ApplyExtras(entry, tool.Extras, target, path+".extras")...)
+	losses = append(losses, RawFields(entry, tool.Raw, target, path+".raw")...)
 	return entry, losses, nil
 }

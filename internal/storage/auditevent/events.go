@@ -7,7 +7,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/redact"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 const (
 	KindRequest       = "request"
@@ -22,20 +22,29 @@ const (
 	KindTerminal      = "terminal"
 )
 
-// Request carries the messages this call added (not the whole expanded history), the request
+// Principal is the agent-key identity at the time of the call. Analysis replays use this snapshot
+// so a later key edit cannot change the verdict of a recorded trace.
+type Principal struct {
+	AgentKeyID string `json:"agent_key_id"`
+	Role       string `json:"role,omitempty"`
+	TrustLevel int    `json:"trust_level"`
+}
+
+// Request carries the items this call added (not the whole expanded history), the request
 // parameters, and the tools when they differ from the parent. Raw text is stored once; the redacted
 // view is derived on read from the call's immutable redaction snapshot.
 type Request struct {
-	Messages []protocol.Message `json:"messages"`
-	Params   protocol.Request   `json:"params"`
-	Tools    []protocol.Tool    `json:"tools,omitempty"`
-	Hits     []redact.Hit       `json:"hits,omitempty"`
-	Losses   []protocol.Loss    `json:"losses,omitempty"`
+	Items     []protocol.Item  `json:"items"`
+	Params    protocol.Request `json:"params"`
+	Tools     []protocol.Tool  `json:"tools,omitempty"`
+	Hits      []redact.Hit     `json:"hits,omitempty"`
+	Ledger    protocol.Ledger  `json:"ledger,omitempty"`
+	Principal *Principal       `json:"principal,omitempty"`
 }
 
 type Response struct {
 	Response protocol.Response `json:"response"`
-	Losses   []protocol.Loss   `json:"losses,omitempty"`
+	Ledger   protocol.Ledger   `json:"ledger,omitempty"`
 }
 
 type ToolCall struct {
@@ -55,7 +64,7 @@ type ToolResult struct {
 type Terminal struct {
 	State  string          `json:"state"`
 	Code   string          `json:"code,omitempty"`
-	Losses []protocol.Loss `json:"losses,omitempty"`
+	Ledger protocol.Ledger `json:"ledger,omitempty"`
 }
 
 type Decision struct {

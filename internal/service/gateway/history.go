@@ -13,24 +13,10 @@ import (
 
 const maximumHistoryBytes = 32 << 20
 
-// responseID is the identifier clients see for a call; it is also what previous_response_id and
-// the stream's message id carry, so every code path must build it here.
-func responseID(kind protocol.Format, callID string) string {
-	switch kind {
-	case protocol.Responses:
-		return "resp_" + callID
-	case protocol.Messages:
-		return "msg_" + callID
-	case protocol.Gemini:
-		return callID
-	}
-	return "chatcmpl-" + callID
-}
-
-// transcript returns the messages a conversation holds up to and including the call: each
-// ancestor's added messages followed by its response. The final call's own response is excluded
-// because the request being built continues after it.
-func (pipeline *Pipeline) transcript(ctx context.Context, callID string) ([]protocol.Message, bool, error) {
+// transcript returns the items a conversation holds up to and including the call: each ancestor's
+// added items followed by its response. The final call's own response is excluded because the
+// request being built continues after it.
+func (pipeline *Pipeline) transcript(ctx context.Context, callID string) ([]protocol.Item, bool, error) {
 	chain, err := pipeline.repository.CallChain(ctx, callID)
 	if err != nil {
 		return nil, false, err
@@ -61,7 +47,7 @@ func (pipeline *Pipeline) transcript(ctx context.Context, callID string) ([]prot
 			responses[event.CallID] = record
 		}
 	}
-	var messages []protocol.Message
+	var items []protocol.Item
 	truncated := chain[0].ParentCallID != "" || chain[0].MessageOffset > 0
 	total := 0
 	for _, call := range chain {
@@ -69,63 +55,88 @@ func (pipeline *Pipeline) transcript(ctx context.Context, callID string) ([]prot
 		if !found {
 			return nil, false, repository.ErrNotFound
 		}
-		if total+len(protocol.Marshal(request.Messages)) > maximumHistoryBytes {
-			return messages, true, nil
+		if total+len(protocol.Marshal(request.Items)) > maximumHistoryBytes {
+			return items, true, nil
 		}
-		total += len(protocol.Marshal(request.Messages))
-		messages = append(messages, request.Messages...)
-		if response, found := responses[call.ID]; found && len(response.Response.Blocks) > 0 {
-			message := protocol.Message{Role: protocol.RoleAssistant, Blocks: response.Response.Blocks}
-			if total+len(protocol.Marshal(message)) > maximumHistoryBytes {
-				return messages, true, nil
+		total += len(protocol.Marshal(request.Items))
+		items = append(items, request.Items...)
+		if response, found := responses[call.ID]; found && len(response.Response.Items) > 0 {
+			if total+len(protocol.Marshal(response.Response.Items)) > maximumHistoryBytes {
+				return items, true, nil
 			}
-			total += len(protocol.Marshal(message))
-			messages = append(messages, message)
+			total += len(protocol.Marshal(response.Response.Items))
+			items = append(items, response.Response.Items...)
 		}
 	}
-	return messages, truncated, nil
+	return items, truncated, nil
 }
 
 // attachHistory expands previous_response_id into the stored conversation so the upstream receives
 // one self-contained request. It returns the parent call.
-func (pipeline *Pipeline) attachHistory(ctx context.Context, agentKeyID string, request *protocol.Request) (*entity.Call, *protocol.Error) {
+func (pipeline *Pipeline) attachHistory(ctx context.Context, agentKeyID string, request *protocol.Request) (*entity.Call, int, *protocol.Error) {
 	parent, err := pipeline.repository.CallByResponseID(ctx, agentKeyID, request.PreviousResponseID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, failure("invalid_request", protocol.ClassInvalid, "previous_response_not_found", "The previous response is unknown or has expired.", 404)
+			return nil, 0, failure("invalid_request", protocol.ClassInvalid, "previous_response_not_found", "The previous response is unknown or has expired.", 404)
 		}
-		return nil, internal("store_failure", "The previous response could not be loaded.")
+		return nil, 0, internal("store_failure", "The previous response could not be loaded.")
 	}
 	history, truncated, err := pipeline.transcript(ctx, parent.ID)
 	if err != nil || truncated {
 		if errors.Is(err, repository.ErrNotFound) || truncated {
-			return nil, failure("invalid_request", protocol.ClassInvalid, "previous_response_not_found", "Part of the previous conversation is unavailable.", 404)
+			return nil, 0, failure("invalid_request", protocol.ClassInvalid, "previous_response_not_found", "Part of the previous conversation is unavailable.", 404)
 		}
 		pipeline.logger.Error("previous response could not be read", "error", err)
-		return nil, internal("store_failure", "The previous response could not be loaded.")
+		return nil, 0, internal("store_failure", "The previous response could not be loaded.")
 	}
-	request.Messages = append(history, request.Messages...)
-	return parent, nil
+	offset := len(history)
+	if !protocol.RepeatsPrefix(request.Items, history) {
+		request.Items = append(history, request.Items...)
+	}
+	for index := range request.Items {
+		request.Items[index].Ordinal = index
+	}
+	if settings, ok := pipeline.parentSettings(ctx, parent.ID); ok {
+		if len(request.Tools) == 0 {
+			request.Tools = settings.Tools
+		}
+		if request.Instructions == "" {
+			request.Instructions = settings.Params.Instructions
+		}
+	}
+	return parent, offset, nil
+}
+
+// parentSettings returns the effective tools and instructions of a stored call. A continuation that
+// names a previous response but repeats only the new input still needs the tools and system prompt
+// the earlier turn used.
+func (pipeline *Pipeline) parentSettings(ctx context.Context, callID string) (auditevent.Request, bool) {
+	events, err := pipeline.repository.EventsOfKinds(ctx, []string{callID}, auditevent.KindRequest)
+	if err != nil || len(events) == 0 {
+		return auditevent.Request{}, false
+	}
+	var record auditevent.Request
+	if err := json.Unmarshal(events[len(events)-1].Payload, &record); err != nil {
+		return auditevent.Request{}, false
+	}
+	return record, true
 }
 
 // link finds the call this one continues when the client repeats its history: first by the id of
 // the latest tool result, then by the fingerprint of the history the client repeated. The returned
-// offset is the number of leading messages the parent conversation already holds; only a verified
+// offset is the number of leading items the parent conversation already holds; only a verified
 // prefix is returned, so recording the tail never drops what the client sent.
 func (pipeline *Pipeline) link(ctx context.Context, identity *Identity, request *protocol.Request) (*entity.Call, int) {
 	if id := latestToolResult(request); id != "" {
 		if found, err := pipeline.repository.CallByToolCall(ctx, identity.Project.ID, identity.AgentKey.ID, id); err == nil {
-			if history, truncated, err := pipeline.transcript(ctx, found.ID); err == nil && !truncated && protocol.RepeatsPrefix(request.Messages, history) {
+			if history, truncated, err := pipeline.transcript(ctx, found.ID); err == nil && !truncated && protocol.RepeatsPrefix(request.Items, history) {
 				return found, len(history)
 			}
 		}
 	}
-	if prefix := protocol.HistoryPrefix(pipeline.secret, request.Messages); prefix != "" {
+	if prefix := protocol.HistoryPrefix(pipeline.secret, request.Items); prefix != "" {
 		if found, err := pipeline.repository.CallByConversationHash(ctx, identity.AgentKey.ID, prefix); err == nil {
-			// The hash is a projection and can ignore blocks, so the projected match alone is
-			// not enough. Verify the full transcript before choosing the offset; otherwise a
-			// reasoning-only assistant turn would be cut from the stored request.
-			if history, truncated, err := pipeline.transcript(ctx, found.ID); err == nil && !truncated && protocol.RepeatsPrefix(request.Messages, history) {
+			if history, truncated, err := pipeline.transcript(ctx, found.ID); err == nil && !truncated && protocol.RepeatsPrefix(request.Items, history) {
 				return found, len(history)
 			}
 		}
@@ -134,12 +145,10 @@ func (pipeline *Pipeline) link(ctx context.Context, identity *Identity, request 
 }
 
 func latestToolResult(request *protocol.Request) string {
-	for index := len(request.Messages) - 1; index >= 0; index-- {
-		blocks := request.Messages[index].Blocks
-		for position := len(blocks) - 1; position >= 0; position-- {
-			if blocks[position].Kind == protocol.KindToolResult && blocks[position].ToolResult != nil {
-				return blocks[position].ToolResult.CallID
-			}
+	for index := len(request.Items) - 1; index >= 0; index-- {
+		item := &request.Items[index]
+		if item.Kind == protocol.ItemToolResult && item.CallID != "" {
+			return item.CallID
 		}
 	}
 	return ""

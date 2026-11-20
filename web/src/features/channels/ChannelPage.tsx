@@ -25,6 +25,8 @@ function channelInput(channel: ConsoleChannelView): ConsoleUpdateChannelInput {
     endpoint: channel.endpoint ?? '',
     count_tokens_endpoint: channel.count_tokens_endpoint,
     currency: channel.currency,
+    forward_headers: channel.forward_headers,
+    default_max_output_tokens: channel.default_max_output_tokens,
     timeout_seconds: channel.timeout_seconds,
     first_byte_timeout_seconds: channel.first_byte_timeout_seconds,
     allow_private_network: channel.allow_private_network,

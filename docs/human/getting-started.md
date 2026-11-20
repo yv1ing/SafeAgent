@@ -125,7 +125,7 @@ With `secure_cookies = true`, the console requires HTTPS. Serve it through a rev
 | The console returns 404 | The frontend is not built. Run `make build`. |
 | Sign-in works but a reload signs the session out | The deployment uses HTTP with `secure_cookies = true`. Use HTTPS, or set it to false on loopback. |
 | Console writes fail behind a proxy | Set `public_origin` to the origin users open in the browser. |
-| An agent call returns 403 and is recorded as blocked | A blocking redaction rule, a policy rule or the decision model blocked it. The call record names the source; asynchronous analysis still runs. |
+| A request returns 403, or a stream ends with a tool-call error | A blocking redaction rule, a policy rule or the decision model blocked it. A request-phase block uses HTTP 403; a tool call held after the stream started ends with a protocol-native error. The call record names the source; asynchronous analysis still runs. |
 
 ## Related
 

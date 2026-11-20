@@ -80,6 +80,9 @@ func TestVerdictDistinguishesMediumAndIncomplete(t *testing.T) {
 	if verdict := analysis.DeriveVerdict(nil, analysis.Coverage{Complete: true}, model, analysis.ModelOK); verdict.Value != analysis.VerdictUnsafe {
 		t.Fatalf("a confident unsafe model answer is unsafe: %+v", verdict)
 	}
+	if verdict := analysis.DeriveVerdict(nil, analysis.Coverage{Complete: false}, model, analysis.ModelOK); verdict.Value != analysis.VerdictUnknown {
+		t.Fatalf("a model answer cannot override incomplete coverage: %+v", verdict)
+	}
 	uncertain := &analysis.ModelLabels{Probability: 0.5, Confidence: 0.8}
 	if verdict := analysis.DeriveVerdict(nil, analysis.Coverage{Complete: true}, uncertain, analysis.ModelOK); verdict.Value != analysis.VerdictUnknown {
 		t.Fatalf("an uncertain model answer is unknown: %+v", verdict)

@@ -4,79 +4,104 @@ type EventKind string
 
 const (
 	EventMessageStart EventKind = "message_start"
-	EventBlockStart   EventKind = "block_start"
-	EventBlockDelta   EventKind = "block_delta"
-	EventBlockStop    EventKind = "block_stop"
+	EventItemStart    EventKind = "item_start"
+	EventPartStart    EventKind = "part_start"
+	EventPartDelta    EventKind = "part_delta"
+	EventPartStop     EventKind = "part_stop"
+	EventItemStop     EventKind = "item_stop"
 	EventMessageDelta EventKind = "message_delta"
 	EventMessageStop  EventKind = "message_stop"
+	EventError        EventKind = "error"
+	EventPing         EventKind = "ping"
 )
 
-// Event is one step of a canonical response stream. A block's streamed content (StreamedContent)
-// travels only in EventBlockDelta: EventBlockStart carries the block without it, and the snapshot
-// on EventBlockStop carries exactly the concatenated deltas. A block's events are self-contained:
-// encoders emit frames for a block only while handling that block's events, so a caller may hold a
-// block's frames back and release them as one group.
+// Event is one step of a canonical response stream. Items and parts open and close independently so
+// a decoder can report concurrent tool calls or interleaved reasoning. A part's streamed content
+// travels only in EventPartDelta: EventPartStart carries the part without it and the snapshot on
+// EventPartStop carries exactly the concatenated deltas. An item's event sequence is self-contained
+// so an encoder may hold one item back and release it as a group.
 type Event struct {
-	Kind    EventKind     `json:"kind"`
-	Index   int           `json:"index"`
-	Block   *Block        `json:"block,omitempty"`
-	Text    string        `json:"text,omitempty"`
-	Meta    *ResponseMeta `json:"meta,omitempty"`
-	Usage   *Usage        `json:"usage,omitempty"`
-	Finish  FinishReason  `json:"finish,omitempty"`
-	Failure *Error        `json:"failure,omitempty"`
-	// Stop carries the matched stop sequence when the provider reports one.
-	Stop string `json:"stop,omitempty"`
-	// Losses reports what the decoder had to approximate; it is set on EventMessageDelta.
-	Losses []Loss `json:"losses,omitempty"`
+	Kind      EventKind     `json:"kind"`
+	Sequence  int64         `json:"sequence,omitempty"`
+	ItemID    string        `json:"item_id,omitempty"`
+	ItemIndex int           `json:"item_index"`
+	PartID    string        `json:"part_id,omitempty"`
+	PartIndex int           `json:"part_index"`
+	Item      *Item         `json:"item,omitempty"`
+	Part      *Part         `json:"part,omitempty"`
+	Delta     string        `json:"delta,omitempty"`
+	Meta      *ResponseMeta `json:"meta,omitempty"`
+	Usage     *Usage        `json:"usage,omitempty"`
+	Finish    *Finish       `json:"finish,omitempty"`
+	Failure   *Error        `json:"failure,omitempty"`
+	Losses    []Loss        `json:"losses,omitempty"`
 }
 
-func streams(block Block) bool {
-	switch block.Kind {
-	case KindText, KindReasoning, KindRefusal:
-		return true
-	case KindToolCall:
-		return block.ToolCall != nil
+func (event Event) IsContent() bool {
+	switch event.Kind {
+	case EventPartDelta:
+		return event.Delta != ""
+	case EventItemStart:
+		return event.Item != nil && event.Item.Kind.IsTool()
 	}
 	return false
 }
 
-// StreamedContent is the part of a block that a stream delivers incrementally: the text of text,
-// reasoning and refusal blocks, or the arguments of a tool call.
-func StreamedContent(block Block) string {
-	if !streams(block) {
-		return ""
+// StreamedContent is the part of a part that a stream delivers incrementally.
+func StreamedContent(part Part) string {
+	switch part.Kind {
+	case PartText, PartRefusal, PartReasoningText, PartReasoningSummary, PartToolArguments:
+		return part.Text
 	}
-	if block.Kind == KindToolCall {
-		return block.ToolCall.Arguments
-	}
-	return block.Text
+	return ""
 }
 
-// WithStreamedContent returns a copy of block whose streamed content is content.
-func WithStreamedContent(block Block, content string) Block {
-	clone := CloneBlock(block)
-	if !streams(clone) {
-		return clone
-	}
-	if clone.Kind == KindToolCall {
-		clone.ToolCall.Arguments = content
-	} else {
+// WithStreamedContent returns a copy of part whose streamed content is content.
+func WithStreamedContent(part Part, content string) Part {
+	clone := part.Clone()
+	switch clone.Kind {
+	case PartText, PartRefusal, PartReasoningText, PartReasoningSummary, PartToolArguments:
 		clone.Text = content
 	}
 	return clone
 }
 
-// MergeBlock overlays the final snapshot of a block onto its streamed state.
-func MergeBlock(target *Block, final Block) {
-	if final.Text != "" {
-		target.Text = final.Text
-	}
+// MergePart overlays the final snapshot of a part onto its streamed state. Unmodelled fields of
+// the snapshot win so a provider's closing frame can add citations or cache metadata.
+func MergePart(target *Part, final Part) {
 	if final.Kind != "" {
 		target.Kind = final.Kind
 	}
-	if final.Reasoning != nil {
-		target.Reasoning = final.Reasoning
+	if final.Text != "" {
+		target.Text = final.Text
+	}
+	if final.Media != nil {
+		target.Media = final.Media
+	}
+	if len(final.Citations) > 0 {
+		target.Citations = final.Citations
+	}
+	if final.CacheControl != nil {
+		target.CacheControl = final.CacheControl
+	}
+	if len(final.Native) > 0 {
+		target.Native = final.Native
+	}
+	if final.Raw != nil {
+		target.Raw = final.Raw
+	}
+}
+
+// MergeItem overlays the final snapshot of an item onto its streamed state.
+func MergeItem(target *Item, final Item) {
+	if final.Kind != "" {
+		target.Kind = final.Kind
+	}
+	if final.Role != "" {
+		target.Role = final.Role
+	}
+	if final.Status != "" {
+		target.Status = final.Status
 	}
 	if final.ToolCall != nil {
 		if target.ToolCall == nil {
@@ -99,19 +124,26 @@ func MergeBlock(target *Block, final Block) {
 			}
 		}
 	}
-	if final.ToolResult != nil {
-		target.ToolResult = final.ToolResult
+	if final.CallID != "" {
+		target.CallID = final.CallID
 	}
-	if final.Media != nil {
-		target.Media = final.Media
+	if final.Name != "" {
+		target.Name = final.Name
+	}
+	target.IsError = target.IsError || final.IsError
+	if final.Reasoning != nil {
+		target.Reasoning = final.Reasoning
 	}
 	if final.CacheControl != nil {
 		target.CacheControl = final.CacheControl
 	}
-	if len(final.Citations) > 0 {
-		target.Citations = final.Citations
+	if len(final.Native) > 0 {
+		target.Native = final.Native
 	}
-	if len(final.Extras.Fields) > 0 {
-		target.Extras = final.Extras
+	if len(final.Parts) > 0 {
+		target.Parts = final.Parts
+	}
+	if final.Raw != nil {
+		target.Raw = final.Raw
 	}
 }

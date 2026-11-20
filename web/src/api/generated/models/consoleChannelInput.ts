@@ -12,10 +12,13 @@ export interface ConsoleChannelInput {
   allow_private_network?: boolean;
   count_tokens_endpoint?: string;
   currency?: string;
+  /** Applied to an Anthropic Messages upstream when the client omits a limit */
+  default_max_output_tokens?: number;
   enabled?: boolean;
   endpoint: string;
   first_byte_timeout_seconds?: number;
   format: string;
+  forward_headers?: string[];
   headers?: ConsoleChannelInputHeaders;
   models?: ConsoleChannelModelView[];
   name: string;

@@ -1,206 +1,212 @@
 # Acceptance lab
 
-`testenv/` is a disposable environment for changes that need a real provider, real agent CLIs and a browser. It is not part of the product deployment. PostgreSQL, four agent CLIs and the headless browser run in Docker; the gateway runs on the host so a backend or console change can be rebuilt without an image build.
+`testenv/` is a disposable environment for changes that need a real provider, real agent CLIs and a browser. It is not part of the product deployment. PostgreSQL, four agent CLIs and the headless browser run in Docker; the gateway runs on the host so a backend or console change can be rebuilt without an image build. A local fault upstream covers failures that a real provider cannot produce on demand.
 
-The lab has two acceptance tracks. The functional track checks protocol conversion, agent compatibility, enforcement, diagnosis and console behavior. The performance track compares the gateway with a direct provider baseline under the same bounded workload. Both tracks use a real provider key supplied by the operator.
+The lab has two tracks. The functional track checks protocol conversion, agent compatibility, enforcement, diagnosis, security and console behavior. The performance track is a short relative smoke, not a capacity measurement. Protocol, agent, policy and analysis runs use the configured providers; the fault suite uses a local deterministic upstream, and the browser suite exercises the console without calling a model.
 
 ## Topology
 
-| Component                          | Runs in            | Address                     |
-| ---------------------------------- | ------------------ | --------------------------- |
-| Gateway and console                | host               | `0.0.0.0:8080`              |
-| PostgreSQL 17                      | `database` service | `127.0.0.1:55432`           |
-| Claude Code, Codex, Gemini CLI, Pi | `agents` image     | `host.docker.internal:8080` |
-| Playwright and Chromium            | `browser` image    | `host.docker.internal:8080` |
+| Component                          | Runs in                   | Address                     |
+| ---------------------------------- | ------------------------- | --------------------------- |
+| Gateway and console                | host                      | `0.0.0.0:8080`              |
+| PostgreSQL 17                      | `database` service        | `127.0.0.1:55432`           |
+| Claude Code, Codex, Gemini CLI, Pi | `agents` image            | `host.docker.internal:8080` |
+| Playwright and Chromium            | `browser` image           | `host.docker.internal:8080` |
+| Fault upstream                     | host, during `lab-faults` | `127.0.0.1:18080`           |
 
-The containers join the `safeagent-testenv_lab` network. Only the database port is published; the agent and browser containers reach the gateway through the Docker host gateway. The lab creates its channels with `allow_private_network=true` because Docker's embedded DNS resolves external names to its fake-IP range, which the gateway otherwise rejects. That exception belongs to the lab only.
+The containers join the `safeagent-testenv_lab` network. Only the database port is published; the agent and browser containers reach the gateway through the Docker host gateway. Lab channels use `allow_private_network=true` because Docker's embedded DNS resolves external names to its fake-IP range, which the gateway otherwise rejects. That exception belongs to the lab only.
 
 ## Environment contract
 
-The setup and load scripts read `testenv/.env` when it exists; the same keys can come from the process environment. The file is ignored and must not be committed.
+The setup and suite scripts read `testenv/.env` when it exists; the same keys can come from the process environment. The file is ignored and must not be committed.
 
-| Key | Required | Meaning |
-| --- | --- | --- |
-| `SAFEAGENT_UPSTREAM_KEY` | yes | provider key used by the three lab channels and the direct performance baseline |
-| `SAFEAGENT_UPSTREAM_MODEL` | yes | upstream model name; also prefixes the three lab route names |
-| `SAFEAGENT_UPSTREAM_CHAT_URL` | yes | Chat Completions endpoint |
-| `SAFEAGENT_UPSTREAM_RESPONSES_URL` | yes | Responses endpoint |
-| `SAFEAGENT_UPSTREAM_MESSAGES_URL` | yes | Anthropic Messages endpoint |
-| `SAFEAGENT_ADMIN_PASSWORD` | no | initial administrator password; generated when empty |
+### Provider formats
 
-The provider must expose all three wire formats under the same account and model. The lab does not assume a vendor or fill in endpoints. The setup script reads the three URLs once and stores them in the lab channels; changing an endpoint later requires recreating the lab with `FRESH=1 make lab-setup`. It also writes `runtime/pi-models.json` from the upstream model, so a different model does not require an image rebuild.
+Each format is enabled independently when its URL, key and model are present.
 
-`make lab-setup` writes generated state to `testenv/runtime`:
+| Key                                   | Meaning                                              |
+| ------------------------------------- | ---------------------------------------------------- |
+| `SAFEAGENT_UPSTREAM_CHAT_URL`         | Chat Completions endpoint                            |
+| `SAFEAGENT_UPSTREAM_CHAT_KEY`         | Chat key; falls back to `SAFEAGENT_UPSTREAM_KEY`     |
+| `SAFEAGENT_UPSTREAM_CHAT_MODEL`       | Chat model; falls back to `SAFEAGENT_UPSTREAM_MODEL` |
+| `SAFEAGENT_UPSTREAM_CHAT_VENDOR`      | vendor, default `openai`                             |
+| `SAFEAGENT_UPSTREAM_RESPONSES_URL`    | Responses endpoint                                   |
+| `SAFEAGENT_UPSTREAM_RESPONSES_KEY`    | Responses key; falls back to the shared key          |
+| `SAFEAGENT_UPSTREAM_RESPONSES_MODEL`  | Responses model; falls back to the shared model      |
+| `SAFEAGENT_UPSTREAM_RESPONSES_VENDOR` | vendor, default `openai`                             |
+| `SAFEAGENT_UPSTREAM_MESSAGES_URL`     | Anthropic Messages endpoint                          |
+| `SAFEAGENT_UPSTREAM_MESSAGES_KEY`     | Messages key; falls back to the shared key           |
+| `SAFEAGENT_UPSTREAM_MESSAGES_MODEL`   | Messages model; falls back to the shared model       |
+| `SAFEAGENT_UPSTREAM_MESSAGES_VENDOR`  | vendor, default `anthropic`                          |
+| `SAFEAGENT_UPSTREAM_GEMINI_URL`       | Gemini endpoint or base URL                          |
+| `SAFEAGENT_UPSTREAM_GEMINI_KEY`       | Gemini key; falls back to the shared key             |
+| `SAFEAGENT_UPSTREAM_GEMINI_MODEL`     | Gemini model; falls back to the shared model         |
+| `SAFEAGENT_UPSTREAM_GEMINI_VENDOR`    | vendor, default `google`                             |
 
-| Path                     | Contents                                                         |
-| ------------------------ | ---------------------------------------------------------------- |
-| `runtime/env`            | base URL, public model names, agent keys, administrator password |
-| `runtime/state.json`     | the same values plus project and channel ids                     |
-| `runtime/config.toml`    | generated gateway configuration                                  |
-| `runtime/pi-models.json` | Pi provider and model list generated from the upstream model     |
-| `runtime/gateway.log`    | gateway stdout and stderr                                        |
-| `runtime/cookies.txt`    | administrator session used by setup                              |
-| `runtime/workspace/`     | agent workspaces and their `answer.txt` files                    |
-| `runtime/logs/`          | one log per agent and route                                      |
-| `runtime/screenshots/`   | browser screenshots and `report.json`                            |
-| `runtime/load/`          | performance reports and the compiled load generator              |
+The shared values `SAFEAGENT_UPSTREAM_KEY`, `SAFEAGENT_UPSTREAM_MODEL` and `SAFEAGENT_UPSTREAM_VENDOR` are optional fallbacks for those three fields only. A URL, extra headers, count-tokens URL and default limit are always per format. Different providers per format are supported.
 
-The script prints only masked keys. `testenv/.env` and `testenv/runtime` are ignored.
+### Optional channel settings
+
+| Key | Meaning |
+| --- | --- |
+| `SAFEAGENT_UPSTREAM_<FORMAT>_HEADERS_JSON` | JSON object of static upstream headers |
+| `SAFEAGENT_UPSTREAM_<FORMAT>_COUNT_TOKENS_URL` | Messages count-tokens endpoint |
+| `SAFEAGENT_UPSTREAM_<FORMAT>_DEFAULT_MAX_OUTPUT_TOKENS` | channel default output limit |
+| `SAFEAGENT_ADMIN_PASSWORD` | initial administrator password; generated when empty |
+
+The URLs accept `{model}` and the gateway substitutes the upstream model. A Gemini URL without a model path is a base URL; the gateway appends the model and the streaming or plain action.
+
+### Available formats and routes
+
+Setup creates one channel named `Lab <format>` and one route named `lab-<format>` for each enabled format. It also creates six agent keys and the agent workspaces. The route names are stable and independent of the upstream model, so a model name containing `/` or `:` does not break agent CLI arguments.
+
+The protocol matrix, policy, analysis and agent suites size themselves from `SAFEAGENT_AVAILABLE_FORMATS`. If you do not configure a Gemini upstream, Gemini remains a client format; the Gemini channel path is covered by unit tests but not by a real provider. The matrix report records skipped combinations rather than claiming them.
+
+### Generated files
+
+| Path | Contents |
+| --- | --- |
+| `runtime/env` | base URL, project, available formats, public route names (`SAFEAGENT_<FORMAT>_ROUTE`), agent keys, administrator password, lab uid/gid |
+| `runtime/state.json` | the same values plus channel ids, formats and upstream models |
+| `runtime/config.toml` | generated gateway configuration |
+| `runtime/pi-models.json` | Pi provider and the available public routes |
+| `runtime/gateway.log` | gateway stdout and stderr |
+| `runtime/acceptance/` | one-command log and the protocol report |
+| `runtime/logs/` | agent logs, answer files and the resolved CLI versions |
+| `runtime/screenshots/` | browser screenshots and `report.json` |
+| `runtime/load/` | performance reports and the compiled load generator |
+
+`testenv/.env` and `testenv/runtime` are ignored.
 
 ## Lifecycle
 
 ```sh
-cp testenv/env.example testenv/.env   # fill the key, model and three endpoints
+cp testenv/env.example testenv/.env   # fill the formats you can reach
 make lab-setup
-# functional suites
-make lab-down                         # or PURGE=1 make lab-down
+make lab-acceptance                   # or run individual suites
+make lab-down
 ```
 
-`make lab-setup` starts PostgreSQL, builds the console and the embedded gateway, starts the gateway on the host, and creates the `Protocol Lab` project, three channels, three model routes, five agent keys and the agent workspaces. The project has no request, concurrency or token limit, so functional and performance runs measure the gateway rather than quota enforcement; the repository integration tests cover quotas. The initial administrator password is changed at the end of setup.
+`make lab-setup` starts PostgreSQL, builds the console and the embedded gateway, starts the gateway on the host, and creates the project, channels, routes, agent keys and workspaces. The project has no request or token quota, so the protocol and agent suites measure conversion rather than limits; the security suite creates separate limited projects.
 
-`FRESH=1 make lab-setup` first removes the container and its volume, then recreates the schema and all lab accounts. Use it after a schema change or when the setup script reports that an administrator already exists. A schema change requires a fresh lab because the product has no migration path. Changing the agent image requires a rebuild: run `PURGE=1 make lab-down` before the next setup, or build the agent services with Compose.
+`FRESH=1 make lab-setup` removes the database volume before recreating the schema and all lab accounts. Use it after a schema change or when setup reports that an administrator already exists. The product has no migration path.
 
-`make lab-restart` is the normal loop while working on the gateway or the console. The lab gateway uses its generated configuration, not `config.toml`.
+`make lab-restart` rebuilds the console and binary and restarts the gateway. `SKIP_WEB=1 make lab-restart` reuses `web/dist` when only Go code changed.
 
-## Functional acceptance
+`make lab-acceptance` runs every suite in order. It stops at the first failure and leaves the lab running; on success it calls `make lab-down`, which removes `runtime` and the evidence. `KEEP_LAB=1 make lab-acceptance` keeps the lab after a successful run.
 
-### Preconditions
+## Agent CLIs
 
-- The lab was created from the current build with `FRESH=1 make lab-setup`.
-- No other suite is running; the suites mutate policy and create calls that later suites inspect.
-- The provider key is valid for all three endpoints and the provider is not rate limiting the account.
-- The host is idle enough that the browser suite does not time out. Performance numbers are taken separately.
+The agents image installs the latest npm release of Claude Code, Codex, Gemini CLI and Pi at build time. The exact resolved versions are written to `runtime/logs/agent-versions.txt` and are included in the delivery evidence. Rebuild the image to pick up a newer release; the next agent run builds it on demand:
 
-### Order and criteria
+```sh
+PURGE=1 make lab-down
+make lab-setup
+```
 
-Run the suites in the order below. The policy suite leaves blocked calls that the browser suite checks, and the agent suite leaves multi-call conversations that the browser suite walks.
+Claude Code speaks Anthropic Messages, Codex speaks Responses, Gemini CLI speaks Gemini and Pi speaks Chat Completions. Each CLI runs against every configured route, so each client protocol is exercised against every real channel protocol. Each run must read `hello.txt`, use its file tools and write `answer.txt` with the expected line. A CLI that exits successfully without writing the file fails. The native route for each CLI also runs a two-file task that requires more than one tool step; a native route that is not configured is reported as skipped.
+
+Gemini CLI is configured with `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_GENAI_API_VERSION=v1beta`, `GEMINI_CLI_TRUST_WORKSPACE=true` and a gateway auth block in `config/gemini-settings.json`. The gateway receives the key through the Gemini API-key path. The approval mode is `yolo` because the container is disposable and only the workspace is mounted.
+
+## Functional suites
+
+Run the suites in order. The policy suite leaves blocked calls that the browser suite checks, and the agent suite leaves multi-call conversations that the browser suite walks. The fault and security suites remove the temporary projects they create; the security suite leaves its test user disabled because users are disabled rather than deleted.
 
 | Step | Command | Coverage | Pass criterion | Evidence |
 | --- | --- | --- | --- | --- |
 | 1 | `make verify` | formatting, vet, typecheck, generated contract, Go race tests, frontend tests | exit 0 | terminal output |
 | 2 | `make lab-integration` | repository transactions, cascades, quotas, retention, idempotency | exit 0 | `go test` output |
-| 3 | `make lab-protocol` | 3 client formats × 3 channel formats × 2 stream modes × 5 cases | `90 passed, 0 failed` | terminal output; `runtime/logs` |
-| 4 | `make lab-agents` | Claude Code, Codex, Gemini CLI and Pi against each of the three routes | `12/12 PASS` | `runtime/logs/*.log`, `runtime/workspace/*/answer.txt` |
-| 5 | `make lab-policy` | request blocking, tool-call blocking and rollback to the empty policy | `3/3 PASS` | terminal output |
-| 6 | `make lab-analysis` | asynchronous diagnosis, finding codes, coverage, verdict and redaction | `PASS` | `runtime/analysis-response.json` |
-| 7 | `make lab-browser` | 16 console pages at desktop and mobile widths, plus primary interactions | exit 0, `report.json` has no failures | `runtime/screenshots` |
+| 3 | `make lab-protocol` | four client formats × configured channel formats × stream/JSON × core cases, plus enabled extensions | no failures; skips are listed with a reason | `runtime/acceptance/matrix.json` |
+| 4 | `make lab-agents` | four CLIs × configured routes, plus one native multi-step task per CLI | every run writes the expected answer | `runtime/logs/*.log`, `runtime/logs/*.answer`, `agent-versions.txt` |
+| 5 | `make lab-policy` | request and tool-call blocks through every client and route | request blocks return 403; a blocked tool call returns 200 with a protocol-native error after the stream has started; policy restored to empty | terminal output, `runtime/policy/*.json` |
+| 6 | `make lab-analysis` | injection, exfiltration, coverage and redaction hits through every client and route | every call completes with both findings, complete coverage, `unsafe` and a redaction hit | `runtime/analysis-response-*.json` |
+| 7 | `make lab-security` | invalid keys, cross-project isolation, rate and token limits, member/admin permissions, raw-event access | every check passes | terminal output |
+| 8 | `make lab-faults` | failover before content, truncated stream, held tool call, header forwarding, route output limit, multi-choice/state rejection | every check passes | terminal output |
+| 9 | `make lab-browser` | all pages at desktop and mobile widths, plus desktop create, edit, delete, revoke or disable flows for projects, channels, routes, keys, policy, redaction rules, users and members | exit 0, `report.json` has no failures | `runtime/screenshots` |
+| 10 | `make lab-load` | native routes and cross-format sample | every native comparison and cross-format sample passes | `runtime/load/<timestamp>` |
 
-`make verify` is the contract and unit gate. It does not start the lab and does not require a provider. `make lab-integration` uses a second database, `safeagent_integration`, on the lab PostgreSQL instance; each integration test drops and recreates its public schema, so it must not point at the gateway database.
+### Protocol matrix
 
-### Suite mechanics
+The matrix sends plain text, one tool call, parallel tool calls, a tool-result continuation and reversible redaction through every client and configured route, in streaming and JSON mode. Rejection cases cover Chat `n>1`, Gemini `candidateCount>1` and Responses provider state; Messages has no defined rejection case and is recorded as skipped. With three configured routes the matrix has 144 core slots; four routes have 192. Every slot is reported even when it is skipped.
 
-`make lab-protocol` sends each case through every client protocol to every channel protocol. The cases are plain text, one tool call, parallel tool calls, a tool-result continuation that replays reasoning, and reversible redaction. A case passes only when the response is protocol-valid, the expected content or tool call survives conversion, and a stream ends with its terminal event. The matrix makes up to three attempts per case because the upstream model chooses tools nondeterministically; a case that fails all attempts is a defect.
+Optional cases are enabled by environment variables:
 
-`make lab-agents` runs each CLI through every route. Claude Code speaks Anthropic Messages, Codex speaks Responses, Pi speaks Chat Completions, and Gemini CLI speaks the Gemini protocol. Each CLI uses its own provider configuration and receives the route name as its model, so the same three public routes exercise every client protocol against every channel protocol. Each run must read `hello.txt`, use its file tools and write `answer.txt` with the expected line. A CLI that exits successfully without writing the file fails.
+| Variable | Default | Case |
+| --- | --- | --- |
+| `SAFEAGENT_TEST_REASONING` | `1` | reasoning summary and visible result; skipped when the model returns no reasoning |
+| `SAFEAGENT_TEST_MEDIA` | `1` | inline image input; skipped when the channel does not support it |
+| `SAFEAGENT_TEST_STRUCTURED` | `1` | JSON output; skipped when the channel does not support the requested format |
+| `SAFEAGENT_TEST_SERVER_TOOLS` | `1` | provider-executed search; skipped when the channel does not support it |
 
-Gemini CLI is pinned to `@google/gemini-cli@0.70.0`. The lab sets `GEMINI_API_KEY` to the Gemini agent key, points `GOOGLE_GEMINI_BASE_URL` at `host.docker.internal:8080`, and sets `GOOGLE_GENAI_API_VERSION=v1beta`. The CLI identifies itself as the gateway auth type when a base URL is present, so the key arrives at the gateway through the Gemini API-key path. `GEMINI_CLI_TRUST_WORKSPACE=true` avoids the folder-trust prompt, and `config/gemini-settings.json` selects the `gateway` auth type with external auth, disables auto-update and disables telemetry. External auth is required because this release validates only the built-in Google methods; the gateway method skips that validation and uses the API key against the configured base URL. The approval mode is `yolo` because the container is disposable and only the workspace volume is mounted.
+A skipped case is not a pass. It appears in `matrix.json` with the HTTP status or capability reason. The redaction case also queries the console and fails unless the call records a positive redaction count, so a client echo alone cannot prove the rule ran.
 
-`make lab-policy` saves a request-phase blocking rule and a tool-call-phase blocking rule through the console API. It expects HTTP 403 with the matching error code for each, then restores the empty policy and verifies that no rules remain. The browser suite depends on the blocked calls this step leaves behind.
+Text, redaction and rejection cases get one attempt; media gets one. Tool, parallel and continuation cases get up to three attempts because the model chooses tools nondeterministically. Reasoning, structured-output and server-tool cases get two. `matrix.json` records the attempts for every case and lists each skip with its reason.
 
-`make lab-analysis` first verifies that the active policy is empty, then sends a prompt that contains an injection phrase, an e-mail address and an exfiltration URL. It polls the console until the call has a completed analysis, then checks four things: the call records at least one redaction hit, the analysis covers the whole trajectory, the findings include `prompt_injection` and `exfiltration_link`, and the verdict is `unsafe`. This is the functional check that diagnosis is reading stored events, running detectors and producing evidence rather than only recording online decisions.
+### Enforcement and diagnosis
 
-`make lab-browser` starts the Chromium image, signs in, visits every page, opens the call tabs, the conversation tree and a blocked call, switches language and theme, and checks the mobile menu. It fails on a page error, a failed API request, a horizontal overflow greater than 2 pixels, a missing heading or an empty page. Screenshots and `report.json` are written to `runtime/screenshots`.
+The policy suite saves a request-phase rule that matches injection findings and a tool-phase rule that matches `get_weather`, then sends a request through every client format and configured route. The tool request asks the model to call `get_weather`; it does not force `tool_choice`, because some providers reject a forced tool while thinking is enabled. A request-phase block returns HTTP 403 with a protocol-shaped error. A tool-phase block happens after the SSE response has started, so it returns HTTP 200 and ends the stream with a protocol-native error frame. The suite restores the empty policy at the end.
 
-### Acceptance rule
+The analysis suite sends an injection phrase, an e-mail address and an exfiltration URL through every client format and route, waits for the asynchronous analysis, and checks that the call has a redaction hit, both findings, complete coverage and an `unsafe` verdict. This proves the stored events, observation adapter, detectors and redaction work together. The protocol matrix separately checks that the client receives the original value back, so the two suites together cover both directions of redaction.
 
-Functional acceptance passes only when every row succeeds on the same fresh lab. A failure is not waived because the failing assertion looks unrelated to the change. Record the failing command, the report path and the first relevant error in the delivery evidence; fix the cause or, when the environment is at fault, rebuild the lab and run the full sequence again.
+### Security
 
-## Performance acceptance
+The security suite uses separate projects so it does not disturb the main audit trail, then deletes those projects and removes its temporary member and rate-limited key. It checks invalid keys for every client protocol, a key cannot use another project's route, a one-request-per-minute key is limited on the second call, a one-token daily quota is rejected before the upstream, a non-member cannot read project calls, a member can read them, members cannot manage channels or the global log, administrators see raw values while members see the redacted view, and raw access is written to the operation log.
 
-### Model
+### Faults
 
-The performance suite compares the complete gateway path with a direct provider request. The direct baseline is the same model, prompt, temperature, token cap and concurrency sent straight to the provider. The gateway run uses the same workload through a model route. The difference is the gateway's decoding, redaction, observation, policy, audit write and streaming overhead, plus any queueing it causes.
+The local fault upstream starts only for this suite and serves deterministic Chat and Messages streams. The suite checks:
 
-The provider is real, so absolute throughput is provider-bound and varies with region, time of day and account limits. The gate is therefore relative: it asks whether the gateway adds material latency or loses a material share of throughput. Absolute numbers are recorded for trend analysis but are not a capacity claim.
+- a 500 on the first candidate fails over to the second before any content;
+- a partial stream with incomplete tool arguments is reported as failed, records one attempt and is not retried;
+- a tool call is held and blocked before its arguments reach the client;
+- allowlisted and channel-configured headers reach the upstream while a cookie does not;
+- a route output limit reaches a Messages upstream when the client omits one;
+- Chat `n>1` and Responses provider state are rejected before the upstream.
 
-Run `make lab-load` after the functional suites have finished and the host has been idle for at least a minute, with no other traffic to the provider. The script waits up to two minutes for `analysis_jobs` to empty before it measures, so backlog from the browser suite does not overlap the run. The gateway must be healthy at `/health`. The suite uses `SAFEAGENT_UPSTREAM_KEY` from `testenv/.env` or the environment for the direct path and the lab agent key for the gateway path; neither key is written to a report.
+### Console
 
-### Workload
+The browser suite signs in and visits every page at desktop and mobile widths. Desktop runs check page errors, failed API responses, headings, empty bodies and horizontal overflow; mobile runs check page errors, failed API responses and horizontal overflow. The desktop flow creates, edits and deletes a project and route; creates, edits and revokes an agent key; saves and restores a policy; creates, edits and deletes a redaction rule; creates and disables a user; adds and removes a member; and creates a channel, edits its default limit, forwarded headers and key, then disables it. It also opens the call transcript, events and attempts tabs. A missing multi-call conversation, blocked call or channel is a failure, not a silently reduced run.
 
-The suite covers Chat Completions in non-streaming and streaming modes. The prompt is short and the completion cap is 16 tokens, so the run measures request handling rather than generation length. Each run is closed-loop: a fixed number of workers send the next request as soon as the previous one finishes.
+## Performance smoke
 
-| Parameter                 | Default | Environment override |
-| ------------------------- | ------- | -------------------- |
-| measured requests per run | 300     | `LOAD_REQUESTS`      |
-| concurrent workers        | 4       | `LOAD_CONCURRENCY`   |
-| warm-up requests per run  | 3       | `LOAD_WARMUP`        |
-| completion token cap      | 16      | `LOAD_MAX_TOKENS`    |
+The performance suite is deliberately short. It is a regression signal, not a capacity claim. The load requests disable provider reasoning so the measured path is visible text rather than a variable-length thought stream.
 
-The default suite makes four measured runs: baseline and gateway for non-streaming, then gateway and baseline for streaming. The order alternates so that neither path always runs first. About 1200 measured requests are made in total, plus warm-up. Three hundred requests per run keep provider variance from deciding the gate; a smaller run can swing more than ten percentage points in throughput. Lower the defaults when the account has a low quota; keep both sides of a scenario identical.
+| Parameter                      | Default | Environment           |
+| ------------------------------ | ------- | --------------------- |
+| native requests per run        | 50      | `LOAD_REQUESTS`       |
+| concurrent workers             | 2       | `LOAD_CONCURRENCY`    |
+| warm-up per run                | 1       | `LOAD_WARMUP`         |
+| completion cap                 | 16      | `LOAD_MAX_TOKENS`     |
+| cross-format requests per pair | 10      | `LOAD_CROSS_REQUESTS` |
 
-Warm-up requests are excluded from the metrics and are expected to succeed. A failed warm-up stops the run with the HTTP status or transport error; it is not silently treated as an empty measurement.
+For each configured native route, the suite compares a direct provider call with the same call through the gateway, in streaming and JSON modes. The direct and gateway reports must describe the same scenario: protocol, stream mode, request count, concurrency, prompt, token cap and reasoning mode. The pass gates are scenario agreement, baseline validity, gateway error classes and the error-rate delta; P95 latency and throughput are reported for comparison but are informational at this sample size, so the quick run does not fail on a provider-bound timing swing. Use `loadgen compare -hard-performance` with a longer run when a latency or throughput gate is required; do not present the quick numbers as a capacity claim.
 
-### Metrics
+The suite also sends a cross-format sample through every client and route. It does not compare cross-format latency with a native baseline because the formats are not directly comparable; it requires zero failures and a complete protocol response.
 
-The load generator records, per run:
-
-- succeeded and failed requests, success rate and error classes (`http_4xx`, `http_429`, `http_5xx`, `timeout`, `network`, `protocol`);
-- status counts and up to three sanitized samples for each error class;
-- mean, P50, P95, P99 and maximum latency of successful requests;
-- throughput as all completed requests, including failures, divided by wall-clock duration;
-- first-half and second-half P95, for detecting a sustained slowdown;
-- prompt and completion token totals when the provider returns usage;
-- host OS, architecture, CPU count and Go version.
-
-The report is JSON and is written to `testenv/runtime/load/<timestamp>`. A protocol failure means the response was not valid Chat Completions: non-JSON, no choices, no text, malformed SSE, no content delta or no terminal event. These count as failures, not as successful requests with high latency.
-
-### Comparison
-
-The `compare` step reads the baseline and gateway reports and applies these checks:
-
-| Check             | Rule                                                                        |
-| ----------------- | --------------------------------------------------------------------------- |
-| Same scenario     | stream mode, request count and concurrency match                            |
-| Baseline validity | baseline success at least 99%, no HTTP 429, no protocol failure             |
-| Gateway errors    | gateway success at least 99%, no HTTP 5xx, no HTTP 429, no protocol failure |
-| Error delta       | gateway error rate at most 0.5 percentage points above baseline             |
-| P95 latency       | `gateway P95 ≤ baseline P95 × 1.20 + 100 ms`                                |
-| Throughput        | `gateway throughput ≥ baseline throughput × 0.90`                           |
-
-The thresholds can be overridden on the `load compare` command, but the delivery gate uses the defaults above for both scenarios. A missing baseline, a baseline with rate limiting, or a scenario mismatch fails the comparison rather than producing a pass.
-
-### Validity and retries
-
-A performance result is invalid when the direct baseline has more than 1% failures, any HTTP 429, or any protocol failure. Stop, lower `LOAD_CONCURRENCY` or `LOAD_REQUESTS`, and rerun the whole scenario on both paths. Do not rerun only the gateway side to obtain a passing number, and do not compare a report taken on a different host, network path or provider account.
-
-A single repeat is allowed when the host was demonstrably busy or the provider had a transient incident. One request that stalls for tens of seconds lowers wall-clock throughput even when P95 stays healthy; treat that run as a provider transient, keep the report and rerun both sides. Keep both reports and state why the first run was discarded. A gateway failure under a valid baseline is a finding, not a reason to retry.
-
-### Scope
-
-The performance suite covers the chat text path, including request decoding, redaction, observation, online policy, audit persistence and streaming relay. It does not cover:
-
-- Responses, Anthropic Messages or Gemini conversion;
-- tool-call holding and the tool checkpoint;
-- console API latency or browser rendering;
-- analysis worker throughput under a large backlog;
-- retention pruning, quota settlement or multi-instance behavior.
-
-Those paths remain covered functionally or are outside the current design. A capacity test that fixes the provider as a constant requires a local fake upstream and is not part of this suite.
+The native comparison covers request decoding, redaction, observation, online policy, audit persistence and streaming relay. It does not cover tool holding, console traffic, analysis worker throughput, retention or multi-instance behavior.
 
 ## Failure triage
 
 | Symptom | Check |
 | --- | --- |
 | The database already has an administrator | The named volume survived a previous run. Use `FRESH=1 make lab-setup`; it destroys the lab database. |
-| The gateway rejects the upstream with a private-address error | Docker returned a fake-IP address for the provider host. Confirm that the lab channels still have `allow_private_network=true`. |
-| An agent cannot reach the gateway | The compose file maps `host.docker.internal` to the Docker host gateway. Confirm that the gateway listens on `0.0.0.0:8080` and port 8080 is free. |
-| Claude Code exits with a permission error | The agent image runs as uid 1000 and `run-agents.sh` passes an explicit tool allowlist. Do not run the container as root and do not use permission-skipping flags. |
-| Pi returns 401 | The run script passes the key with `--api-key`; confirm that `runtime/env` exists and setup completed. |
-| Gemini CLI returns 401 or 403 | Confirm that `SAFEAGENT_GEMINI_KEY` is present in `runtime/env` and that `GOOGLE_GEMINI_BASE_URL` still points at the lab gateway. The CLI uses `GEMINI_API_KEY` from the compose service, which the run script sets from that agent key. |
-| Gemini CLI cannot read or write the workspace | Check that `GEMINI_CLI_TRUST_WORKSPACE=true` is set and that the run uses `--approval-mode=yolo`. The workspace is the only mounted directory. |
-| The browser suite reports no blocked call | Run `make lab-policy` before `make lab-browser`. |
-| The browser suite reports no multi-call conversation | Run `make lab-agents` before `make lab-browser`. |
-| The diagnosis suite reports a non-empty policy | Run `make lab-policy`; it restores the empty baseline at the end. |
-| The diagnosis suite times out | Check `runtime/gateway.log` and the call detail. A missing worker, a schema mismatch or a detector failure leaves the analysis running or failed. |
-| A protocol case fails intermittently | The matrix makes up to three attempts per case and the upstream model chooses tools nondeterministically. Re-run and inspect `runtime/logs` and the failing response body before treating it as a conversion defect. |
-| The load baseline hits 429 | Lower `LOAD_CONCURRENCY`, rerun both sides and keep the report that records the rate limit as invalid evidence. |
-| The gateway P95 or throughput fails | Check `runtime/gateway.log`, database latency and analysis worker backlog. The measured path includes audit writes and job creation, so a saturated database is a real gateway result. |
+| No channel or route was created | The format has no URL, so setup skipped it. The matrix and agent suite then omit that route. |
+| Setup stops on a format with a URL | Its key or model is missing. Supply both, or remove the URL to skip that format. |
+| The gateway rejects the upstream with a private-address error | Docker returned a fake-IP address for the provider host. Confirm that lab channels still have `allow_private_network=true`. |
+| An agent cannot reach the gateway | Confirm the gateway listens on `0.0.0.0:8080`, port 8080 is free and the compose extra host is present. |
+| An agent CLI exits with a permission or config error | The image installs the latest release at build time. Read `runtime/logs/agent-versions.txt` and the per-run log; rebuild the image after a CLI change. |
+| Gemini CLI returns 401 or 403 | Confirm `SAFEAGENT_GEMINI_KEY` (the gateway agent key in `runtime/env`), `SAFEAGENT_UPSTREAM_GEMINI_KEY` (the provider key) and `GOOGLE_GEMINI_BASE_URL`; the gateway auth block may need an update when the CLI changes. |
+| A protocol case fails intermittently | Tool cases are model-dependent. Check `attempts` and the failing response body in `matrix.json`; text and redaction cases must pass on the first attempt. |
+| The matrix has no Gemini route | No Gemini upstream is configured. The route is absent rather than listed as a skip, so read the configured route list before treating the matrix as complete coverage. |
+| The browser suite reports no blocked call | Run `make lab-policy` first. |
+| The browser suite reports no multi-call conversation | Run `make lab-agents` first. |
+| The performance baseline hits 429 | Lower `LOAD_CONCURRENCY`, rerun both sides and keep the report as invalid evidence. |
 
 ## Security boundary
 
-`testenv/.env` holds the provider key and `testenv/runtime` holds the administrator password and agent keys. Both paths are ignored. The gateway listens on all interfaces so containers can reach it; do not expose port 8080 beyond the development host. The lab's private-network exception and its fixed database password are test-only and must not be copied into a deployment.
+`testenv/.env` holds provider keys and `testenv/runtime` holds the administrator password and agent keys. Both are ignored. The gateway listens on all interfaces so containers can reach it; do not expose port 8080 beyond the development host. The lab's private-network exception and fixed database password are test-only. Individual fault runs create global test channels because channels are disabled rather than deleted; the lab database is disposable and `make lab-down` removes it.
 
-Reports contain endpoint URLs, model names, error samples and token counts. They do not contain the provider key or the agent keys. Review error samples before sharing a report outside the lab.
+Reports contain endpoint URLs, model names, error samples and token counts. They do not contain provider keys or agent keys. Review error samples before sharing a report outside the lab.
 
 ## Related
 

@@ -4,66 +4,72 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 )
 
-type canonicalBlock struct {
-	Kind      BlockKind `json:"kind"`
-	Text      string    `json:"text,omitempty"`
-	ToolName  string    `json:"tool_name,omitempty"`
-	Arguments string    `json:"arguments,omitempty"`
-	Result    []string  `json:"result,omitempty"`
-	IsError   bool      `json:"is_error,omitempty"`
-	Media     string    `json:"media,omitempty"`
+type canonicalPart struct {
+	Kind  PartKind `json:"kind"`
+	Text  string   `json:"text,omitempty"`
+	Media string   `json:"media,omitempty"`
 }
 
-type canonicalMessage struct {
-	Role   Role             `json:"role"`
-	Blocks []canonicalBlock `json:"blocks"`
+type canonicalItem struct {
+	Kind      ItemKind        `json:"kind"`
+	Role      Role            `json:"role,omitempty"`
+	Parts     []canonicalPart `json:"parts,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Arguments string          `json:"arguments,omitempty"`
+	Input     string          `json:"input,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
-func canonicalize(messages []Message) []canonicalMessage {
-	result := make([]canonicalMessage, 0, len(messages))
-	for _, message := range messages {
-		entry := canonicalMessage{Role: message.Role}
-		for _, block := range message.Blocks {
-			switch block.Kind {
-			case KindText, KindRefusal:
-				if block.Text == "" {
-					continue
-				}
-				if count := len(entry.Blocks); count > 0 && entry.Blocks[count-1].Kind == KindText {
-					entry.Blocks[count-1].Text += block.Text
-					continue
-				}
-				entry.Blocks = append(entry.Blocks, canonicalBlock{Kind: KindText, Text: block.Text})
-			case KindToolCall:
-				if block.ToolCall == nil {
-					continue
-				}
-				entry.Blocks = append(entry.Blocks, canonicalBlock{Kind: KindToolCall, ToolName: block.ToolCall.Name, Arguments: canonicalArguments(block.ToolCall.Arguments)})
-			case KindToolResult:
-				if block.ToolResult == nil {
-					continue
-				}
-				entry.Blocks = append(entry.Blocks, canonicalBlock{Kind: KindToolResult, Result: resultTexts(block.ToolResult.Content), IsError: block.ToolResult.IsError})
-			case KindMedia:
-				if block.Media != nil {
-					entry.Blocks = append(entry.Blocks, canonicalBlock{Kind: KindMedia, Media: block.Media.MIMEType})
-				}
-			}
-		}
-		if len(entry.Blocks) == 0 {
+func canonicalize(items []Item) []canonicalItem {
+	result := make([]canonicalItem, 0, len(items))
+	for _, item := range items {
+		entry := canonicalItem{Kind: item.Kind, Role: item.Role, CallID: item.CallID, Name: item.Name, IsError: item.IsError}
+		switch item.Kind {
+		case ItemNative:
 			continue
-		}
-		if entry.Role == RoleAssistant && len(result) > 0 && result[len(result)-1].Role == RoleAssistant {
-			previous := &result[len(result)-1]
-			for _, block := range entry.Blocks {
-				if count := len(previous.Blocks); count > 0 && previous.Blocks[count-1].Kind == KindText && block.Kind == KindText {
-					previous.Blocks[count-1].Text += block.Text
-					continue
+		case ItemToolCall, ItemServerToolCall:
+			if item.ToolCall != nil {
+				entry.CallID, entry.Name = item.ToolCall.ID, item.ToolCall.Name
+				if item.ToolCall.Kind == ToolCustom {
+					entry.Input = item.ToolCall.Arguments
+				} else {
+					entry.Arguments = canonicalArguments(item.ToolCall.Arguments)
 				}
-				previous.Blocks = append(previous.Blocks, block)
 			}
+		case ItemToolResult, ItemServerToolResult:
+			entry.CallID = item.CallID
+		}
+		appendPart := func(part canonicalPart) {
+			if part.Kind == PartText || part.Kind == PartRefusal || part.Kind == PartReasoningText || part.Kind == PartReasoningSummary {
+				if part.Text == "" {
+					return
+				}
+				if count := len(entry.Parts); count > 0 && entry.Parts[count-1].Kind == part.Kind {
+					entry.Parts[count-1].Text += part.Text
+					return
+				}
+			}
+			entry.Parts = append(entry.Parts, part)
+		}
+		for _, part := range item.Parts {
+			if part.Kind == PartToolArguments {
+				continue
+			}
+			switch part.Kind {
+			case PartMedia:
+				if part.Media != nil {
+					appendPart(canonicalPart{Kind: PartMedia, Media: mediaFingerprint(part.Media)})
+				}
+			case PartNative:
+			default:
+				appendPart(canonicalPart{Kind: part.Kind, Text: part.Text})
+			}
+		}
+		if len(entry.Parts) == 0 && entry.Kind != ItemToolCall && entry.Kind != ItemServerToolCall && entry.Kind != ItemToolResult && entry.Kind != ItemServerToolResult {
 			continue
 		}
 		result = append(result, entry)
@@ -71,14 +77,9 @@ func canonicalize(messages []Message) []canonicalMessage {
 	return result
 }
 
-func resultTexts(content []Block) []string {
-	texts := make([]string, 0, len(content))
-	for _, block := range content {
-		if block.Kind == KindText && block.Text != "" {
-			texts = append(texts, block.Text)
-		}
-	}
-	return texts
+func mediaFingerprint(media *Media) string {
+	sum := sha256.Sum256([]byte(media.MIMEType + "\x00" + media.Data + "\x00" + media.URL + "\x00" + media.FileID))
+	return media.MIMEType + ":" + hex.EncodeToString(sum[:8])
 }
 
 func canonicalArguments(arguments string) string {
@@ -89,62 +90,42 @@ func canonicalArguments(arguments string) string {
 	return string(Marshal(decoded))
 }
 
-func historyBytes(messages []Message) []byte {
-	return Marshal(canonicalize(messages))
-}
-
-func HistoryFingerprint(secret []byte, messages []Message) string {
+func HistoryFingerprint(secret []byte, items []Item) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte("safeagent/history/v1\x00"))
-	mac.Write(historyBytes(messages))
+	mac.Write(Marshal(canonicalize(items)))
 	return hex.EncodeToString(mac.Sum(nil)[:16])
 }
 
 // HistoryPrefix fingerprints the request up to and including the last assistant turn, which is what
-// a follow-up request repeats before appending its new messages.
-func HistoryPrefix(secret []byte, messages []Message) string {
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == RoleAssistant {
-			return HistoryFingerprint(secret, messages[:index+1])
+// a follow-up request repeats before appending its new items.
+func HistoryPrefix(secret []byte, items []Item) string {
+	for index := len(items) - 1; index >= 0; index-- {
+		if items[index].Role == RoleAssistant {
+			return HistoryFingerprint(secret, items[:index+1])
 		}
 	}
 	return ""
 }
 
-// RepeatsPrefix reports whether messages starts with history. Cache markers, signatures, item ids
-// and JSON formatting are ignored because clients do not echo them, while every block and its
-// content still has to match so that the offset never cuts a turn the client actually sent.
-func RepeatsPrefix(messages, history []Message) bool {
-	if len(history) == 0 || len(messages) < len(history) {
+// RepeatsPrefix reports whether items starts with history. Cache markers, signatures, item ids and
+// JSON formatting are ignored because clients do not echo them, while every part and its content
+// still has to match so that the offset never cuts a turn the client actually sent.
+func RepeatsPrefix(items, history []Item) bool {
+	if len(history) == 0 || len(items) < len(history) {
 		return false
 	}
-	return string(prefixBytes(messages[:len(history)])) == string(prefixBytes(history))
-}
-
-func prefixBytes(messages []Message) []byte {
-	normalized := make([]Message, len(messages))
-	for index, message := range messages {
-		normalized[index] = Message{Role: message.Role, Extras: message.Extras, Blocks: make([]Block, len(message.Blocks))}
-		for position, block := range message.Blocks {
-			block = CloneBlock(block)
-			block.CacheControl = nil
-			if block.Reasoning != nil {
-				block.Reasoning.Signature = nil
-				block.Reasoning.ItemID = ""
-			}
-			if block.ToolCall != nil {
-				block.ToolCall.Signature = nil
-				block.ToolCall.Arguments = canonicalArguments(block.ToolCall.Arguments)
-			}
-			normalized[index].Blocks[position] = block
-		}
-	}
-	return Marshal(normalized)
+	return string(Marshal(canonicalize(items[:len(history)]))) == string(Marshal(canonicalize(history)))
 }
 
 func ConversationFingerprint(secret []byte, request *Request, response *Response) string {
-	messages := make([]Message, 0, len(request.Messages)+1)
-	messages = append(messages, request.Messages...)
-	messages = append(messages, Message{Role: RoleAssistant, Blocks: response.Blocks})
-	return HistoryFingerprint(secret, messages)
+	items := make([]Item, 0, len(request.Items)+len(response.Items))
+	items = append(items, request.Items...)
+	for _, item := range response.Items {
+		item.Role = RoleAssistant
+		items = append(items, item)
+	}
+	return HistoryFingerprint(secret, items)
 }
+
+func itemKey(index int) string { return "items[" + strconv.Itoa(index) + "]" }

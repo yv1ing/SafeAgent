@@ -6,7 +6,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/protocol"
 )
 
-const defaultMessagesMaxTokens = 4096
+const defaultMessagesMaxTokens = 8192
 
 func generationConfig(root map[string]any) map[string]any {
 	config := protocol.Object(root["generationConfig"])
@@ -35,7 +35,7 @@ func EncodeParams(request *protocol.Request, target protocol.Format, root map[st
 		}
 	} else if target == protocol.Messages {
 		root["max_tokens"] = defaultMessagesMaxTokens
-		losses = append(losses, protocol.Loss{Path: "max_output_tokens", Code: protocol.LossDefaultTokenLimit, Detail: "Messages requires a token limit; 4096 was applied", To: target})
+		losses = append(losses, protocol.Loss{Path: "max_output_tokens", Code: protocol.LossDefaultTokenLimit, Detail: "Messages requires a token limit; 8192 was applied", To: target})
 	}
 	setSampling := func(chatKey, geminiKey string, value any) {
 		if target == protocol.Gemini {
@@ -103,24 +103,14 @@ func EncodeParams(request *protocol.Request, target protocol.Format, root map[st
 		}
 	}
 	if request.ServiceTier != "" {
-		if target == protocol.Chat || target == protocol.Responses {
+		if target == protocol.Chat || target == protocol.Responses || target == protocol.Messages {
 			root["service_tier"] = request.ServiceTier
 		} else {
 			loss("service_tier", "target has no OpenAI service tier")
 		}
 	}
 	if request.Logprobs != nil || request.TopLogprobs != nil {
-		switch target {
-		case protocol.Chat, protocol.Responses:
-			if request.Logprobs != nil {
-				root["logprobs"] = *request.Logprobs
-			}
-			if request.TopLogprobs != nil {
-				root["top_logprobs"] = *request.TopLogprobs
-			}
-		default:
-			loss("logprobs", "target has no token logprobs")
-		}
+		loss("logprobs", "token logprobs are not first-class and are not requested upstream")
 	}
 	if len(request.LogitBias) > 0 {
 		if target == protocol.Chat {
@@ -130,9 +120,18 @@ func EncodeParams(request *protocol.Request, target protocol.Format, root map[st
 		}
 	}
 	if len(request.Modalities) > 0 {
-		if target == protocol.Chat || target == protocol.Responses {
+		unsupported := false
+		for _, modality := range request.Modalities {
+			if modality != "text" {
+				unsupported = true
+			}
+		}
+		if unsupported {
+			loss("modalities", "non-text output modalities are not first-class")
+		}
+		if (target == protocol.Chat || target == protocol.Responses) && !unsupported {
 			root["modalities"] = request.Modalities
-		} else {
+		} else if target != protocol.Chat && target != protocol.Responses {
 			loss("modalities", "target has no output modality selection")
 		}
 	}
@@ -153,6 +152,16 @@ func EncodeParams(request *protocol.Request, target protocol.Format, root map[st
 			root["prompt_cache_key"] = request.PromptCacheKey
 		} else {
 			loss("prompt_cache_key", "target has no prompt cache key")
+		}
+	}
+	if request.PromptCacheRetention != "" && target != protocol.Responses {
+		loss("prompt_cache_retention", "only Responses controls prompt cache retention")
+	}
+	if request.SafetyIdentifier != "" {
+		if target == protocol.Chat {
+			root["safety_identifier"] = request.SafetyIdentifier
+		} else if target == protocol.Gemini || target == protocol.Messages {
+			loss("safety_identifier", "target has no safety identifier")
 		}
 	}
 	nested, err := encodeToolPolicy(request, target, root)

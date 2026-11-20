@@ -19,6 +19,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
+	"github.com/yv1ing/SafeAgent/internal/protocol"
 	"github.com/yv1ing/SafeAgent/internal/service/gateway"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/testkit"
@@ -298,6 +299,25 @@ func TestTransientFailuresFailOverAndOpenTheBreaker(t *testing.T) {
 	}
 }
 
+func TestBlockingPolicyHoldsServerToolCalls(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"response.created","response":{"id":"resp_1","model":"gpt-5","created_at":1}}`},
+		{Data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}`},
+		{Data: `{"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`},
+		{Data: `{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`},
+	}
+	rig := newRigFor(t, "openai_responses", func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: frames} })
+	setPolicy(rig, blockPolicy(policy.PhaseToolCall, `tool.kind == "server"`))
+	writer := rig.send(gateway.Request{Kind: "openai_responses", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"tools":[{"type":"web_search"}],"input":"search"}`)})
+	full := writer.Body.String()
+	if strings.Contains(full, "ws_1") || !strings.Contains(full, "tool_call_blocked") {
+		t.Fatalf("server tool call leaked or no error frame: %s", full)
+	}
+	if call := rig.store.Calls[0]; call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+		t.Fatalf("call %+v", call)
+	}
+}
+
 func TestHalfOpenProbeIsReleasedOnEveryExit(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Status: 400, Body: "no"} })
 	backend := routing.Backend{ChannelID: "channel_1", UpstreamModel: "gpt-5-upstream"}
@@ -427,6 +447,28 @@ func TestBlockingPolicyHoldsToolCallsAndRecordsThem(t *testing.T) {
 	}
 }
 
+func TestBlockingRedactionRuleRecordsADecision(t *testing.T) {
+	rig := newRig(t, nil)
+	rig.store.RuleList[0].Action = "block"
+	response := rig.chat(mailRequest)
+	if response.Code != 403 || !strings.Contains(response.Body.String(), "sensitive_content_blocked") {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	call := rig.store.Calls[0]
+	if call.State != "rejected" || call.ErrorCode != "sensitive_content_blocked" {
+		t.Fatalf("call %+v", call)
+	}
+	found := false
+	for _, decision := range decisionsOf(rig, call) {
+		if decision.Phase == policy.PhaseRequest && decision.Action == policy.ActionBlock && decision.Blocked {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a blocking redaction rule must leave a decision: %+v", decisionsOf(rig, call))
+	}
+}
+
 func TestLeakingARedactedSecretIntoToolArgumentsIsFlagged(t *testing.T) {
 	var placeholder string
 	rig := newRig(t, func(received testkit.Received) testkit.Reply {
@@ -449,6 +491,27 @@ func TestLeakingARedactedSecretIntoToolArgumentsIsFlagged(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("restoring a secret into tool arguments must be recorded as a decision: %+v", decisionsOf(rig, rig.store.Calls[0]))
+	}
+}
+
+func TestStreamingToolArgumentsAreRestoredBeforeRelease(t *testing.T) {
+	var placeholder string
+	rig := newRig(t, func(received testkit.Received) testkit.Reply {
+		placeholder = "[AWS_KEY_" + testkit.Between(received.Body, "[AWS_KEY_", "]") + "]"
+		return testkit.Reply{Frames: testkit.ChatToolCall("call_1", "send", `{"token":"`+placeholder+`"}`)}
+	})
+	rig.store.RuleList = append(rig.store.RuleList, entity.Rule{ID: "r2", ProjectID: "project_1", Kind: "builtin", Detector: "aws_access_key", Label: "AWS_KEY", Action: "replace", Enabled: true})
+	rig.store.Proj.RulesVersion++
+	response := rig.chat(`{"model":"gpt-5","stream":true,"tools":[{"type":"function","function":{"name":"send","parameters":{"type":"object","properties":{"token":{"type":"string"}}}}}],"messages":[{"role":"user","content":"use AKIAABCDEFGHIJKLMNOP"}]}`)
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "AKIAABCDEFGHIJKLMNOP") || strings.Contains(body, placeholder) {
+		t.Fatalf("streamed tool arguments were not restored: %s", body)
+	}
+	if call := rig.store.Calls[0]; call.State != "completed" {
+		t.Fatalf("call %+v", call)
 	}
 }
 
@@ -680,5 +743,341 @@ func TestDecisionModelFailureDoesNotBlock(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the unavailable model must be visible: %+v", decisionsOf(rig, rig.store.Calls[0]))
+	}
+}
+
+func TestSameFormatTextStreamPassesThroughVerbatim(t *testing.T) {
+	raw := `{"vendor":"acme","id":"chatcmpl-upstream","model":"m","choices":[{"index":0,"delta":{"content":"hi"}}]}`
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: []testkit.Frame{
+			{Data: raw},
+			{Data: `{"id":"chatcmpl-upstream","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
+			{Data: `[DONE]`},
+		}}
+	})
+	writer := rig.send(gateway.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)})
+	if body := writer.Body.String(); !strings.Contains(body, raw) {
+		t.Fatalf("a same-format text stream must keep the upstream bytes: %s", body)
+	}
+	if strings.Count(writer.Body.String(), "[DONE]") != 1 {
+		t.Fatalf("the terminal frame must appear exactly once: %s", writer.Body.String())
+	}
+}
+
+func TestSameFormatToolStreamSwitchesToCanonicalAndStillTerminates(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		frames := append([]testkit.Frame{{Data: `{"id":"chatcmpl-upstream","model":"m","choices":[{"index":0,"delta":{"content":"checking"}}]}`}}, testkit.ChatToolCall("call_1", "read", `{"path":"notes.txt"}`)...)
+		for index := range frames {
+			frames[index].Data = strings.ReplaceAll(frames[index].Data, `"id":"c1"`, `"id":"chatcmpl-upstream"`)
+		}
+		return testkit.Reply{Frames: frames}
+	})
+	writer := rig.send(gateway.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"read"}]}`)})
+	body := writer.Body.String()
+	if !strings.Contains(body, "checking") || !strings.Contains(body, "notes.txt") || !strings.Contains(body, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("the stream must continue after the switch: %s", body)
+	}
+	if strings.Count(body, "[DONE]") != 1 {
+		t.Fatalf("the terminal frame must appear exactly once: %s", body)
+	}
+}
+
+func TestContinuationReusesParentToolsAndInstructions(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.chat(`{"model":"gpt-5","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"find x"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)
+	first := rig.store.Calls[0]
+	rig.send(gateway.Request{Kind: "openai_responses", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","previous_response_id":"` + first.ResponseID + `","input":"and then?"}`)})
+	body := rig.upstream.Requests()[1].Body
+	if !strings.Contains(body, "lookup") || !strings.Contains(body, "be brief") {
+		t.Fatalf("continuation must carry the parent tools and instructions: %s", body)
+	}
+}
+
+func TestForwardedHeadersReachTheUpstreamWithoutCredentials(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.store.Channel[0].ForwardHeaders = []string{"x-client"}
+	header := http.Header{"Authorization": {"Bearer agent-key"}, "X-Client": {"trace-1"}, "OpenAI-Beta": {"assistants=v2"}, "Cookie": {"session=1"}}
+	rig.send(gateway.Request{Kind: "openai_chat", Header: header, Body: []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`)})
+	received := rig.upstream.Requests()[0].Header
+	if received.Get("X-Client") != "trace-1" || received.Get("OpenAI-Beta") != "assistants=v2" {
+		t.Fatalf("allowlisted headers must be forwarded: %+v", received)
+	}
+	if received.Get("Cookie") != "" || strings.Contains(received.Get("Authorization"), "agent-key") {
+		t.Fatalf("credentials must never be forwarded: %+v", received)
+	}
+}
+
+func TestUnrepresentableMediaIsRejectedBeforeTheUpstream(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	writer := rig.send(gateway.Request{Kind: "google_gemini", Model: "gpt-5", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"video/mp4","data":"AAAA"}}]}]}`)})
+	if writer.Code != 422 || !strings.Contains(writer.Body.String(), "video") {
+		t.Fatalf("video must be rejected before any upstream call: %d %s", writer.Code, writer.Body.String())
+	}
+	if len(rig.upstream.Requests()) != 0 {
+		t.Fatal("no upstream call may happen for an unrepresentable request")
+	}
+	found := false
+	for _, loss := range rig.store.Calls[0].Losses {
+		found = found || loss.Code == string(protocol.LossMediaMapped) && loss.Class == string(protocol.LossFatal)
+	}
+	if !found {
+		t.Fatalf("a fatal conversion must be recorded: %+v", rig.store.Calls[0].Losses)
+	}
+}
+
+func TestHistoryRepairDropsUnansweredCallsBeforeTheUpstream(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.chat(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"},{"role":"assistant","tool_calls":[{"id":"call_9","type":"function","function":{"name":"read","arguments":"{}"}}]}]}`)
+	body := rig.upstream.Requests()[0].Body
+	if strings.Contains(body, "call_9") {
+		t.Fatalf("an unanswered call must be repaired away: %s", body)
+	}
+}
+
+func TestForeignReasoningSignatureIsStrippedAcrossVendors(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	signature, _ := protocol.SealSignature([]byte(testkit.InstanceSecret), protocol.Signature{Vendor: protocol.VendorAnthropic, Blob: "provider-blob", TextDigest: protocol.TextDigest("plan")})
+	body := []byte(`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"plan","signature":"` + signature + `"}]},{"role":"user","content":"hi"}]}`)
+	writer := rig.send(gateway.Request{Kind: protocol.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}, "Anthropic-Version": {"2023-06-01"}}, Body: body})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if strings.Contains(sent, "provider-blob") || strings.Contains(sent, signature) {
+		t.Fatalf("a foreign signature must not reach the upstream: %s", sent)
+	}
+}
+
+func TestEarlyHeadersEndWithAProtocolNativeError(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: []testkit.Frame{}} })
+	writer := rig.send(gateway.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)})
+	if writer.Code != 200 {
+		t.Fatalf("headers are sent before content, so the status is already 200: %d", writer.Code)
+	}
+	body := writer.Body.String()
+	if !strings.Contains(body, "keepalive") || !strings.Contains(body, `"error"`) || !strings.Contains(body, "[DONE]") {
+		t.Fatalf("a failed streaming attempt must end with a native error frame: %s", body)
+	}
+	if call := rig.store.Calls[0]; call.State != "failed" {
+		t.Fatalf("call %+v", call)
+	}
+}
+
+func TestSameFormatRequestIsReencodedWhenToolReasoningIsMissing(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: testkit.ChatText("ok")}
+	})
+	body := `{"model":"gpt-5","messages":[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"},{"role":"user","content":"one"},{"role":"user","content":"two"}]}`
+	response := rig.chat(body)
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := protocol.Array(testkit.JSONValue(t, []byte(rig.upstream.Requests()[0].Body), "messages"))
+	if len(sent) != 3 {
+		t.Fatalf("a history without tool reasoning must be re-encoded before the upstream: %s", rig.upstream.Requests()[0].Body)
+	}
+	if call := rig.store.Calls[0]; len(call.Losses) == 0 || call.Losses[0].Code != string(protocol.LossReasoningNotReplayable) {
+		t.Fatalf("the disabled target reasoning must be recorded: %+v", call.Losses)
+	}
+}
+
+func TestSameFormatRequestKeepsTheClientWireShape(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.chat(`{"model":"gpt-5","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+	body := rig.upstream.Requests()[0].Body
+	if !strings.Contains(body, `"content":[{`) || !strings.Contains(body, `"type":"text"`) || !strings.Contains(body, `"text":"hi"`) {
+		t.Fatalf("a same-format request must keep the client's content shape: %s", body)
+	}
+}
+
+func TestCustomToolKindIsRestoredForTheClient(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+		{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"apply_patch","input":{}}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"*** patch\"}"}}`},
+		{Data: `{"type":"content_block_stop","index":0}`},
+		{Data: `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}`},
+		{Data: `{"type":"message_stop"}`},
+	}
+	rig := newRigFor(t, string(protocol.Messages), func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: frames} })
+	writer := rig.chat(`{"model":"gpt-5","tools":[{"type":"custom","custom":{"name":"apply_patch"}}],"messages":[{"role":"user","content":"patch it"}]}`)
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	testkit.AssertJSON(t, writer.Body.Bytes(), "choices.0.message.tool_calls.0.type", "custom")
+	testkit.AssertJSON(t, writer.Body.Bytes(), "choices.0.message.tool_calls.0.custom.input", "*** patch")
+}
+
+func TestClosingFrameLossesReachTheAuditRecord(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+		{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`},
+		{Data: `{"type":"content_block_stop","index":0}`},
+		{Data: `{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":2}}`},
+		{Data: `{"type":"message_stop"}`},
+	}
+	rig := newRigFor(t, string(protocol.Messages), func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: frames} })
+	writer := rig.send(gateway.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	found := false
+	for _, loss := range rig.store.Calls[0].Losses {
+		found = found || loss.Code == string(protocol.LossFinishMapped)
+	}
+	if !found {
+		t.Fatalf("a closing-frame loss must be stored with the call: %+v", rig.store.Calls[0].Losses)
+	}
+}
+
+func TestMultiChoiceIsRejectedWithAStableCode(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	response := rig.chat(`{"model":"gpt-5","n":2,"messages":[{"role":"user","content":"hi"}]}`)
+	if response.Code != 422 || !strings.Contains(response.Body.String(), "unsupported_multi_choice") {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	if len(rig.upstream.Requests()) != 0 {
+		t.Fatal("a multi-choice request must be rejected before the upstream")
+	}
+}
+
+func TestSealedRequestSignatureIsUnsealedBeforeTheUpstream(t *testing.T) {
+	rig := newRigFor(t, string(protocol.Messages), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: []testkit.Frame{
+			{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+			{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
+			{Data: `{"type":"content_block_stop","index":0}`},
+			{Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+			{Data: `{"type":"message_stop"}`},
+		}}
+	})
+	sealed, _ := protocol.SealSignature([]byte(testkit.InstanceSecret), protocol.Signature{Vendor: protocol.VendorAnthropic, Blob: "provider-blob", TextDigest: protocol.TextDigest("plan")})
+	body := []byte(`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"plan","signature":"` + sealed + `"}]},{"role":"user","content":"hi"}]}`)
+	writer := rig.send(gateway.Request{Kind: protocol.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}, "Anthropic-Version": {"2023-06-01"}}, Body: body})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if !strings.Contains(sent, "provider-blob") || strings.Contains(sent, sealed) {
+		t.Fatalf("the upstream must see the provider blob, not the envelope: %s", sent)
+	}
+}
+
+func TestSameFormatReasoningStreamSealsTheSignature(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+		{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"provider-blob"}}`},
+		{Data: `{"type":"content_block_stop","index":0}`},
+		{Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+		{Data: `{"type":"message_stop"}`},
+	}
+	rig := newRigFor(t, string(protocol.Messages), func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: frames} })
+	writer := rig.send(gateway.Request{Kind: protocol.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}, "Anthropic-Version": {"2023-06-01"}}, Body: []byte(`{"model":"gpt-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)})
+	body := writer.Body.String()
+	if strings.Contains(body, `"signature":"provider-blob"`) {
+		t.Fatalf("the raw provider signature leaked: %s", body)
+	}
+	sealed := false
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
+			continue
+		}
+		delta := protocol.Object(event["delta"])
+		if signature := protocol.String(delta["signature"]); signature != "" {
+			if opened, ok := protocol.OpenSignature([]byte(testkit.InstanceSecret), signature); ok && opened.Blob == "provider-blob" {
+				sealed = true
+			}
+		}
+	}
+	if !sealed {
+		t.Fatalf("the client must see a sealed signature: %s", body)
+	}
+}
+
+func TestContinuationDoesNotDuplicateEchoedHistory(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("answer")} })
+	first := rig.send(gateway.Request{Kind: protocol.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hello"}`)})
+	if first.Code != 200 {
+		t.Fatalf("%d %s", first.Code, first.Body.String())
+	}
+	id := rig.store.Calls[0].ResponseID
+	second := rig.send(gateway.Request{Kind: protocol.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","previous_response_id":"` + id + `","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"more"}]}]}`)})
+	if second.Code != 200 {
+		t.Fatalf("%d %s", second.Code, second.Body.String())
+	}
+	body := rig.upstream.Requests()[1].Body
+	if strings.Count(body, `"hello"`) != 1 || strings.Count(body, `"answer"`) != 1 || strings.Count(body, `"more"`) != 1 {
+		t.Fatalf("echoed history was duplicated: %s", body)
+	}
+}
+
+func TestOutputLimitDefaultChain(t *testing.T) {
+	textFrames := func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: []testkit.Frame{
+			{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+			{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
+			{Data: `{"type":"content_block_stop","index":0}`},
+			{Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+			{Data: `{"type":"message_stop"}`},
+		}}
+	}
+	request := func() gateway.Request {
+		return gateway.Request{Kind: protocol.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`)}
+	}
+	rig := newRigFor(t, string(protocol.Messages), textFrames)
+	rig.send(request())
+	testkit.AssertJSON(t, []byte(rig.upstream.Requests()[0].Body), "max_tokens", 8192)
+
+	rig = newRigFor(t, string(protocol.Messages), textFrames)
+	rig.store.Proj.DefaultMaxOutputTokens = 888
+	rig.send(request())
+	testkit.AssertJSON(t, []byte(rig.upstream.Requests()[0].Body), "max_tokens", 888)
+
+	rig = newRigFor(t, string(protocol.Messages), textFrames)
+	rig.store.Proj.DefaultMaxOutputTokens = 888
+	rig.store.Channel[0].DefaultMaxOutputTokens = 777
+	rig.send(request())
+	testkit.AssertJSON(t, []byte(rig.upstream.Requests()[0].Body), "max_tokens", 777)
+
+	rig = newRigFor(t, string(protocol.Messages), textFrames)
+	rig.store.Proj.DefaultMaxOutputTokens = 888
+	rig.store.Channel[0].DefaultMaxOutputTokens = 777
+	rig.store.Route.Targets[0].MaxOutputTokens = 999
+	rig.send(request())
+	testkit.AssertJSON(t, []byte(rig.upstream.Requests()[0].Body), "max_tokens", 999)
+}
+
+func TestUpstreamStateIsRejectedAtPreflight(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	response := rig.send(gateway.Request{Kind: protocol.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","store":true,"input":"hi"}`)})
+	if response.Code != 422 || !strings.Contains(response.Body.String(), "state_not_supported") {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	if len(rig.upstream.Requests()) != 0 {
+		t.Fatal("stateful requests must not reach an upstream")
+	}
+}
+
+func TestGeminiStreamDoesNotSendSSEComments(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("hello")} })
+	writer := rig.send(gateway.Request{
+		Kind: protocol.Gemini, Model: "gpt-5", ForceStream: true,
+		Header: http.Header{"X-Goog-Api-Key": {"agent-key"}},
+		Body:   []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":16}}`),
+	})
+	if strings.HasPrefix(writer.Body.String(), ":") {
+		t.Fatalf("Gemini clients reject SSE comments: %q", writer.Body.String()[:20])
+	}
+	if !strings.HasPrefix(writer.Body.String(), "data: ") {
+		t.Fatalf("Gemini stream must start with a data frame: %q", writer.Body.String()[:40])
 	}
 }

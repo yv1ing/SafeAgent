@@ -585,6 +585,9 @@ export const en = {
     quota: 'Daily token quota',
     retention: 'Retention (days)',
     limitHint: '0 means unlimited.',
+    defaultMaxOutput: 'Default output limit',
+    defaultMaxOutputHint:
+      'Applied when an Anthropic Messages upstream request has no limit. 0 uses the gateway default.',
     deleteTitle: 'Delete project {name}?',
     deleteHint: 'Its keys, routes, rules and audit records are removed for good.',
     emptyTitle: 'No projects.',
@@ -632,6 +635,12 @@ export const en = {
     addModel: 'Add model',
     removeModel: 'Remove model',
     headers: 'Extra headers',
+    forwardHeaders: 'Forward client headers',
+    forwardHeadersHint:
+      'Comma-separated client header names to pass upstream; credentials are never forwarded.',
+    defaultMaxOutput: 'Default output limit',
+    defaultMaxOutputHint:
+      'Applied when an Anthropic Messages upstream request has no limit. 0 uses the gateway default.',
     headerName: 'Header',
     headerValue: 'Value',
     addHeader: 'Add header',

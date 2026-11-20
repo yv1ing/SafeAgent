@@ -33,7 +33,7 @@
 
 ## Rollups and indexes
 
-`traffic_rollups` is the only read model. It is recomputed from `calls` for hour and day buckets; the lookback is aligned to a bucket edge, so a partial bucket is never overwritten with a truncated count. The `1d` window recomputes only the last seven days, so a one-minute tick does not scan years. Finding and model views read the stored analyses directly, so no rollup tables exist for them.
+`traffic_rollups` is the monitor read model. It is recomputed from `calls` for hour and day buckets; the lookback is aligned to a bucket edge, so a partial bucket is never overwritten with a truncated count. The `1d` window recomputes only the last seven days, so a one-minute tick does not scan years. Project statistics, finding views and model views read `calls` and the stored analyses directly, so no rollup tables exist for them.
 
 Indexes cover the paths that grow with traffic: project and agent-key call listings, analysis identity, flows by analysis, agent and call, batch and job maintenance, and the monitor series. The index list is part of `schema.sql`; adding an index is a schema change and recreates the database.
 
@@ -43,7 +43,7 @@ Pruning runs in batches of 1,000 rows. Calls older than the project's `retention
 
 ## Secrets
 
-Raw audit payloads are stored as sent. Read access is role-based: members see the redacted view, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; only masked prefixes or suffixes are returned by the API. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
+Audit payloads use event schema version 3: the request and response are stored as item/part structures, together with the effective instructions and tools, the agent-key principal snapshot and the loss/repair ledger. Raw values are stored as sent. Read access is role-based: members see the redacted view, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; only masked prefixes or suffixes are returned by the API. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers and forwarded-header names are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
 
 ## Related
 

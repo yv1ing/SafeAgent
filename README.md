@@ -64,19 +64,34 @@ The schema is a fresh baseline with no migration path; a schema change requires 
 
 ## Verification
 
-The acceptance lab ran on 2026-11-20 against a live upstream provider, with Claude Code, Codex, Gemini CLI and Pi connected through the gateway. Every gate passed:
+The last acceptance run used DeepSeek Flash (`deepseek-flash`) through its Chat Completions, Responses and Anthropic Messages endpoints. No Gemini upstream was configured; Gemini client coverage uses the three routes, and the Gemini channel path is covered by unit tests rather than a live provider.
 
 | Check | Result |
 | --- | --- |
 | Unit, contract and frontend tests | `make verify` passed |
-| Repository integration tests | passed on a separate lab database |
-| Protocol matrix: 3 client formats × 3 channel formats × 2 stream modes × 5 cases | 90 passed, 0 failed |
-| Agent clients: 4 CLIs × 3 routes | 12 passed, 0 failed |
-| Online policy | request and tool-call blocks passed; policy restored to empty |
-| Diagnosis and redaction | injection and exfiltration findings, complete coverage, `unsafe`, redaction hit |
-| Console | 16 pages at desktop and mobile widths, no page or API failure |
-| Performance, non-streaming | 300 requests each side, 0 errors; P95 1105 ms vs 1126 ms baseline; 5.79 vs 5.94 req/s |
-| Performance, streaming | 300 requests each side, 0 errors; P95 1070 ms vs 1022 ms baseline; 6.18 vs 6.12 req/s |
+| Repository integration tests | `make lab-integration` passed |
+| Protocol matrix: four client formats × three channel formats × stream/JSON, core and enabled extensions | 212 passed, 0 failed, 28 skipped |
+| Agent clients: Claude Code, Codex, Gemini CLI and Pi against every configured route | 15 passed, 0 failed; the Gemini native deep task was skipped because no Gemini upstream was configured |
+| Online policy | 24 passed, 0 failed |
+| Diagnosis and redaction hits | 12 passed, 0 failed |
+| Authentication, quotas, isolation and console permissions | 16 passed, 0 failed |
+| Failover, truncation, tool holds, headers and default limits | 9 passed, 0 failed |
+| Console | 17 pages at desktop and mobile widths; desktop create, edit, delete, revoke and disable flows; no page, API or overflow failure |
+| Dependency and vulnerability scan | `make security` passed: SBOMs written, Go modules verified, npm audit empty and no symbol-reachable Go vulnerabilities |
+| Cross-format performance sample | 24 of 24 client/route/mode combinations passed with no protocol error |
+
+The 28 matrix skips are capability gaps, not passes: Messages has no structured-output field, Chat and Gemini clients have no provider-executed server tool, DeepSeek Flash did not execute `web_search` on the Responses channel, and Messages has no multi-choice or provider-state field. Every skip is listed with its reason in `matrix.json`.
+
+The quick performance smoke runs 50 requests per side at concurrency 2. Errors and protocol completeness are the gates; P95 and throughput are recorded for comparison but are informational at this sample size.
+
+| Native path      | P95, direct / gateway | Throughput, direct / gateway |
+| ---------------- | --------------------- | ---------------------------- |
+| Chat JSON        | 952 / 894 ms          | 3.81 / 3.79 req/s            |
+| Chat stream      | 717 / 858 ms          | 4.14 / 3.88 req/s            |
+| Responses JSON   | 1024 / 771 ms         | 3.30 / 3.93 req/s            |
+| Responses stream | 756 / 821 ms          | 4.32 / 3.82 req/s            |
+| Messages JSON    | 716 / 769 ms          | 4.34 / 4.00 req/s            |
+| Messages stream  | 818 / 609 ms          | 4.19 / 4.48 req/s            |
 
 ## Documentation
 

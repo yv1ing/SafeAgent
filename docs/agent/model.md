@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TB
-    Protocol["request or response block"] --> Obs["observe: item translation"]
+    Protocol["request or response item"] --> Obs["observe: item translation"]
     Obs --> Origin["origin + trust"]
     Obs --> Call["tool call + normalized target"]
     Call --> Sink["sink inference"]
@@ -36,7 +36,7 @@ type Trace struct {
 }
 ```
 
-A `Turn` has a role and ordered `Item`s. An `Item` carries one of text, reasoning, refusal, tool call, tool result, media or a native provider block. `ToolResult.Content` contains nested items. `Steps` is the ordered tool chain, rebuilt from the turns by `Trace.RebuildSteps`.
+A `Turn` has a role and ordered `Item`s. An `Item` carries one of text, reasoning, refusal, tool call, tool result, media or a native provider item. `ToolResult.Content` contains nested items. `Steps` is the ordered tool chain, rebuilt from the turns by `Trace.RebuildSteps`.
 
 `PreviousCallID` is the client's `previous_response_id` or the linked parent. The schema detector uses it to avoid reporting a tool result as unmatched when the call is a continuation.
 
@@ -93,7 +93,7 @@ type Finding struct {
 }
 ```
 
-`Fingerprint` hashes the detector, code, origin, sink, semantic location (including the item's locator path) and match ordinal. It does not depend on a byte offset, a timestamp or an analysis id, so re-analyzing the same call keeps the same identities and two content blocks with the same code do not collapse into one finding.
+`Fingerprint` hashes the detector, code, origin, sink, semantic location (including the item's locator path) and match ordinal. It does not depend on a byte offset, a timestamp or an analysis id, so re-analyzing the same call keeps the same identities and two items with the same code do not collapse into one finding.
 
 `Evidence` locates the match with byte offsets in the raw value and stores a quote that is always safe to display: a match overlapping a redacted span is stored as `[redacted]`. Nested tool arguments carry their shown text separately, so evidence never quotes a value that the call view hides.
 
@@ -141,7 +141,7 @@ type Principal struct {
 }
 ```
 
-Client-supplied metadata is not copied into the principal. It is available in `Trace.Context` for display and hashing, but a policy condition that trusts `metadata.user_id` would be trusting the client.
+Client-supplied metadata is not copied into the principal. It is available in `Trace.Context` for display and hashing. The policy CEL environment exposes the principal, tool, target, tool chain, findings and phase; it has no `metadata` or `context` variable, so a rule cannot be satisfied by a value the client writes.
 
 ## Related
 

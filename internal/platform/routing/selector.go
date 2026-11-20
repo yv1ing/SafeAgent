@@ -23,10 +23,11 @@ const (
 )
 
 type Target struct {
-	ChannelID     string
-	UpstreamModel string
-	Priority      int
-	Weight        int
+	ChannelID       string
+	UpstreamModel   string
+	Priority        int
+	Weight          int
+	MaxOutputTokens int
 }
 
 func (target Target) Backend() Backend {
