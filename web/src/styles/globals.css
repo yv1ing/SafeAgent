@@ -1,0 +1,187 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  --color-*: initial;
+  --color-white: oklch(1 0 0);
+  --color-black: oklch(0 0 0);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-overlay: var(--overlay);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, monospace;
+
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+
+  --shadow-pop: 0 12px 32px -12px oklch(0.2 0.02 270 / 0.24), 0 0 0 1px var(--line);
+  --shadow-card: 0 1px 2px oklch(0.2 0.02 270 / 0.04);
+
+  --animate-fade-in: fade-in 120ms ease-out;
+  --animate-pop-in: pop-in 140ms ease-out;
+  --animate-slide-in: slide-in 180ms ease-out;
+}
+
+/* Light is the default; dark applies when data-theme=dark. The attribute is set before first paint
+   by the inline script in index.html and kept in sync by lib/theme.ts. */
+:root {
+  color-scheme: light;
+  --canvas: oklch(0.975 0.002 270);
+  --surface: oklch(1 0 0);
+  --raised: oklch(1 0 0);
+  --sunken: oklch(0.955 0.003 270);
+  --line: oklch(0.905 0.004 270);
+  --line-strong: oklch(0.82 0.006 270);
+  --ink: oklch(0.21 0.01 270);
+  --muted: oklch(0.44 0.012 270);
+  --faint: oklch(0.52 0.01 270);
+  --accent: oklch(0.5 0.17 275);
+  --accent-ink: oklch(1 0 0);
+  --accent-soft: oklch(0.95 0.028 275);
+  --danger: oklch(0.52 0.19 25);
+  --danger-soft: oklch(0.95 0.032 25);
+  --danger-ink: oklch(1 0 0);
+  --warning: oklch(0.52 0.12 65);
+  --warning-soft: oklch(0.95 0.05 85);
+  --success: oklch(0.49 0.11 155);
+  --success-soft: oklch(0.95 0.04 155);
+  --info: oklch(0.49 0.1 235);
+  --info-soft: oklch(0.95 0.03 235);
+  --chart-1: #4f5bd5;
+  --chart-2: #eb6834;
+  --chart-3: #2ab7a9;
+  --overlay: oklch(0.2 0.01 270 / 0.42);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: oklch(0.15 0.006 270);
+  --surface: oklch(0.19 0.007 270);
+  --raised: oklch(0.23 0.008 270);
+  --sunken: oklch(0.17 0.006 270);
+  --line: oklch(0.29 0.008 270);
+  --line-strong: oklch(0.38 0.01 270);
+  --ink: oklch(0.95 0.004 270);
+  --muted: oklch(0.73 0.01 270);
+  --faint: oklch(0.62 0.01 270);
+  --accent: oklch(0.72 0.14 275);
+  --accent-ink: oklch(0.17 0.02 275);
+  --accent-soft: oklch(0.28 0.05 275);
+  --danger: oklch(0.72 0.16 25);
+  --danger-soft: oklch(0.27 0.06 25);
+  --danger-ink: oklch(0.18 0 0);
+  --warning: oklch(0.79 0.13 80);
+  --warning-soft: oklch(0.28 0.05 80);
+  --success: oklch(0.75 0.13 155);
+  --success-soft: oklch(0.26 0.05 155);
+  --info: oklch(0.75 0.1 235);
+  --info-soft: oklch(0.26 0.04 235);
+  --chart-1: #7f89ea;
+  --chart-2: #d95926;
+  --chart-3: #3fd4c5;
+  --overlay: oklch(0 0 0 / 0.62);
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+  html {
+    scrollbar-gutter: stable;
+  }
+  body {
+    margin: 0;
+    min-width: 320px;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}

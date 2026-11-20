@@ -1,0 +1,22 @@
+# The build context is a whitelist: everything is excluded unless listed below.
+**
+!LICENSE
+!NOTICE
+!go.mod
+!go.sum
+!cmd/safeagent/
+!internal/
+!web/*.go
+!web/index.html
+!web/package.json
+!web/package-lock.json
+!web/tsconfig.json
+!web/vite.config.ts
+!web/orval.config.ts
+!web/openapi.json
+!web/src/
+!web/public/
+
+# Tests and fixtures run in the repository, not in the image build.
+**/*_test.go
+**/testdata

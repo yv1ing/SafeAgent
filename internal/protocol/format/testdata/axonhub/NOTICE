@@ -1,0 +1,7 @@
+The files in this directory are copied unmodified from AxonHub 1.0.0-rc.4
+(https://github.com/looplj/axonhub), from its llm/transformer/*/testdata
+directories. They are used only as protocol fixtures by the tests and are not
+included in any binary.
+
+AxonHub is licensed under the Apache License, Version 2.0. The full text is in
+LICENSE in this directory.

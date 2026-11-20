@@ -1,0 +1,15 @@
+{
+  "general": {
+    "enableAutoUpdate": false,
+    "enableAutoUpdateNotification": false
+  },
+  "telemetry": {
+    "enabled": false
+  },
+  "security": {
+    "auth": {
+      "selectedType": "gateway",
+      "useExternal": true
+    }
+  }
+}

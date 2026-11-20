@@ -1,0 +1,134 @@
+# Getting started
+
+[中文](getting-started_zh.md)
+
+This guide starts from a fresh checkout and ends with an agent sending traffic through SafeAgent.
+
+## Prerequisites
+
+The build requires Go 1.27.4, Node.js 22 or newer, GNU Make and PostgreSQL 17. The database must already exist; SafeAgent creates its tables during the first start. Install the locked dependencies once:
+
+```sh
+make deps
+```
+
+## Configure and start
+
+Copy the example configuration and set `database_url`:
+
+```sh
+cp config.example.toml config.toml
+```
+
+```toml
+listen = "127.0.0.1:8080"
+database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=disable"
+secure_cookies = false
+```
+
+Every other key has a default. Keep `secure_cookies = false` only while the console is reached over plain HTTP on loopback. In any other deployment use HTTPS and set it to `true`; a Secure cookie is dropped on plain HTTP. `sslmode=disable` is likewise for a local database; a remote database should use TLS.
+
+An unrecognized configuration key stops startup, so a typo fails loudly.
+
+Build and run:
+
+```sh
+make build
+build/bin/safeagent -config config.toml serve
+```
+
+On its first start against an empty database, the process creates the schema and prints the initial administrator once:
+
+```text
+Initial administrator: admin / <password>
+```
+
+Keep this password; later starts do not print it again. If it is lost, reset it from another administrator account, or recreate the database.
+
+The same process serves the console at `/console/`, the gateway at `/v1/` and `/v1beta/`, and a health check at `/health`.
+
+To work on the code, run `make dev`. It starts the backend and the console dev server together, and the console is then at <http://127.0.0.1:5173/console/>.
+
+## Set up the console
+
+Sign in as `admin` at <http://127.0.0.1:8080/console/>. The first sign-in requires a new password. The console opens on Monitor, which aggregates every visible project.
+
+Create a project. A project name is sufficient; the defaults can be changed later. New projects start with the common redaction detectors enabled and an empty, inspectable policy document.
+
+Opening a project changes the sidebar to that project's pages. Use Settings to change the name and, as an administrator, the retention period and usage limits. Project members manage the project's routes, non-blocking redaction rules, record-only policy rules and agent keys; trust levels and non-default roles are administrator-only. Only administrators can add or remove members, create or delete projects, save blocking policy or redaction rules, restore a policy version, configure the decision model, and manage channels and users. The Activity page lists the changes made to the project.
+
+Create a channel. Only administrators can create channels, and each channel represents one upstream provider:
+
+- Choose the protocol the provider speaks.
+- Enter the full endpoint, such as `https://api.openai.com/v1/chat/completions`. If the model name is part of the path, write `{model}` there. If a Gemini endpoint omits `{model}`, the gateway appends the model and action.
+- Model names must match what the provider uses. Prices are per million tokens in the currency set on the channel.
+- Add at least one upstream key. Only its last characters are shown afterwards. The key is encrypted with the instance key.
+- Turn on "allow private network" only for a provider on a private address, such as a self-hosted inference server.
+
+Create a model route. A route maps a public model name to one or more upstream models. The target with the lowest priority number is tried first; targets with equal priority are ordered by weight, and a failed target falls through to the next.
+
+Issue an agent key on the project's keys page. The full key is shown once, so copy it then. A key can carry its own rate and concurrency limits. Only an administrator can set a trust level or a role other than the default agent.
+
+If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page edits one ordered CEL rule list; saving validates it and makes it active at once, and the history can restore an earlier version. A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background; add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it.
+
+## Connect an agent
+
+Give the agent the gateway address and an agent key, and use the public model name from the route. Upstream names stay inside the channel configuration.
+
+| Agent protocol     | Base URL                   | Where the key goes                  |
+| ------------------ | -------------------------- | ----------------------------------- |
+| Chat Completions   | `http://127.0.0.1:8080/v1` | `Authorization: Bearer <key>`       |
+| Responses          | `http://127.0.0.1:8080/v1` | `Authorization: Bearer <key>`       |
+| Anthropic Messages | `http://127.0.0.1:8080`    | `x-api-key: <key>`                  |
+| Gemini             | `http://127.0.0.1:8080`    | `x-goog-api-key: <key>`, or `?key=` |
+
+Verification request:
+
+```sh
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer <agent-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"public-model","messages":[{"role":"user","content":"hello"}]}'
+```
+
+To verify redaction, send a prompt that contains an e-mail address and open the call in the console. The request sent to the provider contains a placeholder such as `[EMAIL_…]`, while the reply received by the client contains the original address.
+
+## Container deployment
+
+Build the image and mount the configuration:
+
+```sh
+docker build -t safeagent .
+docker run -d --name safeagent -p 127.0.0.1:8080:8080 \
+  -v "$PWD/config.toml:/app/config.toml:ro" safeagent
+```
+
+Inside a container the service has to listen on all interfaces and reach the database by a name the container can resolve:
+
+```toml
+listen = "0.0.0.0:8080"
+database_url = "postgres://safeagent:change-me@db-host:5432/safeagent?sslmode=require"
+secure_cookies = true
+```
+
+With `secure_cookies = true`, the console requires HTTPS. Serve it through a reverse proxy that handles TLS, and set `public_origin` to the address users open in the browser, for example `https://safeagent.example.com`. If the reverse proxy connects directly to the application, list its CIDR in `trusted_proxies` so the console can read the client address for login rate limiting. The image has no shell or HTTP client, so check `/health` from outside.
+
+## Troubleshooting
+
+| Message or symptom | What to do |
+| --- | --- |
+| `database_url is required` | Set it in the configuration file, or check that the process is reading the file you edited. |
+| Unknown configuration key at startup | A key is misspelled. Use the name reported in the error. |
+| `the database schema does not match this build` | The database belongs to another build. Recreate it; there is no migration. |
+| `the database has tables but no schema fingerprint` | The database was created by another tool or a partial start. Recreate it; guessing at the missing state is unsafe. |
+| `another SafeAgent instance owns this database` | Only one instance may use a database. Stop the other process. |
+| The console returns 404 | The frontend is not built. Run `make build`. |
+| Sign-in works but a reload signs the session out | The deployment uses HTTP with `secure_cookies = true`. Use HTTPS, or set it to false on loopback. |
+| Console writes fail behind a proxy | Set `public_origin` to the origin users open in the browser. |
+| An agent call returns 403 and is recorded as blocked | A blocking redaction rule, a policy rule or the decision model blocked it. The call record names the source; asynchronous analysis still runs. |
+
+## Related
+
+- [Architecture](architecture.md)
+- [Console](console.md)
+- [Project README](../../README.md)

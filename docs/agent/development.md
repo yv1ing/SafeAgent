@@ -1,0 +1,146 @@
+# Development
+
+This document covers the build, configuration and test workflow, and the extension points that a change is most likely to touch.
+
+## Requirements
+
+- Go 1.27.4
+- Node.js 22 or newer and npm
+- GNU Make
+- PostgreSQL 17 for integration and end-to-end runs
+
+## Commands
+
+```text
+make deps         # go mod download + npm ci
+make generate     # OpenAPI -> web/src/api/generated
+make format       # format Go, frontend, testenv JavaScript and documentation
+make check        # gofmt, go vet, TypeScript, prettier, contract diff
+make test         # go test -race ./..., node --test
+make verify       # run check and test
+make build        # web build + embedded Go binary
+make integration  # repository tests against SAFEAGENT_TEST_DATABASE
+make lab-setup    # start the Docker acceptance lab; see testenv.md
+make lab-analysis # asynchronous diagnosis and redaction acceptance
+make lab-integration # repository tests on a separate database in the lab
+make lab-load     # compare gateway latency and throughput with a direct provider baseline
+make security     # SBOM + govulncheck + npm audit
+```
+
+`cmd/safeagent` also provides `schema` and `openapi` subcommands. `schema` prints the baseline DDL, and `openapi` writes the contract to the requested output path.
+
+## Configuration
+
+`config.example.toml` lists every key. All keys except `database_url` have defaults.
+
+| Key | Meaning |
+| --- | --- |
+| `listen` | HTTP listen address |
+| `database_url` | PostgreSQL connection string; required |
+| `secure_cookies` | mark the session cookie Secure; keep true outside loopback HTTP |
+| `public_origin` | console origin behind a reverse proxy, for example `https://safeagent.example.com` |
+| `max_request_bytes` | client request body cap |
+| `max_response_bytes` | non-streaming response cap; streaming is bounded by `max_stream_bytes` |
+| `max_stream_bytes` | upstream stream cap, at most 128 MiB (the SSE reader's own limit) |
+| `stream_idle_seconds` | idle timeout between upstream frames |
+| `trusted_proxies` | IPs or CIDRs whose forwarded client address may be trusted |
+| `max_attempts` | total upstream attempts for one call, across keys and channels |
+| `shutdown_seconds` | graceful shutdown budget |
+| `operation_log_days` | operation-log retention |
+| `tool_hold_bytes` | frames queued while a tool call waits for its verdict (1 MiB default) |
+| `analysis_concurrency` | in-process diagnosis worker count |
+
+Response text is stored and checked for concealed Unicode asynchronously; it is not blocked online. Changing `schema.sql` changes the fingerprint. An existing database must be recreated; there is no migration path.
+
+## Tests
+
+| Package | Coverage |
+| --- | --- |
+| `internal/analysis` | finding identity, normalization, verdict rules, input hashing, analysis diff, typed CEL, finding predicates, axis derivation |
+| `internal/analysis/builtin` | role split, schema checks, trailing JSON, flow relations, secret flow, redacted evidence |
+| `internal/analysis/decision` | answer interpretation, both adapters against fake servers, private endpoint rejection, malformed answer rejection |
+| `internal/observe` | origin and trust, sink inference, two views, stored-event replay, history expansion |
+| `internal/service/gateway` | admission, redaction, request and tool checkpoints, tool hold, veto, veto failure, streaming, failover, quotas, SSE timing, clean EOF, verified history linking |
+| `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by gateway tests, and idempotency by repository integration tests |
+| `internal/service/console` | permission rules, name bounds, password policy, policy member restrictions |
+| `internal/api/console` | project summary rendering and OpenAPI contract consistency |
+| `internal/protocol/format` | 4×4 conversion, AxonHub fixtures, clean EOF, truncation, media, citations |
+| `internal/app` | direct and transitive dependency boundaries |
+| `internal/storage/repository` | schema documentation consistency; integration tests require `SAFEAGENT_TEST_DATABASE` and are run by the operator |
+| `testenv/load` | SSE and JSON response validation, percentile calculation and the relative performance gate |
+
+Browser acceptance is automated by `make lab-browser`; see the [acceptance lab](testenv.md).
+
+## Acceptance lab
+
+[`testenv/`](../../testenv/) is a disposable Docker lab for live functional and performance acceptance. PostgreSQL, Claude Code, Codex, Gemini CLI, Pi and the Playwright browser run in containers; the gateway runs on the host so a backend change can be rebuilt without an image build. The complete topology, suite expectations, performance model, thresholds and troubleshooting guide is [`testenv.md`](testenv.md). The functional workflow uses `make lab-setup`, `lab-restart`, `lab-protocol`, `lab-agents`, `lab-policy`, `lab-analysis`, `lab-browser`, `lab-integration` and `lab-down`; `make lab-load` is the manual performance gate. The lab is not part of the product deployment; its runtime directory and `testenv/.env` are ignored.
+
+## Contracts
+
+Five contracts define what the rest of the system may rely on. Treat a change to one as a deliberate contract change.
+
+| Contract | Authority | Consumers |
+| --- | --- | --- |
+| Observation model | `internal/observation` | detectors, policy, console read models |
+| Stored audit events | `internal/storage/auditevent` | gateway writer, observation adapter, diagnosis |
+| Canonical wire model | `internal/protocol` | all four codecs and the gateway |
+| Console API | DTO tags and `internal/api/console/openapi.go` | `web/openapi.json`, generated client, console |
+| Policy document | `internal/analysis/policy` | policy editor, gateway evaluation |
+
+The observation and audit contracts carry explicit version numbers. A stored event records the schema version it was written with. Startup checks the DDL fingerprint and refuses a database whose events carry a different `auditevent.SchemaVersion`; changing either contract therefore requires recreating the database. The console contract is generated from Go types: `make generate` rewrites `web/openapi.json` and `web/src/api/generated`, and `make check` fails when either is stale. Neither generated file is edited by hand.
+
+A protocol conversion that cannot carry a field must emit a `protocol.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture; a same-format passthrough is not an acceptable shortcut.
+
+## Conventions
+
+- A package has one responsibility. `observation` models a call, `observe` adapts protocols, `analysis` judges, `storage` persists, `service` orchestrates and `api` transports.
+- Package names are singular nouns that state the responsibility. Protocol names such as `messages` and `responses` keep the provider's spelling. A package that groups utilities is named for the group (`platform`, `storage`), not for a layer of the product.
+- File names describe one topic in lower case; an underscore separates words only when the joined form would be ambiguous (`channel_keys.go`, not `channelkeys.go`). Exported identifiers use full words and the usual Go initialisms (`ID`, `URL`, `HTTP`).
+- Do not add a second mechanism for an existing concept. If a field, table or endpoint has no reader, remove it; do not document it.
+- DTOs use `View` for responses and `Input` for requests. Their `json` tags and `required` markers are the contract. `web/openapi.json` and `web/src/api/generated` are produced by `make generate` and are never edited by hand.
+- Repository methods are verbs (`Create`, `Save`, `Prune`); domain types are nouns. Errors that a caller must distinguish are sentinel values or typed failures, not strings.
+- Comments explain a non-obvious invariant or an external constraint. They do not restate the code.
+
+## Adding a detector
+
+1. Add the code to `analysis.CodeCatalogue` with its severity and allowed origins.
+2. Extend `AxisFor` if the code needs a new mechanism or harm mapping. Leave an axis empty when it cannot be justified.
+3. Implement `analysis.Detector` in `internal/analysis/builtin` and register it in `init`.
+4. Use `analysis.NewFinding` so the fingerprint, axes and evidence stay consistent.
+5. Add a unit test.
+
+A detector that cannot finish must emit `analysis_incomplete`, not nothing. The console carries code labels in `web/src/i18n`; a new code falls back to the raw string until a label is added.
+
+## Adding a policy field
+
+1. Add the field to the struct in `internal/analysis/policy/policy.go` with a `cel` tag.
+2. Add it to the activation in `activationFor`.
+3. Document it in `policy.md` and add a compile test for the field name.
+
+Policy values are server-side. Text arguments and targets are supplied in their redacted form when redaction changed them; the principal contains only authenticated key attributes.
+
+## Adding a protocol field
+
+Add the field to the canonical model, decode it in each codec that has it, encode it where an equivalent exists, and add an explicit loss where one does not. Extend the matrix fixture; do not add a same-format passthrough. A new protocol also needs a gateway route in `internal/api/gateway/gateway.go` and a codec registration.
+
+## Security review
+
+Before delivery run `make security` and review:
+
+- agent-key authentication, console session cookies, Origin and request-header checks;
+- project and administrator checks in the service layer before any state change;
+- raw payload access is administrator-only and written to the operation log;
+- decision model endpoints reject private and carrier-NAT addresses unless explicitly allowed, and the dialer checks the address it connects to;
+- channel keys and the decision-model key are sealed; extra headers are not sealed and must not be used for credentials;
+- redaction placeholders are HMAC-derived and bound to the call namespace;
+- request, response, stream, tool hold, worker and detector limits are in place;
+- evidence never quotes a redacted value.
+
+Raw audit data is plaintext by design. Access is controlled by role-based visibility and operation logging.
+
+## Related
+
+- [Storage contract](storage.md)
+- [Analysis model](analysis.md)
+- [Protocol layer](protocol.md)
+- [Agent guide](README.md)

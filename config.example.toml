@@ -1,0 +1,29 @@
+# Copy to config.toml and adjust. Every key except database_url has a default.
+# In a container, set listen = "0.0.0.0:8080" and mount this file at /app/config.toml.
+
+listen = "127.0.0.1:8080"
+database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=disable"
+
+# Cookies are Secure by default. Set false only for plain-HTTP local development.
+secure_cookies = true
+
+# Public origin of the console behind a reverse proxy, e.g. "https://safeagent.example.com".
+# Empty means the request's own Host is used for the same-origin check.
+public_origin = ""
+
+# CIDRs of reverse proxies whose X-Forwarded-For header may be trusted.
+# trusted_proxies = ["10.0.0.0/8"]
+
+max_request_bytes = 8388608
+max_response_bytes = 33554432
+max_stream_bytes = 67108864
+stream_idle_seconds = 60
+max_attempts = 3
+shutdown_seconds = 30
+operation_log_days = 365
+
+# Upper bound on frames queued while a tool call waits for its policy verdict.
+tool_hold_bytes = 1048576
+
+# Asynchronous analysis workers running in this process.
+analysis_concurrency = 2

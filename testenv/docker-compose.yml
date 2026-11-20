@@ -1,0 +1,103 @@
+name: safeagent-testenv
+
+x-agent: &agent
+  image: safeagent-testenv-agents
+  build:
+    context: ./agents
+  profiles: ["agents"]
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  user: "1000:1000"
+  environment:
+    SAFEAGENT_KEY: ${SAFEAGENT_KEY:-}
+    HOME: /home/node
+  volumes:
+    - ./runtime/workspace:/workspace
+  working_dir: /workspace
+  networks: [lab]
+
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: safeagent-testenv-db
+    environment:
+      POSTGRES_USER: safeagent
+      POSTGRES_PASSWORD: safeagent
+      POSTGRES_DB: safeagent
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safeagent -d safeagent"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [lab]
+
+  claude:
+    <<: *agent
+    entrypoint: ["claude"]
+    volumes:
+      - ./runtime/workspace/claude:/workspace
+    environment:
+      SAFEAGENT_KEY: ${SAFEAGENT_KEY:-}
+      HOME: /home/node
+      ANTHROPIC_BASE_URL: http://host.docker.internal:8080
+      ANTHROPIC_AUTH_TOKEN: ${SAFEAGENT_KEY:-}
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      DISABLE_AUTOUPDATER: "1"
+
+  codex:
+    <<: *agent
+    entrypoint: ["codex"]
+    volumes:
+      - ./runtime/workspace/codex:/workspace
+    environment:
+      SAFEAGENT_KEY: ${SAFEAGENT_KEY:-}
+      HOME: /home/node
+
+  gemini:
+    <<: *agent
+    entrypoint: ["gemini"]
+    volumes:
+      - ./runtime/workspace/gemini:/workspace
+    environment:
+      SAFEAGENT_KEY: ${SAFEAGENT_KEY:-}
+      HOME: /home/node
+      GEMINI_API_KEY: ${SAFEAGENT_KEY:-}
+      GOOGLE_GEMINI_BASE_URL: http://host.docker.internal:8080
+      GOOGLE_GENAI_API_VERSION: v1beta
+      GEMINI_CLI_TRUST_WORKSPACE: "true"
+
+  pi:
+    <<: *agent
+    entrypoint: ["pi"]
+    volumes:
+      - ./runtime/workspace/pi:/workspace
+      - ./runtime/pi-models.json:/home/node/.pi/agent/models.json:ro
+    environment:
+      SAFEAGENT_KEY: ${SAFEAGENT_KEY:-}
+      HOME: /home/node
+
+  browser:
+    image: safeagent-testenv-browser
+    build:
+      context: ./browser
+    profiles: ["browser"]
+    user: "0:0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SAFEAGENT_BASE_URL: http://host.docker.internal:8080
+      SAFEAGENT_ADMIN_PASSWORD: ${SAFEAGENT_ADMIN_PASSWORD:-}
+      SAFEAGENT_PROJECT: ${SAFEAGENT_PROJECT:-}
+    volumes:
+      - ./runtime/screenshots:/screenshots
+    networks: [lab]
+
+volumes:
+  pgdata:
+
+networks:
+  lab:

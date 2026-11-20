@@ -1,0 +1,6682 @@
+{
+  "components": {
+    "schemas": {
+      "ConsoleAPIError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ConsoleAddMemberInput": {
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "ConsoleAgentKeyView": {
+        "properties": {
+          "concurrency": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "type": "integer"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "Returned once, when the key is created",
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "ConsoleAnalysisBatchInput": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "call",
+              "session",
+              "window",
+              "agent_key"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ConsoleAnalysisBatchPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleAnalysisBatchView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleAnalysisBatchView": {
+        "properties": {
+          "completed": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "total",
+          "completed",
+          "failed",
+          "created_at",
+          "finished_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleAnalysisPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleAnalysisView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleAnalysisView": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/ConsoleCoverageView"
+          },
+          "error": {
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFindingView"
+            },
+            "type": "array"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "flows": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFlowView"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_hash": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ConsoleModelView"
+          },
+          "model_state": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ConsoleVerdictView"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/ConsoleVersionsView"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "input_hash",
+          "versions",
+          "verdict",
+          "coverage",
+          "model_state",
+          "error",
+          "started_at",
+          "finished_at",
+          "findings",
+          "flows"
+        ],
+        "type": "object"
+      },
+      "ConsoleAttemptView": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "end_ms": {
+            "type": "integer"
+          },
+          "first_token_ms": {
+            "type": "integer"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "integer"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "channel_name",
+          "upstream_model",
+          "key_id",
+          "start_ms",
+          "end_ms",
+          "first_token_ms",
+          "result",
+          "code",
+          "class"
+        ],
+        "type": "object"
+      },
+      "ConsoleAttributionView": {
+        "properties": {
+          "item": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn",
+          "item",
+          "tool_call_id",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ConsoleAxesView": {
+        "properties": {
+          "harm": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "mode",
+          "harm"
+        ],
+        "type": "object"
+      },
+      "ConsoleBucketView": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "duration_p95": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "findings_high": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "redaction_hits": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "requests",
+          "errors",
+          "blocked",
+          "input_tokens",
+          "output_tokens",
+          "duration_p95",
+          "redaction_hits",
+          "findings_high"
+        ],
+        "type": "object"
+      },
+      "ConsoleCallDetailView": {
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleAnalysisView"
+            },
+            "type": "array"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleAttemptView"
+            },
+            "type": "array"
+          },
+          "call": {
+            "$ref": "#/components/schemas/ConsoleCallView"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleDecisionView"
+            },
+            "type": "array"
+          },
+          "events": {
+            "description": "Only returned to administrators",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleEventView"
+            },
+            "type": "array"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleHitView"
+            },
+            "type": "array"
+          },
+          "transcript": {
+            "$ref": "#/components/schemas/ConsoleTranscriptView"
+          }
+        },
+        "required": [
+          "call",
+          "transcript",
+          "decisions",
+          "analyses",
+          "attempts",
+          "events",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "ConsoleCallPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCallView"
+            },
+            "type": "array"
+          },
+          "next": {
+            "$ref": "#/components/schemas/ConsoleCursorView"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleCallView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "analysis_state": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "cache_read_tokens": {
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "type": "integer"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "client_format": {
+            "type": "string"
+          },
+          "cost_micros": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "first_token_ms": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "latest_analysis_id": {
+            "type": "string"
+          },
+          "losses": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleLossView"
+            },
+            "type": "array"
+          },
+          "max_severity": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "parent_call_id": {
+            "type": "string"
+          },
+          "public_model": {
+            "type": "string"
+          },
+          "reasoning_tokens": {
+            "type": "integer"
+          },
+          "redaction_hits": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "blocked",
+              "cancelled",
+              "interrupted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "terminated_at": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "usage_known": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "agent_key_id",
+          "client_format",
+          "public_model",
+          "upstream_model",
+          "channel_id",
+          "state",
+          "error_code",
+          "stream",
+          "first_token_ms",
+          "duration_ms",
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "reasoning_tokens",
+          "usage_known",
+          "cost_micros",
+          "currency",
+          "redaction_hits",
+          "analysis_state",
+          "latest_analysis_id",
+          "finding_count",
+          "max_severity",
+          "losses",
+          "attempts",
+          "session_id",
+          "parent_call_id",
+          "created_at",
+          "terminated_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelInput": {
+        "properties": {
+          "allow_private_network": {
+            "type": "boolean"
+          },
+          "count_tokens_endpoint": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "first_byte_timeout_seconds": {
+            "type": "integer"
+          },
+          "format": {
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelModelView"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "format",
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelKeyView": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "suffix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelModelView": {
+        "properties": {
+          "cache_read_price": {
+            "type": "integer"
+          },
+          "cache_write_price": {
+            "type": "integer"
+          },
+          "input_price": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output_price": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelOption": {
+        "properties": {
+          "format": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelTraffic": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "duration_p95": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel_id",
+          "channel_name",
+          "requests",
+          "errors",
+          "duration_p95"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelView": {
+        "properties": {
+          "allow_private_network": {
+            "type": "boolean"
+          },
+          "count_tokens_endpoint": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "first_byte_timeout_seconds": {
+            "type": "integer"
+          },
+          "format": {
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelModelView"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ConsoleCodeCountView": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ConsoleConversationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleConversationView"
+            },
+            "type": "array"
+          },
+          "next": {
+            "$ref": "#/components/schemas/ConsoleCursorView"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleConversationTreeView": {
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/ConsoleConversationView"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleTreeNodeView"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "conversation",
+          "nodes",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "ConsoleConversationView": {
+        "properties": {
+          "calls": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "first_call_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "last_call_id": {
+            "type": "string"
+          },
+          "max_severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "first_call_id",
+          "last_call_id",
+          "calls",
+          "max_severity",
+          "created_at",
+          "last_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleCostView": {
+        "properties": {
+          "cost_micros": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "currency",
+          "cost_micros"
+        ],
+        "type": "object"
+      },
+      "ConsoleCoverageView": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evaluated": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "evaluated",
+          "skipped",
+          "errors",
+          "complete"
+        ],
+        "type": "object"
+      },
+      "ConsoleCreateChannelKeyInput": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "type": "object"
+      },
+      "ConsoleCreateKeyInput": {
+        "properties": {
+          "concurrency": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "agent",
+              "user",
+              "service"
+            ],
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "ConsoleCreateRouteInput": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRouteTarget"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "ConsoleCreateRuleInput": {
+        "properties": {
+          "action": {
+            "enum": [
+              "replace",
+              "block",
+              "alert"
+            ],
+            "type": "string"
+          },
+          "capture": {
+            "description": "Named group to replace instead of the whole match",
+            "type": "string"
+          },
+          "detector": {
+            "description": "Detector id; builtin rules only",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "builtin",
+              "regex"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pattern": {
+            "description": "RE2 expression; regex rules only",
+            "type": "string"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "ConsoleCursorView": {
+        "properties": {
+          "before": {
+            "type": "string"
+          },
+          "before_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "before",
+          "before_id"
+        ],
+        "type": "object"
+      },
+      "ConsoleDecisionModelView": {
+        "properties": {
+          "allow_private": {
+            "type": "boolean"
+          },
+          "api_key_set": {
+            "type": "boolean"
+          },
+          "authorize_below": {
+            "type": "number"
+          },
+          "daily_token_budget": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "typesafe",
+              "openai"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "use_raw": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "kind",
+          "endpoint",
+          "model",
+          "api_key_set",
+          "timeout_seconds",
+          "allow_private",
+          "use_raw",
+          "daily_token_budget",
+          "authorize_below",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleDecisionView": {
+        "properties": {
+          "action": {
+            "enum": [
+              "block",
+              "record"
+            ],
+            "type": "string"
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "request",
+              "tool_call"
+            ],
+            "type": "string"
+          },
+          "policy_version": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "action",
+          "blocked",
+          "rule_id",
+          "code",
+          "severity",
+          "reason",
+          "policy_version",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleDetectorView": {
+        "properties": {
+          "default": {
+            "description": "Enabled in new projects",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "Matches credentials rather than personal data",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "default",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "ConsoleDiffView": {
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFindingView"
+            },
+            "type": "array"
+          },
+          "after_count": {
+            "type": "integer"
+          },
+          "after_id": {
+            "type": "string"
+          },
+          "before_count": {
+            "type": "integer"
+          },
+          "before_id": {
+            "type": "string"
+          },
+          "changed": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFindingChangeView"
+            },
+            "type": "array"
+          },
+          "comparable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFindingView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "before_id",
+          "after_id",
+          "comparable",
+          "reason",
+          "added",
+          "removed",
+          "changed",
+          "before_count",
+          "after_count"
+        ],
+        "type": "object"
+      },
+      "ConsoleEventView": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "payload": {},
+          "schema_version": {
+            "type": "integer"
+          },
+          "sequence": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "kind",
+          "schema_version",
+          "payload",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleEvidenceView": {
+        "properties": {
+          "end": {
+            "type": "integer"
+          },
+          "item": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "turn": {
+            "type": "integer"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn",
+          "item",
+          "section",
+          "path",
+          "view",
+          "start",
+          "end",
+          "quote"
+        ],
+        "type": "object"
+      },
+      "ConsoleFindingChangeView": {
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/ConsoleFindingView"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ConsoleFindingView"
+          },
+          "code": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "code",
+          "before",
+          "after"
+        ],
+        "type": "object"
+      },
+      "ConsoleFindingCodeView": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "severity",
+          "origins"
+        ],
+        "type": "object"
+      },
+      "ConsoleFindingView": {
+        "properties": {
+          "attribution": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleAttributionView"
+            },
+            "type": "array"
+          },
+          "axes": {
+            "$ref": "#/components/schemas/ConsoleAxesView"
+          },
+          "code": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "detector_id": {
+            "type": "string"
+          },
+          "detector_version": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleEvidenceView"
+            },
+            "type": "array"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "flow": {
+            "$ref": "#/components/schemas/ConsoleFlowView"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "sink": {
+            "type": "string"
+          },
+          "trust": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "code",
+          "origin",
+          "trust",
+          "sink",
+          "axes",
+          "severity",
+          "confidence",
+          "detector_id",
+          "detector_version",
+          "evidence",
+          "attribution"
+        ],
+        "type": "object"
+      },
+      "ConsoleFlowPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFlowView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleFlowView": {
+        "properties": {
+          "confidence": {
+            "type": "number"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "sink": {
+            "type": "string"
+          },
+          "sink_tool_call_id": {
+            "type": "string"
+          },
+          "source_item": {
+            "type": "integer"
+          },
+          "source_origin": {
+            "type": "string"
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "source_turn": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_turn",
+          "source_item",
+          "source_origin",
+          "source_path",
+          "sink_tool_call_id",
+          "sink",
+          "relation",
+          "content_hash",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ConsoleGroupView": {
+        "properties": {
+          "calls": {
+            "type": "integer"
+          },
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCostView"
+            },
+            "type": "array"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "calls",
+          "failures",
+          "input_tokens",
+          "output_tokens",
+          "costs"
+        ],
+        "type": "object"
+      },
+      "ConsoleHealthView": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "cooldown_seconds": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "closed",
+              "open",
+              "half_open"
+            ],
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "channel_name",
+          "upstream_model",
+          "state",
+          "consecutive_failures",
+          "cooldown_seconds"
+        ],
+        "type": "object"
+      },
+      "ConsoleHitView": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "action",
+          "path",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "ConsoleItemView": {
+        "properties": {
+          "call_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "media": {
+            "$ref": "#/components/schemas/ConsoleMediaView"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tool_call": {
+            "$ref": "#/components/schemas/ConsoleToolCallView"
+          },
+          "tool_result": {
+            "$ref": "#/components/schemas/ConsoleToolResultView"
+          },
+          "trust": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "origin",
+          "trust",
+          "text",
+          "call_id"
+        ],
+        "type": "object"
+      },
+      "ConsoleLoginInput": {
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "type": "object"
+      },
+      "ConsoleLossView": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "code",
+          "detail",
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "ConsoleMediaView": {
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "mime_type",
+          "filename"
+        ],
+        "type": "object"
+      },
+      "ConsoleMemberView": {
+        "properties": {
+          "administrator": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "administrator",
+          "disabled"
+        ],
+        "type": "object"
+      },
+      "ConsoleModelView": {
+        "properties": {
+          "asked_at": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "confidence_known": {
+            "type": "boolean"
+          },
+          "harm": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "probability": {
+            "type": "number"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "unsafe": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "unsafe",
+          "probability",
+          "confidence",
+          "confidence_known",
+          "source",
+          "mode",
+          "harm",
+          "severity",
+          "model",
+          "asked_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorAgentView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "integer"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "high_findings": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "agent_key_id",
+          "label",
+          "calls",
+          "blocked",
+          "high_findings",
+          "last_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorBucketView": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "duration_p95": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "requests",
+          "errors",
+          "blocked",
+          "input_tokens",
+          "output_tokens",
+          "duration_p95"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorProjectView": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "high_findings": {
+            "type": "integer"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "calls",
+          "failures",
+          "blocked",
+          "high_findings",
+          "last_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorRecentView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "project_id",
+          "agent_key_id",
+          "model",
+          "severity",
+          "state",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorTotalsView": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "findings": {
+            "type": "integer"
+          },
+          "high_findings": {
+            "type": "integer"
+          },
+          "projects": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "failures",
+          "blocked",
+          "findings",
+          "high_findings",
+          "projects"
+        ],
+        "type": "object"
+      },
+      "ConsoleMonitorView": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleMonitorAgentView"
+            },
+            "type": "array"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleMonitorProjectView"
+            },
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleMonitorRecentView"
+            },
+            "type": "array"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleMonitorBucketView"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ConsoleMonitorTotalsView"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "since",
+          "totals",
+          "projects",
+          "series",
+          "agents",
+          "recent"
+        ],
+        "type": "object"
+      },
+      "ConsoleOperationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleOperationView"
+            },
+            "type": "array"
+          },
+          "next": {
+            "$ref": "#/components/schemas/ConsoleCursorView"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleOperationView": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Path parameters of the request",
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "action",
+          "project_id",
+          "detail",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsolePasswordInput": {
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "next": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "next"
+        ],
+        "type": "object"
+      },
+      "ConsolePolicyDecisionView": {
+        "properties": {
+          "action": {
+            "enum": [
+              "block",
+              "record"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "rule_name",
+          "action",
+          "severity",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ConsolePolicyPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsolePolicyVersionView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsolePolicyTestView": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsolePolicyDecisionView"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleFindingView"
+            },
+            "type": "array"
+          },
+          "max_severity": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "findings",
+          "decisions",
+          "verdict",
+          "max_severity"
+        ],
+        "type": "object"
+      },
+      "ConsolePolicyValidateView": {
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid"
+        ],
+        "type": "object"
+      },
+      "ConsolePolicyVersionView": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "document": {},
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "document",
+          "hash",
+          "note",
+          "created_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleProjectCreate": {
+        "properties": {
+          "concurrency": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "daily_token_quota": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "retention_days": {
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ConsoleProjectView": {
+        "properties": {
+          "active_policy_version": {
+            "type": "integer"
+          },
+          "blocked_24h": {
+            "type": "integer"
+          },
+          "calls_24h": {
+            "type": "integer"
+          },
+          "concurrency": {
+            "description": "0 means unlimited",
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "daily_token_quota": {
+            "description": "0 means unlimited",
+            "type": "integer"
+          },
+          "failure_rate": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_activity_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quota_usage_percent": {
+            "type": "integer"
+          },
+          "requests_per_minute": {
+            "description": "0 means unlimited",
+            "type": "integer"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "retention_days",
+          "requests_per_minute",
+          "concurrency",
+          "daily_token_quota",
+          "active_policy_version",
+          "version",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleRedactionView": {
+        "properties": {
+          "hits": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "ConsoleRiskAgentView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "integer"
+          },
+          "flows": {
+            "type": "integer"
+          },
+          "high": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_key_id",
+          "label",
+          "findings",
+          "high",
+          "flows",
+          "last_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleRiskCallView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "agent_key_id",
+          "model",
+          "severity",
+          "state",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleRiskCodeView": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "harm": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "source",
+          "mode",
+          "harm",
+          "severity",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ConsoleRiskCountView": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ConsoleRiskView": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskAgentView"
+            },
+            "type": "array"
+          },
+          "codes": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCodeView"
+            },
+            "type": "array"
+          },
+          "harms": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCountView"
+            },
+            "type": "array"
+          },
+          "high_recent": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCallView"
+            },
+            "type": "array"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCountView"
+            },
+            "type": "array"
+          },
+          "severities": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCountView"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRiskCountView"
+            },
+            "type": "array"
+          },
+          "total_findings": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "since",
+          "total_findings",
+          "sources",
+          "modes",
+          "harms",
+          "severities",
+          "codes",
+          "agents",
+          "high_recent"
+        ],
+        "type": "object"
+      },
+      "ConsoleRouteTarget": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "priority": {
+            "description": "Lower values are tried first",
+            "type": "integer"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "weight": {
+            "description": "Relative share among targets of the same priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel_id",
+          "upstream_model",
+          "priority",
+          "weight"
+        ],
+        "type": "object"
+      },
+      "ConsoleRouteView": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRouteTarget"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "targets",
+          "version",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleRuleInput": {
+        "properties": {
+          "action": {
+            "enum": [
+              "replace",
+              "block",
+              "alert"
+            ],
+            "type": "string"
+          },
+          "capture": {
+            "description": "Named group to replace instead of the whole match",
+            "type": "string"
+          },
+          "detector": {
+            "description": "Detector id; builtin rules only",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "builtin",
+              "regex"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pattern": {
+            "description": "RE2 expression; regex rules only",
+            "type": "string"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "ConsoleRuleTestView": {
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleHitView"
+            },
+            "type": "array"
+          },
+          "replaced": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "replaced",
+          "blocked",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "ConsoleRuleView": {
+        "properties": {
+          "action": {
+            "enum": [
+              "replace",
+              "block",
+              "alert"
+            ],
+            "type": "string"
+          },
+          "capture": {
+            "type": "string"
+          },
+          "detector": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "builtin",
+              "regex"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "detector",
+          "pattern",
+          "capture",
+          "label",
+          "action",
+          "enabled",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ConsoleSavePolicyInput": {
+        "properties": {
+          "document": {},
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "type": "object"
+      },
+      "ConsoleSeriesView": {
+        "properties": {
+          "bucket": {
+            "enum": [
+              "15m",
+              "1h",
+              "6h",
+              "1d"
+            ],
+            "type": "string"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleBucketView"
+            },
+            "type": "array"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelTraffic"
+            },
+            "type": "array"
+          },
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCostView"
+            },
+            "type": "array"
+          },
+          "finding_codes": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCodeCountView"
+            },
+            "type": "array"
+          },
+          "health": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleHealthView"
+            },
+            "type": "array"
+          },
+          "redactions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRedactionView"
+            },
+            "type": "array"
+          },
+          "severities": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSeverityCountView"
+            },
+            "type": "array"
+          },
+          "window": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "bucket",
+          "buckets",
+          "costs",
+          "redactions",
+          "severities",
+          "finding_codes",
+          "channels",
+          "health"
+        ],
+        "type": "object"
+      },
+      "ConsoleSessionView": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/ConsoleUserView"
+          }
+        },
+        "required": [
+          "user"
+        ],
+        "type": "object"
+      },
+      "ConsoleSeverityCountView": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "count"
+        ],
+        "type": "object"
+      },
+      "ConsoleStatsView": {
+        "properties": {
+          "costs": {
+            "description": "Spend per currency; amounts in different currencies are never added",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCostView"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleGroupView"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ConsoleTotalsView"
+          },
+          "window": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "totals",
+          "groups",
+          "costs"
+        ],
+        "type": "object"
+      },
+      "ConsoleTargetView": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value",
+          "host",
+          "path",
+          "command"
+        ],
+        "type": "object"
+      },
+      "ConsoleTestPolicyInput": {
+        "properties": {
+          "document": {},
+          "trace": {
+            "description": "An observation.Trace object"
+          }
+        },
+        "required": [
+          "document",
+          "trace"
+        ],
+        "type": "object"
+      },
+      "ConsoleTestRuleInput": {
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/ConsoleRuleInput"
+          },
+          "text": {
+            "maxLength": 65536,
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "text"
+        ],
+        "type": "object"
+      },
+      "ConsoleToolCallView": {
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sink": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ConsoleTargetView"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "arguments",
+          "target",
+          "capabilities",
+          "sink"
+        ],
+        "type": "object"
+      },
+      "ConsoleToolResultView": {
+        "properties": {
+          "call_id": {
+            "type": "string"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleItemView"
+            },
+            "type": "array"
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "name",
+          "is_error",
+          "content"
+        ],
+        "type": "object"
+      },
+      "ConsoleToolView": {
+        "properties": {
+          "boundary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sensitivity": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "description",
+          "boundary",
+          "sensitivity",
+          "integrity",
+          "tags"
+        ],
+        "type": "object"
+      },
+      "ConsoleTotalsView": {
+        "properties": {
+          "blocked": {
+            "type": "integer"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "duration_p50": {
+            "type": "integer"
+          },
+          "duration_p95": {
+            "type": "integer"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "first_token_p50": {
+            "type": "integer"
+          },
+          "first_token_p95": {
+            "type": "integer"
+          },
+          "high_severity": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "redaction_hits": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "failures",
+          "blocked",
+          "input_tokens",
+          "output_tokens",
+          "redaction_hits",
+          "high_severity",
+          "first_token_p50",
+          "first_token_p95",
+          "duration_p50",
+          "duration_p95"
+        ],
+        "type": "object"
+      },
+      "ConsoleTranscriptView": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleToolView"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleTurnView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "turns",
+          "tools",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "ConsoleTreeNodeView": {
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/ConsoleCallView"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "ConsoleTurnView": {
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleItemView"
+            },
+            "type": "array"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "role",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateChannelInput": {
+        "properties": {
+          "allow_private_network": {
+            "type": "boolean"
+          },
+          "count_tokens_endpoint": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "first_byte_timeout_seconds": {
+            "type": "integer"
+          },
+          "format": {
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelModelView"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "format",
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateDecisionModelInput": {
+        "properties": {
+          "allow_private": {
+            "type": "boolean"
+          },
+          "api_key": {
+            "type": "string"
+          },
+          "authorize_below": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "daily_token_budget": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "typesafe",
+              "openai"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "use_raw": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "model"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateKeyInput": {
+        "properties": {
+          "concurrency": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "agent",
+              "user",
+              "service"
+            ],
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateProjectInput": {
+        "properties": {
+          "concurrency": {
+            "type": "integer"
+          },
+          "daily_token_quota": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "type": "integer"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "retention_days",
+          "requests_per_minute",
+          "concurrency",
+          "daily_token_quota",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateRouteInput": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleRouteTarget"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateRuleInput": {
+        "properties": {
+          "action": {
+            "enum": [
+              "replace",
+              "block",
+              "alert"
+            ],
+            "type": "string"
+          },
+          "capture": {
+            "description": "Named group to replace instead of the whole match",
+            "type": "string"
+          },
+          "detector": {
+            "description": "Detector id; builtin rules only",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "builtin",
+              "regex"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pattern": {
+            "description": "RE2 expression; regex rules only",
+            "type": "string"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "ConsoleUpdateUserInput": {
+        "properties": {
+          "administrator": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ConsoleUserInput": {
+        "properties": {
+          "administrator": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "type": "object"
+      },
+      "ConsoleUserView": {
+        "properties": {
+          "administrator": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "initial_password": {
+            "description": "Returned once, when the account is created or its password is reset",
+            "type": "string"
+          },
+          "must_change_password": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "administrator",
+          "must_change_password",
+          "disabled",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleValidatePolicyInput": {
+        "properties": {
+          "document": {}
+        },
+        "required": [
+          "document"
+        ],
+        "type": "object"
+      },
+      "ConsoleVerdictView": {
+        "properties": {
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "value": {
+            "enum": [
+              "safe",
+              "unsafe",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "confidence",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ConsoleVersionsView": {
+        "properties": {
+          "adapter": {
+            "type": "string"
+          },
+          "catalogue": {
+            "type": "string"
+          },
+          "decision_model": {
+            "type": "string"
+          },
+          "detectors": {
+            "type": "string"
+          },
+          "taxonomy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter",
+          "detectors",
+          "catalogue",
+          "taxonomy",
+          "decision_model"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "session": {
+        "description": "Console session",
+        "in": "cookie",
+        "name": "safeagent_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.",
+    "title": "SafeAgent console API",
+    "version": "0.2.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/console/api/channels": {
+      "get": {
+        "operationId": "listChannels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleChannelView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      },
+      "post": {
+        "operationId": "createChannel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleChannelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}": {
+      "get": {
+        "operationId": "getChannel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      },
+      "put": {
+        "operationId": "updateChannel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateChannelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}/health": {
+      "get": {
+        "operationId": "getChannelHealth",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleHealthView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}/keys": {
+      "get": {
+        "operationId": "listChannelKeys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleChannelKeyView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      },
+      "post": {
+        "operationId": "createChannelKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCreateChannelKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleChannelKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}/keys/{key_id}": {
+      "delete": {
+        "operationId": "deleteChannelKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/detectors": {
+      "get": {
+        "operationId": "listDetectors",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleDetectorView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "detectors"
+        ]
+      }
+    },
+    "/console/api/finding-codes": {
+      "get": {
+        "operationId": "listFindingCodes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleFindingCodeView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "finding-codes"
+        ]
+      }
+    },
+    "/console/api/monitor": {
+      "get": {
+        "operationId": "getMonitor",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleMonitorView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/console/api/operation-logs": {
+      "get": {
+        "operationId": "listOperationLogs",
+        "parameters": [
+          {
+            "description": "RFC 3339 time of the last row of the previous page",
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "RFC 3339 time of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last row of the previous page",
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "description": "ID of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleOperationPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "operation-logs"
+        ]
+      }
+    },
+    "/console/api/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleProjectView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "createProject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleProjectView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "deleteProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleProjectView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "projects"
+        ]
+      },
+      "put": {
+        "operationId": "updateProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateProjectInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleProjectView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/analyses/diff": {
+      "get": {
+        "operationId": "diffAnalyses",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "before",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleDiffView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "analyses"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/analysis-batches": {
+      "get": {
+        "operationId": "listAnalysisBatches",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAnalysisBatchPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "analysis-batches"
+        ]
+      },
+      "post": {
+        "operationId": "createAnalysisBatch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleAnalysisBatchInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAnalysisBatchView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "analysis-batches"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/calls": {
+      "get": {
+        "operationId": "listCalls",
+        "parameters": [
+          {
+            "description": "RFC 3339 time of the last row of the previous page",
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "RFC 3339 time of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last row of the previous page",
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "description": "ID of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "enum": [
+                "running",
+                "completed",
+                "failed",
+                "blocked",
+                "cancelled",
+                "interrupted",
+                "rejected"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_severity",
+            "schema": {
+              "enum": [
+                "info",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_key_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleCallPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "calls"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/calls/{call_id}": {
+      "get": {
+        "operationId": "getCall",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "call_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleCallDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "calls"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/calls/{call_id}/analyses": {
+      "get": {
+        "operationId": "listCallAnalyses",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "call_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAnalysisPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "calls"
+        ]
+      },
+      "post": {
+        "operationId": "reanalyzeCall",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "call_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAnalysisView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "calls"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/channel-options": {
+      "get": {
+        "operationId": "listChannelOptions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleChannelOption"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channel-options"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/conversations": {
+      "get": {
+        "operationId": "listConversations",
+        "parameters": [
+          {
+            "description": "RFC 3339 time of the last row of the previous page",
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "RFC 3339 time of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last row of the previous page",
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "description": "ID of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleConversationPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/conversations/{session_id}": {
+      "get": {
+        "operationId": "getConversation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleConversationTreeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/decision-model": {
+      "get": {
+        "operationId": "getDecisionModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleDecisionModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "decision-model"
+        ]
+      },
+      "put": {
+        "operationId": "updateDecisionModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateDecisionModelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleDecisionModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "decision-model"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/flows": {
+      "get": {
+        "operationId": "listProjectFlows",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent_key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleFlowPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "flows"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/keys": {
+      "get": {
+        "operationId": "listKeys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleAgentKeyView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ]
+      },
+      "post": {
+        "operationId": "createKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCreateKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAgentKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/keys/{key_id}": {
+      "delete": {
+        "operationId": "revokeKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAgentKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ]
+      },
+      "put": {
+        "operationId": "updateKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAgentKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/members": {
+      "get": {
+        "operationId": "listMembers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleMemberView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "members"
+        ]
+      },
+      "post": {
+        "operationId": "addMember",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleAddMemberInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleMemberView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "removeMember",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/operations": {
+      "get": {
+        "operationId": "listProjectOperations",
+        "parameters": [
+          {
+            "description": "RFC 3339 time of the last row of the previous page",
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "RFC 3339 time of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last row of the previous page",
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "description": "ID of the last row of the previous page",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleOperationPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/policies": {
+      "get": {
+        "operationId": "listPolicies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      },
+      "post": {
+        "operationId": "savePolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleSavePolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyVersionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/policies/active": {
+      "get": {
+        "operationId": "getActivePolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyVersionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/policies/test": {
+      "post": {
+        "operationId": "testPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleTestPolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyTestView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/policies/validate": {
+      "post": {
+        "operationId": "validatePolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleValidatePolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyValidateView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/policies/{version}/rollback": {
+      "post": {
+        "operationId": "rollbackPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolePolicyVersionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/risk": {
+      "get": {
+        "operationId": "getProjectRisk",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRiskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "risk"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/routes": {
+      "get": {
+        "operationId": "listRoutes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleRouteView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "post": {
+        "operationId": "createRoute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCreateRouteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRouteView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/routes/{route_id}": {
+      "delete": {
+        "operationId": "deleteRoute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "put": {
+        "operationId": "updateRoute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateRouteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRouteView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/rules": {
+      "get": {
+        "operationId": "listRules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleRuleView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "rules"
+        ]
+      },
+      "post": {
+        "operationId": "createRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCreateRuleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRuleView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/rules/test": {
+      "post": {
+        "operationId": "testRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleTestRuleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRuleTestView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/rules/{rule_id}": {
+      "delete": {
+        "operationId": "deleteRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "rules"
+        ]
+      },
+      "put": {
+        "operationId": "updateRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateRuleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRuleView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/series": {
+      "get": {
+        "operationId": "getProjectSeries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "schema": {
+              "enum": [
+                "15m",
+                "1h",
+                "6h",
+                "1d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSeriesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "series"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/stats": {
+      "get": {
+        "operationId": "getProjectStats",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group",
+            "schema": {
+              "enum": [
+                "model",
+                "agent_key"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleStatsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "stats"
+        ]
+      }
+    },
+    "/console/api/session": {
+      "delete": {
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "session"
+        ]
+      },
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "session"
+        ]
+      },
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleLoginInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/console/api/session/password": {
+      "put": {
+        "operationId": "changePassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsolePasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/console/api/users": {
+      "get": {
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleUserView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "operationId": "createUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleUserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/console/api/users/{user_id}": {
+      "put": {
+        "operationId": "updateUser",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleUserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/console/api/users/{user_id}/password": {
+      "post": {
+        "operationId": "resetPassword",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleUserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "users"
+        ]
+      }
+    }
+  }
+}

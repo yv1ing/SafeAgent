@@ -1,0 +1,26 @@
+# Local configuration and secrets
+/config.toml
+/config.*.toml
+!/config.example.toml
+.env
+.env.*
+
+# Build output and caches
+/build/
+/web/dist/
+node_modules/
+*.tsbuildinfo
+*.log
+
+# Coverage reports
+coverage/
+coverage.out
+*.coverprofile
+
+# Acceptance lab state
+/testenv/runtime/
+
+# Editor and operating system files
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,32 @@
+SafeAgent
+Copyright 2026 yv1ing
+
+This product includes protocol test fixtures copied unmodified from AxonHub
+1.0.0-rc.4 (https://github.com/looplj/axonhub), located under
+internal/protocol/format/testdata/axonhub. AxonHub is licensed under the Apache
+License, Version 2.0; the full text is included in that directory as LICENSE.
+These fixtures are read only by tests and are excluded from the container image.
+
+The analysis model draws on two papers. This product contains no source code
+from either paper or its reference implementation.
+
+Dongrui Liu et al., "AgentDoG: A Diagnostic Guardrail Framework for AI Agent
+Safety and Security", arXiv:2601.18491v2,
+https://arxiv.org/abs/2601.18491. The design borrows the 8/14/10 risk taxonomy
+and the treatment of a whole agent trajectory as the unit of analysis. The
+paper's reference repository (https://github.com/AI45Lab/AgentDoG) is licensed
+under the Apache License, Version 2.0; the paper itself is distributed under
+the arXiv non-exclusive distribution license.
+
+Jiaqi Luo et al., "AgentGuard: An Attribute-Based Access Control Framework for
+Tool-Use LLM-Based Agent", arXiv:2605.28071v1,
+https://arxiv.org/abs/2605.28071. The design borrows the runtime attribute
+vocabulary (principal, tool, arguments, target and trust) and the idea of
+applying policy to single tool calls and tool chains. The paper's reference
+repository (https://github.com/WhitzardAgent/AgentGuard) is licensed under
+GPL-3.0, while the paper's availability section states MIT. No code from
+either is included here.
+
+See docs/agent/papers.md for the ideas adopted and left out.
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE.
