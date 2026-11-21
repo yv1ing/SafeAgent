@@ -9,43 +9,47 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yv1ing/SafeAgent/internal/api/console"
-	apigateway "github.com/yv1ing/SafeAgent/internal/api/gateway"
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
+	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
+	"github.com/yv1ing/SafeAgent/internal/pipeline"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
 	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
-	"github.com/yv1ing/SafeAgent/internal/service/gateway"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/transport/console"
+	apigateway "github.com/yv1ing/SafeAgent/internal/transport/http"
 )
 
 type dependencies struct {
 	database  *repository.Store
 	selector  *routing.Selector
-	settings  gateway.Settings
+	settings  pipeline.Settings
 	diagnosis *diagnosis.Service
 }
 
 func assemble(configuration config.Config, database *repository.Store) (*gin.Engine, dependencies) {
 	selector := routing.NewSelector(routing.NewBreakers(nil), routing.NewKeyPool(nil), routing.NewSticky(nil), configuration.MaxAttempts)
-	settings := gateway.Settings{
+	settings := pipeline.Settings{
 		MaxRequestBytes:  configuration.MaxRequestBytes,
 		MaxResponseBytes: configuration.MaxResponseBytes,
 		MaxStreamBytes:   configuration.MaxStreamBytes,
 		StreamIdle:       time.Duration(configuration.StreamIdleSeconds) * time.Second,
+		Keepalive:        15 * time.Second,
 		ToolHoldBytes:    configuration.ToolHoldBytes,
 		MaxAttempts:      configuration.MaxAttempts,
 	}
+	providers := provider.NewRegistry(builtin.All()...)
 	diagnosisService := diagnosis.New(database, diagnosis.Options{})
-	pipeline := gateway.New(database, database.Secret, gateway.Options{Settings: settings, Selector: selector, Limiter: limit.New(nil), Veto: diagnosisService})
-	services := serviceconsole.NewServices(database, selector, diagnosisService)
+	online := pipeline.New(database, database.Secret, pipeline.Options{Settings: settings, Providers: providers, Selector: selector, Limiter: limit.New(nil), Veto: diagnosisService})
+	services := serviceconsole.NewServices(database, selector, providers, diagnosisService)
 
 	router := gin.New()
 	router.ContextWithFallback = true
 	_ = router.SetTrustedProxies(configuration.TrustedProxies)
 	router.Use(securityHeaders, recoverPanic)
-	apigateway.NewHandler(pipeline, settings).Register(router)
+	apigateway.NewHandler(online, settings).Register(router)
 	console.New(services, console.Options{SecureCookies: configuration.SecureCookies, PublicOrigin: configuration.PublicOrigin}).Register(router)
 	router.GET("/health", health(database))
 	return router, dependencies{database: database, selector: selector, settings: settings, diagnosis: diagnosisService}

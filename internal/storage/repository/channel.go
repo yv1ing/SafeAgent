@@ -19,8 +19,8 @@ func (store *Store) CreateChannel(ctx context.Context, channel *entity.Channel) 
 
 func (store *Store) UpdateChannel(ctx context.Context, id string, channel entity.Channel, version int64) (*entity.Channel, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Channel)(nil)).
-		Set("name = ?, format = ?, vendor = ?, endpoint = ?, count_tokens_endpoint = ?, headers = ?, forward_headers = ?, default_max_output_tokens = ?, models = ?, currency = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
-			channel.Name, channel.Format, channel.Vendor, channel.Endpoint, channel.CountTokensEndpoint, channel.Headers, channel.ForwardHeaders, channel.DefaultMaxOutputTokens, channel.Models, channel.Currency, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
+		Set("name = ?, provider_id = ?, custom = ?, endpoints = ?, headers = ?, forward_headers = ?, default_max_output_tokens = ?, models = ?, currency = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
+			channel.Name, channel.ProviderID, channel.Custom, channel.Endpoints, channel.Headers, channel.ForwardHeaders, channel.DefaultMaxOutputTokens, channel.Models, channel.Currency, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
 		return nil, err
@@ -29,6 +29,31 @@ func (store *Store) UpdateChannel(ctx context.Context, id string, channel entity
 		return nil, ErrVersionConflict
 	}
 	return store.Channel(ctx, id)
+}
+
+// AddCapabilityOverride records a field an upstream rejected. The write is idempotent per format
+// and field, so concurrent rejections do not accumulate duplicates.
+func (store *Store) AddCapabilityOverride(ctx context.Context, channelID, format, field, reason string) error {
+	channel, err := store.Channel(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	for _, existing := range channel.CapabilityOverrides {
+		if existing.Format == format && existing.Field == field {
+			return nil
+		}
+	}
+	channel.CapabilityOverrides = append(channel.CapabilityOverrides, entity.CapabilityOverride{Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
+	result, err := store.DB.NewUpdate().Model((*entity.Channel)(nil)).
+		Set("capability_overrides = ?, version = version + 1", channel.CapabilityOverrides).
+		Where("id = ? AND version = ?", channelID, channel.Version).Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrVersionConflict
+	}
+	return nil
 }
 
 func (store *Store) ChannelKeys(ctx context.Context, channelID string) ([]entity.ChannelKey, error) {

@@ -34,16 +34,20 @@ func (bucket *Bucket) expire(now time.Time) {
 	}
 }
 
-// makeRoom bounds the map even when every request uses a different key. One arbitrary entry is
-// evicted; the caller holds the lock.
+// makeRoom bounds the map even when every request uses a different key. The oldest entry is
+// evicted, so a rotating attacker cannot push out a recently blocked key at random.
 func (bucket *Bucket) makeRoom() {
 	if len(bucket.entries) < maximumEntries {
 		return
 	}
-	for name := range bucket.entries {
-		delete(bucket.entries, name)
-		return
+	oldest := ""
+	var oldestAt time.Time
+	for name, entry := range bucket.entries {
+		if oldest == "" || entry.started.Before(oldestAt) {
+			oldest, oldestAt = name, entry.started
+		}
 	}
+	delete(bucket.entries, oldest)
 }
 
 // Allow counts one use of key and reports whether it stayed within the maximum.

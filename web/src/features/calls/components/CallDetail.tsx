@@ -5,6 +5,7 @@ import type { ConsoleCallView } from '../../../api/generated/models';
 import { TableSkeleton } from '../../../components/data/DataTable';
 import { QueryState } from '../../../components/feedback/QueryState';
 import { SeverityBadge, StateBadge } from '../../../components/feedback/StatusBadge';
+import { Badge } from '../../../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { usePollingInterval } from '../../../hooks/usePolling';
 import { useLocale } from '../../../i18n';
@@ -17,6 +18,7 @@ import {
 } from '../../../lib/format';
 import { AttemptWaterfall } from './AttemptWaterfall';
 import { AnalysesSection, DecisionsSection, EventsSection, Section } from './CallSections';
+import { Timeline } from './Timeline';
 import { Transcript } from './Transcript';
 
 function Metrics({ call }: { call: ConsoleCallView }) {
@@ -71,6 +73,11 @@ export function CallDetail({ projectId, callId }: { projectId: string; callId: s
               <div className="flex flex-wrap items-center gap-2">
                 <StateBadge state={call.state} />
                 <SeverityBadge severity={call.max_severity} />
+                <Badge tone={loaded.integrity.status === 'verified' ? 'success' : 'neutral'}>
+                  {t.call.integrityStatuses[
+                    loaded.integrity.status as keyof typeof t.call.integrityStatuses
+                  ] ?? loaded.integrity.status}
+                </Badge>
                 <h2 className="font-mono text-base font-semibold">{call.public_model}</h2>
                 <span className="ml-auto text-xs text-muted">
                   {call.finding_count}{' '}
@@ -105,6 +112,7 @@ export function CallDetail({ projectId, callId }: { projectId: string; callId: s
                 <TabsTrigger value="analysis">{t.call.analysis}</TabsTrigger>
                 <TabsTrigger value="transcript">{t.call.transcript}</TabsTrigger>
                 <TabsTrigger value="attempts">{t.call.attempts}</TabsTrigger>
+                <TabsTrigger value="timeline">{t.call.timeline}</TabsTrigger>
                 <TabsTrigger value="events">{t.call.events}</TabsTrigger>
               </TabsList>
               <TabsContent value="analysis" className="flex flex-col gap-5 pt-3">
@@ -120,6 +128,9 @@ export function CallDetail({ projectId, callId }: { projectId: string; callId: s
                 ) : (
                   <p className="text-sm text-muted">{t.call.noAttempts}</p>
                 )}
+              </TabsContent>
+              <TabsContent value="timeline" className="pt-3">
+                <Timeline detail={loaded} />
               </TabsContent>
               <TabsContent value="events" className="pt-3">
                 <EventsSection detail={loaded} />

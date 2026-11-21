@@ -18,8 +18,8 @@ import { useCreateChannel } from './hooks';
 
 const blankChannel: ConsoleChannelInput = {
   name: '',
-  format: 'openai_chat',
-  endpoint: '',
+  provider_id: 'anthropic',
+  endpoints: [],
   currency: 'USD',
   enabled: true,
 };
@@ -71,22 +71,16 @@ export function ChannelsPage() {
                   ),
                 },
                 {
-                  key: 'format',
-                  header: t.channels.format,
+                  key: 'provider',
+                  header: t.channels.provider,
                   className: 'font-mono text-xs',
-                  cell: (row) => row.format,
+                  cell: (row) => row.provider_id,
                 },
                 {
-                  key: 'endpoint',
-                  header: t.channels.endpoint,
-                  cell: (row) => (
-                    <span
-                      className="block max-w-sm truncate font-mono text-xs text-muted"
-                      title={row.endpoint}
-                    >
-                      {row.endpoint}
-                    </span>
-                  ),
+                  key: 'formats',
+                  header: t.channels.formats,
+                  className: 'font-mono text-xs text-muted',
+                  cell: (row) => (row.formats ?? []).join(', '),
                 },
                 {
                   key: 'models',

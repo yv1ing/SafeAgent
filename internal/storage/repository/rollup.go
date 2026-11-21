@@ -19,7 +19,7 @@ func (store *Store) Rollup(ctx context.Context, now time.Time) error {
 		lookback time.Duration
 	}{
 		{"1h", "1 hour", time.Hour, 90 * 24 * time.Hour},
-		{"1d", "1 day", 24 * time.Hour, 7 * 24 * time.Hour},
+		{"1d", "1 day", 24 * time.Hour, 31 * 24 * time.Hour},
 	}
 	for _, window := range windows {
 		since := now.Add(-window.lookback).Truncate(window.width)

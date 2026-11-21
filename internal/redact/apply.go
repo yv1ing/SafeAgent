@@ -6,14 +6,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yv1ing/SafeAgent/internal/protocol"
+	"github.com/yv1ing/SafeAgent/internal/llm/model"
 )
 
 // ApplyRequest redacts the request in place. Redaction runs twice over the same request: the first,
 // dry pass registers every value so placeholder collisions are known before any placeholder is
 // issued; the second pass rewrites the request. When Result.Blocked is set the request must not be
 // forwarded, because the blocked texts have been cleared.
-func (scope *Scope) ApplyRequest(request *protocol.Request) (*Result, error) {
+func (scope *Scope) ApplyRequest(request *model.Request) (*Result, error) {
 	if scope.engine.Empty() {
 		return &Result{}, nil
 	}
@@ -70,13 +70,42 @@ func (applier *applier) immutables(values ...string) error {
 	return nil
 }
 
-func (applier *applier) request(request *protocol.Request) error {
+func (applier *applier) request(request *model.Request) error {
 	request.Instructions = applier.text(request.Instructions, "instructions")
 	request.User = applier.text(request.User, "user")
 	request.SafetyIdentifier = applier.text(request.SafetyIdentifier, "safety_identifier")
 	request.PromptCacheKey = applier.text(request.PromptCacheKey, "prompt_cache_key")
+	// These values are structural: a rule match cannot be rewritten in place, so the request is
+	// refused instead of forwarding the value upstream.
+	if err := applier.immutables(request.Model); err != nil {
+		return err
+	}
 	if err := applier.immutables(request.Stop...); err != nil {
 		return err
+	}
+	if err := applier.immutables(request.Include...); err != nil {
+		return err
+	}
+	if err := applier.immutables(request.Modalities...); err != nil {
+		return err
+	}
+	if err := applier.immutables(request.ServiceTier, request.Verbosity, request.Truncation, request.PromptCacheRetention); err != nil {
+		return err
+	}
+	for key := range request.LogitBias {
+		if err := applier.immutable(key); err != nil {
+			return err
+		}
+	}
+	for _, setting := range request.SafetySettings {
+		if err := applier.immutables(setting.Category, setting.Threshold); err != nil {
+			return err
+		}
+	}
+	if request.Reasoning != nil {
+		if err := applier.immutables(request.Reasoning.Effort, request.Reasoning.Summary, request.Reasoning.Display); err != nil {
+			return err
+		}
 	}
 	if request.ToolChoice != nil {
 		if err := applier.immutables(request.ToolChoice.Names...); err != nil {
@@ -110,7 +139,7 @@ func (applier *applier) request(request *protocol.Request) error {
 	return applier.raw(request.Raw, "raw")
 }
 
-func (applier *applier) metadata(request *protocol.Request) error {
+func (applier *applier) metadata(request *model.Request) error {
 	if len(request.Metadata) == 0 {
 		return nil
 	}
@@ -134,7 +163,7 @@ func (applier *applier) metadata(request *protocol.Request) error {
 	return nil
 }
 
-func (applier *applier) tool(tool *protocol.Tool, path string) error {
+func (applier *applier) tool(tool *model.Tool, path string) error {
 	if err := applier.immutable(tool.Name); err != nil {
 		return err
 	}
@@ -154,7 +183,7 @@ func (applier *applier) tool(tool *protocol.Tool, path string) error {
 	return applier.raw(tool.Raw, path+".raw")
 }
 
-func (applier *applier) item(item *protocol.Item, path string) error {
+func (applier *applier) item(item *model.Item, path string) error {
 	if item.ToolCall != nil {
 		if err := applier.toolCall(item.ToolCall, path+".tool_call"); err != nil {
 			return err
@@ -163,8 +192,9 @@ func (applier *applier) item(item *protocol.Item, path string) error {
 	if err := applier.immutables(item.CallID, item.Name); err != nil {
 		return err
 	}
-	if item.Kind == protocol.ItemReasoning {
-		applier.reasoning(item, path+".reasoning")
+	originalReasoning := ""
+	if item.Kind == model.ItemReasoning {
+		originalReasoning = item.Text()
 	}
 	for index := range item.Parts {
 		if err := applier.part(&item.Parts[index], path+".parts["+strconv.Itoa(index)+"]"); err != nil {
@@ -178,18 +208,21 @@ func (applier *applier) item(item *protocol.Item, path string) error {
 		}
 		item.Native = redacted
 	}
+	if item.Kind == model.ItemReasoning {
+		applier.reasoningSignature(item, originalReasoning)
+	}
 	return applier.raw(item.Raw, path+".raw")
 }
 
-func (applier *applier) part(part *protocol.Part, path string) error {
+func (applier *applier) part(part *model.Part, path string) error {
 	switch part.Kind {
-	case protocol.PartText, protocol.PartRefusal, protocol.PartReasoningText, protocol.PartReasoningSummary:
+	case model.PartText, model.PartRefusal, model.PartReasoningText, model.PartReasoningSummary:
 		part.Text = applier.text(part.Text, path+".text")
-	case protocol.PartRedactedReasoning:
+	case model.PartRedactedReasoning:
 		if err := applier.immutable(part.Text); err != nil {
 			return err
 		}
-	case protocol.PartMedia:
+	case model.PartMedia:
 		if err := applier.media(part.Media, path+".media"); err != nil {
 			return err
 		}
@@ -216,31 +249,23 @@ func (applier *applier) part(part *protocol.Part, path string) error {
 	return applier.raw(part.Raw, path+".raw")
 }
 
-// reasoning redacts the reasoning text the client echoed back. Its signature was issued for the
-// text the client was shown, which is the restored form of what the provider produced; redacting
-// it again yields the provider's text, so the signature stays valid as long as the echoed text is
-// the text it was issued for. Without that proof a rewritten text loses its signature.
-func (applier *applier) reasoning(item *protocol.Item, path string) {
-	original := item.Text()
-	for index := range item.Parts {
-		part := &item.Parts[index]
-		if part.Kind == protocol.PartReasoningText || part.Kind == protocol.PartReasoningSummary {
-			part.Text = applier.text(part.Text, path+".text["+strconv.Itoa(index)+"]")
-		}
-	}
+// reasoningSignature drops a signature whose text was rewritten by redaction. Its signature was
+// issued for the text the client was shown, which is the restored form of what the provider
+// produced; the text stays either way.
+func (applier *applier) reasoningSignature(item *model.Item, original string) {
 	if item.Text() == original || item.Reasoning == nil || item.Reasoning.Signature == nil {
 		return
 	}
-	if item.Reasoning.Signature.TextDigest != protocol.TextDigest(original) {
+	if item.Reasoning.Signature.TextDigest != model.TextDigest(original) {
 		item.Reasoning.Signature = nil
 	}
 }
 
-func (applier *applier) toolCall(call *protocol.ToolCall, path string) error {
+func (applier *applier) toolCall(call *model.ToolCall, path string) error {
 	if err := applier.immutables(call.ID, call.Name); err != nil {
 		return err
 	}
-	if call.Kind == protocol.ToolCustom {
+	if call.Kind == model.ToolCustom {
 		call.Arguments = applier.text(call.Arguments, path+".arguments")
 		return nil
 	}
@@ -249,7 +274,7 @@ func (applier *applier) toolCall(call *protocol.ToolCall, path string) error {
 	return err
 }
 
-func (applier *applier) media(media *protocol.Media, path string) error {
+func (applier *applier) media(media *model.Media, path string) error {
 	if media == nil {
 		return nil
 	}
@@ -264,7 +289,7 @@ func (applier *applier) media(media *protocol.Media, path string) error {
 		return ErrImmutablePosition
 	}
 	redacted := applier.text(string(decoded), path+".data")
-	if !applier.dry {
+	if !applier.dry && redacted != string(decoded) {
 		media.Data = base64.StdEncoding.EncodeToString([]byte(redacted))
 	}
 	return nil
@@ -290,7 +315,7 @@ func textualMIME(mimeType string) bool {
 	return strings.HasPrefix(mimeType, "text/") || mimeType == "application/json" || mimeType == "application/xml"
 }
 
-func (applier *applier) raw(raw *protocol.Raw, path string) error {
+func (applier *applier) raw(raw *model.Raw, path string) error {
 	if raw == nil {
 		return nil
 	}

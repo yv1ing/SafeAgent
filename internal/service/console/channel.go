@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
@@ -29,7 +30,6 @@ const (
 )
 
 var (
-	Vendors    = []string{"openai", "anthropic", "google"}
 	Currencies = []string{"USD", "CNY", "EUR", "JPY", "GBP"}
 
 	headerNamePattern = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$")
@@ -47,20 +47,20 @@ var (
 )
 
 type ChannelService struct {
-	store    *repository.Store
-	selector *routing.Selector
+	store     *repository.Store
+	selector  *routing.Selector
+	providers *provider.Registry
 }
 
-func NewChannelService(store *repository.Store, selector *routing.Selector) *ChannelService {
-	return &ChannelService{store: store, selector: selector}
+func NewChannelService(store *repository.Store, selector *routing.Selector, providers *provider.Registry) *ChannelService {
+	return &ChannelService{store: store, selector: selector, providers: providers}
 }
 
 type ChannelInput struct {
 	Name                    string
-	Format                  string
-	Vendor                  string
-	Endpoint                string
-	CountTokensEndpoint     string
+	ProviderID              string
+	Custom                  bool
+	Endpoints               []entity.ChannelEndpoint
 	Headers                 map[string]string
 	ForwardHeaders          []string
 	DefaultMaxOutputTokens  int
@@ -74,7 +74,12 @@ type ChannelInput struct {
 }
 
 func (input ChannelInput) entity() entity.Channel {
-	return entity.Channel{Name: input.Name, Format: input.Format, Vendor: input.Vendor, Endpoint: input.Endpoint, CountTokensEndpoint: input.CountTokensEndpoint, Headers: input.Headers, ForwardHeaders: input.ForwardHeaders, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Models: input.Models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled}
+	return entity.Channel{
+		Name: input.Name, ProviderID: input.ProviderID, Custom: input.Custom, Endpoints: input.Endpoints,
+		Headers: input.Headers, ForwardHeaders: input.ForwardHeaders, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
+		Models: input.Models, Currency: input.Currency, TimeoutSeconds: input.TimeoutSeconds,
+		FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled,
+	}
 }
 
 func (service *ChannelService) List(ctx context.Context, actor Actor) ([]entity.Channel, error) {
@@ -96,7 +101,7 @@ func (service *ChannelService) Create(ctx context.Context, actor Actor, input Ch
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
-	normalized, err := input.normalize()
+	normalized, err := input.normalize(service.providers)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +122,7 @@ func (service *ChannelService) Update(ctx context.Context, actor Actor, channelI
 		return nil, Translate(err)
 	}
 	input.Headers = mergeHeaders(existing.Headers, input.Headers)
-	normalized, err := input.normalize()
+	normalized, err := input.normalize(service.providers)
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +132,10 @@ func (service *ChannelService) Update(ctx context.Context, actor Actor, channelI
 
 // ChannelOption is what a project member needs to point a route at a channel.
 type ChannelOption struct {
-	ID     string
-	Name   string
-	Format string
-	Models []string
+	ID      string
+	Name    string
+	Formats []string
+	Models  []string
 }
 
 func (service *ChannelService) Options(ctx context.Context, actor Actor, projectID string) ([]ChannelOption, error) {
@@ -150,9 +155,34 @@ func (service *ChannelService) Options(ctx context.Context, actor Actor, project
 		for _, model := range channel.Models {
 			names = append(names, model.Name)
 		}
-		options = append(options, ChannelOption{ID: channel.ID, Name: channel.Name, Format: channel.Format, Models: names})
+		options = append(options, ChannelOption{ID: channel.ID, Name: channel.Name, Formats: service.formats(channel), Models: names})
 	}
 	return options, nil
+}
+
+// FormatsOf exposes the enabled formats of a channel to the console view.
+func (service *ChannelService) FormatsOf(channel entity.Channel) []string {
+	return service.formats(channel)
+}
+
+func (service *ChannelService) formats(channel entity.Channel) []string {
+	spec, found := service.providers.Get(channel.ProviderID)
+	if !found {
+		return nil
+	}
+	disabled := map[string]bool{}
+	for _, endpoint := range channel.Endpoints {
+		if endpoint.Disabled {
+			disabled[endpoint.Format] = true
+		}
+	}
+	formats := make([]string, 0, len(spec.Endpoints))
+	for _, format := range spec.Formats() {
+		if !disabled[string(format)] {
+			formats = append(formats, string(format))
+		}
+	}
+	return formats
 }
 
 // ChannelHealth is the live breaker state of one channel model.
@@ -173,4 +203,46 @@ func (service *ChannelService) Health(ctx context.Context, actor Actor, channelI
 		health = append(health, ChannelHealth{ChannelID: channel.ID, ChannelName: channel.Name, UpstreamModel: model.Name, Health: service.selector.Health(channel.ID, model.Name)})
 	}
 	return health, nil
+}
+
+// ProviderOption is one entry of the built-in provider catalog the console offers.
+type ProviderOption struct {
+	ID      string
+	Label   string
+	Custom  bool
+	Formats []string
+	Hosts   map[string]string
+}
+
+func (service *ChannelService) ProviderCatalog(ctx context.Context, actor Actor) ([]ProviderOption, error) {
+	if err := actor.RequireAdmin(); err != nil {
+		return nil, err
+	}
+	specs := service.providers.List()
+	options := make([]ProviderOption, 0, len(specs))
+	for _, spec := range specs {
+		hosts := map[string]string{}
+		for _, format := range spec.Formats() {
+			hosts[string(format)] = spec.Endpoints[format].BaseURL
+		}
+		options = append(options, ProviderOption{ID: spec.ID, Label: spec.Label, Custom: spec.Custom, Formats: providerFormats(spec), Hosts: hosts})
+	}
+	return options, nil
+}
+
+func providerFormats(spec provider.ProviderSpec) []string {
+	names := make([]string, 0, len(spec.Endpoints))
+	for _, format := range spec.Formats() {
+		names = append(names, string(format))
+	}
+	return names
+}
+
+func providerEndpoint(spec provider.ProviderSpec, name string) (provider.EndpointSpec, bool) {
+	for _, format := range spec.Formats() {
+		if string(format) == name {
+			return spec.Endpoint(format)
+		}
+	}
+	return provider.EndpointSpec{}, false
 }

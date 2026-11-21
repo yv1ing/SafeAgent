@@ -123,7 +123,7 @@ func inspectArguments(ref observation.ItemRef, item observation.Item, declared m
 	if !ok || len(schema) == 0 {
 		return nil
 	}
-	checker := &schemaChecker{ref: ref, item: item}
+	checker := &schemaChecker{ref: ref, item: item, ordinals: map[string]int{}}
 	checker.value(arguments, schema, 0, "tool_call.arguments")
 	return checker.findings
 }
@@ -164,6 +164,7 @@ type schemaChecker struct {
 	findings      []analysis.Finding
 	checks        int
 	violations    int
+	ordinals      map[string]int
 	partial       bool
 	indeterminate bool
 	probe         bool
@@ -171,6 +172,11 @@ type schemaChecker struct {
 
 func (checker *schemaChecker) add(code, path, detail string) {
 	checker.violations++
+	if checker.ordinals == nil {
+		checker.ordinals = map[string]int{}
+	}
+	ordinal := checker.ordinals[path]
+	checker.ordinals[path] = ordinal + 1
 	origin := checker.item.Origin
 	if code == analysis.CodeAnalysisIncomplete {
 		origin = observation.OriginEnvironment
@@ -178,7 +184,7 @@ func (checker *schemaChecker) add(code, path, detail string) {
 	start, end := matchOffsets(checker.item.ToolCall.Arguments.Raw, detail)
 	finding := analysis.NewFinding(
 		analysis.DetectorRef{ID: "schema", Version: version}, code, origin, checker.item.ToolCall.Sink, "",
-		confidenceFor(code), locationKey(checker.ref, path), checker.violations,
+		confidenceFor(code), locationKey(checker.ref, path), ordinal,
 		analysis.EvidenceAt(checker.ref, "message", path, checker.item.ToolCall.Arguments, start, end),
 	)
 	finding.Attribution = []analysis.Attribution{{Turn: checker.ref.Turn, Item: checker.ref.Position, ToolCallID: checker.item.Locator.CallID, Source: "message"}}
@@ -283,7 +289,7 @@ func (checker *schemaChecker) alternatives(value any, schema map[string]any, dep
 				indeterminate = true
 				continue
 			}
-			probe := &schemaChecker{ref: checker.ref, item: checker.item, checks: checker.checks, probe: true}
+			probe := &schemaChecker{ref: checker.ref, item: checker.item, checks: checker.checks, ordinals: map[string]int{}, probe: true}
 			probe.value(value, branchSchema, depth+1, path)
 			checker.checks = probe.checks
 			switch {

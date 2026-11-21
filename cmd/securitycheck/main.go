@@ -30,7 +30,7 @@ func findings(reader io.Reader) ([]string, error) {
 			return nil, err
 		}
 		configured = configured || len(record.Config) > 0
-		if record.Finding != nil && len(record.Finding.Trace) > 0 && record.Finding.Trace[0].Function != "" {
+		if record.Finding != nil && record.Finding.OSV != "" && len(record.Finding.Trace) > 0 && record.Finding.Trace[0].Function != "" {
 			identifiers[record.Finding.OSV] = true
 		}
 	}

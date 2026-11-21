@@ -7,10 +7,12 @@
  */
 import type { ConsoleAnalysisView } from './consoleAnalysisView.ts';
 import type { ConsoleAttemptView } from './consoleAttemptView.ts';
+import type { ConsoleAuditIntegrityView } from './consoleAuditIntegrityView.ts';
 import type { ConsoleCallView } from './consoleCallView.ts';
 import type { ConsoleDecisionView } from './consoleDecisionView.ts';
 import type { ConsoleEventView } from './consoleEventView.ts';
 import type { ConsoleHitView } from './consoleHitView.ts';
+import type { ConsoleTimelineEntryView } from './consoleTimelineEntryView.ts';
 import type { ConsoleTranscriptView } from './consoleTranscriptView.ts';
 
 export interface ConsoleCallDetailView {
@@ -21,5 +23,7 @@ export interface ConsoleCallDetailView {
   /** Only returned to administrators */
   events: ConsoleEventView[];
   hits: ConsoleHitView[];
+  integrity: ConsoleAuditIntegrityView;
+  timeline: ConsoleTimelineEntryView[];
   transcript: ConsoleTranscriptView;
 }

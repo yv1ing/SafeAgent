@@ -20,7 +20,7 @@ base=${SAFEAGENT_BASE_URL:-http://127.0.0.1:8080}
 requests=${LOAD_REQUESTS:-50}
 concurrency=${LOAD_CONCURRENCY:-2}
 warmup=${LOAD_WARMUP:-1}
-max_tokens=${LOAD_MAX_TOKENS:-16}
+max_tokens=${LOAD_MAX_TOKENS:-64}
 cross_requests=${LOAD_CROSS_REQUESTS:-10}
 
 if ! curl -fsS "$base/health" >/dev/null; then
@@ -35,7 +35,7 @@ upstream() {
   local value=${!specific:-}
   if [ -z "$value" ]; then
     case "$suffix" in
-      KEY|MODEL|VENDOR)
+      KEY|MODEL|PROVIDER)
         local shared="SAFEAGENT_UPSTREAM_${suffix}"
         value=${!shared:-}
         ;;
@@ -46,7 +46,7 @@ upstream() {
 
 wait_queue() {
   local pending="unknown"
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 150); do
     pending=$(docker compose -f "$lab/docker-compose.yml" exec -T database \
       psql -U safeagent -d safeagent -tAc \
       "SELECT count(*) FROM analysis_jobs WHERE state IN ('pending','running')" 2>/dev/null | tr -d '[:space:]')
@@ -100,7 +100,11 @@ done
 for format in "${formats[@]}"; do
   upper=${format^^}
   route_name=${route[$format]}
-  direct_url=$(upstream "$format" URL)
+  direct_url=$(upstream "$format" ENDPOINT)
+  if [ -z "$direct_url" ]; then
+    echo "SAFEAGENT_UPSTREAM_${format^^}_ENDPOINT is required for the direct baseline" >&2
+    exit 1
+  fi
   direct_model=$(upstream "$format" MODEL)
   direct_key=$(upstream "$format" KEY)
   for stream in false true; do

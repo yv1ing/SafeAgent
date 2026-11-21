@@ -10,7 +10,6 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -69,31 +68,30 @@ func (store *Store) Initialize(ctx context.Context) error {
 // build and loads the HMAC secret. A mismatch is fatal: this project intentionally has no migration
 // path, and running new code against an old schema would corrupt the audit trail.
 func (store *Store) Prepare(ctx context.Context) error {
-	baseline, err := store.Baseline()
-	if err != nil {
-		return err
-	}
 	if err := store.Initialize(ctx); err != nil {
 		return err
+	}
+	return store.LoadAuditSecret(ctx)
+}
+
+var (
+	errMissingAuditKey = errors.New("the database has no HMAC secret; recreate the database")
+	errStaleEvents     = errors.New("the database contains events with a different schema version; recreate the database")
+)
+
+// loadState reads the schema anchor without creating or modifying anything.
+func (store *Store) loadState(ctx context.Context) (*entity.SystemState, error) {
+	baseline, err := store.Baseline()
+	if err != nil {
+		return nil, err
 	}
 	expected := schemaFingerprint(baseline)
 	state := new(entity.SystemState)
 	if err := store.DB.NewSelect().Model(state).Where("id = 1").Scan(ctx); err != nil {
-		return errors.New("the schema state is unreadable; recreate the database")
+		return nil, errors.New("the schema state is unreadable; recreate the database")
 	}
 	if state.SchemaFingerprint != expected {
-		return fmt.Errorf("the database schema does not match this build (stored %s, expected %s); recreate the database", state.SchemaFingerprint, expected)
+		return nil, fmt.Errorf("the database schema does not match this build (stored %s, expected %s); recreate the database", state.SchemaFingerprint, expected)
 	}
-	if len(state.HMACSecret) != 32 {
-		return errors.New("the database has no HMAC secret; recreate the database")
-	}
-	var incompatible int
-	if err := store.DB.NewRaw(`SELECT count(*) FROM events WHERE schema_version <> ?`, auditevent.SchemaVersion).Scan(ctx, &incompatible); err != nil {
-		return errors.New("the event schema state is unreadable; recreate the database")
-	}
-	if incompatible > 0 {
-		return errors.New("the database contains events with a different schema version; recreate the database")
-	}
-	store.Secret = state.HMACSecret
-	return nil
+	return state, nil
 }

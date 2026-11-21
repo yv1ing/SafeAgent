@@ -27,6 +27,7 @@ import type {
   ConsoleChannelKeyView,
   ConsoleChannelView,
   ConsoleCreateChannelKeyInput,
+  ConsoleDiscoveryView,
   ConsoleHealthView,
   ConsoleUpdateChannelInput,
 } from '../models';
@@ -458,6 +459,84 @@ export const useUpdateChannel = <TError = ConsoleAPIError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getUpdateChannelMutationOptions(options), queryClient);
+};
+export const getDiscoverChannelModelsUrl = (channelId: string) => {
+  return `/console/api/channels/${channelId}/discover-models`;
+};
+
+export const discoverChannelModels = async (
+  channelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleDiscoveryView> => {
+  return request<ConsoleDiscoveryView>(getDiscoverChannelModelsUrl(channelId), {
+    ...options,
+    method: 'POST',
+  });
+};
+
+export const getDiscoverChannelModelsMutationKey = () => ['discoverChannelModels'] as const;
+
+export const getDiscoverChannelModelsMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof discoverChannelModels>>,
+    TError,
+    DiscoverChannelModelsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof discoverChannelModels>>,
+  TError,
+  DiscoverChannelModelsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDiscoverChannelModelsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof discoverChannelModels>>,
+    DiscoverChannelModelsMutationVariables
+  > = (props) => {
+    const { channelId } = props ?? {};
+
+    return discoverChannelModels(channelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DiscoverChannelModelsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof discoverChannelModels>>
+>;
+
+export type DiscoverChannelModelsMutationError = ConsoleAPIError;
+export type DiscoverChannelModelsMutationVariables = { channelId: string };
+
+export const useDiscoverChannelModels = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof discoverChannelModels>>,
+      TError,
+      DiscoverChannelModelsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof discoverChannelModels>>,
+  TError,
+  DiscoverChannelModelsMutationVariables,
+  TContext
+> => {
+  return useMutation(getDiscoverChannelModelsMutationOptions(options), queryClient);
 };
 export const getGetChannelHealthUrl = (channelId: string) => {
   return `/console/api/channels/${channelId}/health`;

@@ -25,13 +25,14 @@ const (
 type Target struct {
 	ChannelID       string
 	UpstreamModel   string
+	Format          string
 	Priority        int
 	Weight          int
 	MaxOutputTokens int
 }
 
 func (target Target) Backend() Backend {
-	return Backend{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel}
+	return Backend{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Format: target.Format}
 }
 
 type Candidate struct {
@@ -68,7 +69,7 @@ func NewSelector(breakers *Breakers, keys *KeyPool, sticky *Sticky, maxTries int
 
 // Plan orders the candidates that look usable right now. It reserves nothing: the caller must
 // Admit a candidate right before trying it and report the outcome exactly once.
-func (selector *Selector) Plan(targets []Target, keysByChannel map[string][]Key, stickyKey string) []Candidate {
+func (selector *Selector) Plan(targets []Target, keysByChannel map[string][]Key, stickyKey, preferredFormat string) []Candidate {
 	available := make([]Candidate, 0, len(targets))
 	for _, target := range targets {
 		if !selector.breakers.Allows(target.Backend()) {
@@ -83,8 +84,8 @@ func (selector *Selector) Plan(targets []Target, keysByChannel map[string][]Key,
 	if len(available) == 0 {
 		return nil
 	}
-	ordered := selector.ordered(available)
-	if preferred, found := selector.sticky.Get(stickyKey); found && stickyKey != "" {
+	ordered := selector.ordered(available, preferredFormat)
+	if preferred, found := selector.sticky.Get(stickyKey); found && stickyKey != "" && (preferredFormat == "" || preferred.Format == preferredFormat) {
 		if index := slices.IndexFunc(ordered, func(candidate Candidate) bool { return candidate.Target.Backend() == preferred }); index > 0 {
 			pinned := ordered[index]
 			ordered = append([]Candidate{pinned}, slices.Delete(ordered, index, index+1)...)
@@ -99,7 +100,7 @@ func (selector *Selector) Admit(candidate Candidate) (Admission, bool) {
 	return Admission{Candidate: candidate, ticket: ticket}, admitted
 }
 
-func (selector *Selector) ordered(candidates []Candidate) []Candidate {
+func (selector *Selector) ordered(candidates []Candidate, preferredFormat string) []Candidate {
 	byPriority := make([]int, 0, len(candidates))
 	groups := map[int][]Candidate{}
 	for _, candidate := range candidates {
@@ -112,7 +113,22 @@ func (selector *Selector) ordered(candidates []Candidate) []Candidate {
 	slices.Sort(byPriority)
 	ordered := make([]Candidate, 0, len(candidates))
 	for _, priority := range byPriority {
-		ordered = append(ordered, selector.weighted(groups[priority])...)
+		group := groups[priority]
+		if preferredFormat != "" {
+			preferred := make([]Candidate, 0, len(group))
+			rest := make([]Candidate, 0, len(group))
+			for _, candidate := range group {
+				if candidate.Target.Format == preferredFormat {
+					preferred = append(preferred, candidate)
+				} else {
+					rest = append(rest, candidate)
+				}
+			}
+			ordered = append(ordered, selector.weighted(preferred)...)
+			ordered = append(ordered, selector.weighted(rest)...)
+			continue
+		}
+		ordered = append(ordered, selector.weighted(group)...)
 	}
 	return ordered
 }

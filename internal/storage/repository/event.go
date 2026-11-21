@@ -17,7 +17,8 @@ func (store *Store) AppendEvent(event *entity.Event) error {
 // CallByResponseID finds the call a client refers to with previous_response_id.
 func (store *Store) CallByResponseID(ctx context.Context, agentKeyID, responseID string) (*entity.Call, error) {
 	return store.firstCall(ctx, store.DB.NewSelect().Model((*entity.Call)(nil)).
-		Where("agent_key_id = ? AND response_id = ?", agentKeyID, responseID))
+		Where("agent_key_id = ? AND response_id = ?", agentKeyID, responseID).
+		Where("response_deleted_at IS NULL"))
 }
 
 // CallByToolCall finds the call that issued a tool call, for a request that only carries its result.

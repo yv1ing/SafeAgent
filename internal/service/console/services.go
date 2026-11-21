@@ -1,6 +1,7 @@
 package console
 
 import (
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/service/diagnosis"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
@@ -23,11 +24,11 @@ type Services struct {
 	Monitor    *MonitorService
 }
 
-func NewServices(store *repository.Store, selector *routing.Selector, analyzer *diagnosis.Service) Services {
+func NewServices(store *repository.Store, selector *routing.Selector, providers *provider.Registry, analyzer *diagnosis.Service) Services {
 	return Services{
 		Account:    NewAccountService(store),
 		Project:    NewProjectService(store),
-		Channel:    NewChannelService(store, selector),
+		Channel:    NewChannelService(store, selector, providers),
 		Key:        NewKeyService(store),
 		Route:      NewRouteService(store),
 		Rule:       NewRuleService(store),

@@ -6,7 +6,14 @@ This guide starts from a fresh checkout and ends with an agent sending traffic t
 
 ## Prerequisites
 
-The build requires Go 1.27.4, Node.js 22 or newer, GNU Make and PostgreSQL 17. The database must already exist; SafeAgent creates its tables during the first start. Install the locked dependencies once:
+Requirements:
+
+- Go 1.27.4
+- Node.js 22 or newer
+- GNU Make
+- a PostgreSQL 17 database that already exists
+
+SafeAgent creates its tables on the first start, but not the database itself. Install the locked dependencies first:
 
 ```sh
 make deps
@@ -26,9 +33,12 @@ database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=
 secure_cookies = false
 ```
 
-Every other key has a default. Keep `secure_cookies = false` only while the console is reached over plain HTTP on loopback. In any other deployment use HTTPS and set it to `true`; a Secure cookie is dropped on plain HTTP. `sslmode=disable` is likewise for a local database; a remote database should use TLS.
+Every other key has a default. Two settings depend on the deployment:
 
-An unrecognized configuration key stops startup, so a typo fails loudly.
+- `secure_cookies`: set to `false` only while the console is reached over plain HTTP on loopback. Any other deployment uses HTTPS and sets it to `true`; a Secure cookie is dropped on plain HTTP.
+- `sslmode`: `disable` is for a local database only. A remote database should use TLS.
+
+An unrecognized configuration key stops startup, so a typo is not ignored.
 
 Build and run:
 
@@ -37,7 +47,7 @@ make build
 build/bin/safeagent -config config.toml serve
 ```
 
-On its first start against an empty database, the process creates the schema and prints the initial administrator once:
+On its first start against an empty database, the process creates the schema and prints the administrator account and password once:
 
 ```text
 Initial administrator: admin / <password>
@@ -47,29 +57,41 @@ Keep this password; later starts do not print it again. If it is lost, reset it 
 
 The same process serves the console at `/console/`, the gateway at `/v1/` and `/v1beta/`, and a health check at `/health`.
 
-To work on the code, run `make dev`. It starts the backend and the console dev server together, and the console is then at <http://127.0.0.1:5173/console/>.
-
 ## Set up the console
 
 Sign in as `admin` at <http://127.0.0.1:8080/console/>. The first sign-in requires a new password. The console opens on Monitor, which aggregates every visible project.
 
 Create a project. A project name is sufficient; the defaults can be changed later. New projects start with the common redaction detectors enabled and an empty, inspectable policy document.
 
-Opening a project changes the sidebar to that project's pages. Use Settings to change the name and, as an administrator, the retention period and usage limits. Project members manage the project's routes, non-blocking redaction rules, record-only policy rules and agent keys; trust levels and non-default roles are administrator-only. Only administrators can add or remove members, create or delete projects, save blocking policy or redaction rules, restore a policy version, configure the decision model, and manage channels and users. The Activity page lists the changes made to the project.
+Opening a project changes the sidebar to that project's pages. Use Settings to change the name and, as an administrator, the retention period and usage limits.
 
-Create a channel. Only administrators can create channels, and each channel represents one upstream provider:
+| Role | Can manage |
+| --- | --- |
+| Project member | routes, non-blocking redaction rules, record-only policy rules, agent keys |
+| Administrator | channels, users, the global log, projects, members, blocking policy and redaction rules, policy restore, the decision model, retention and limit fields |
 
-- Choose the protocol the provider speaks.
-- Enter the full endpoint, such as `https://api.openai.com/v1/chat/completions`. If the model name is part of the path, write `{model}` there. If a Gemini endpoint omits `{model}`, the gateway appends the model and action.
-- Model names must match what the provider uses. Prices are per million tokens in the currency set on the channel.
-- Add at least one upstream key. Only its last characters are shown afterwards. The key is encrypted with the instance key.
+Trust levels and non-default roles are administrator-only. The Activity page lists changes made to the project.
+
+Only administrators can create channels, and each channel represents one upstream provider:
+
+- Choose the provider. Anthropic, OpenAI, Google, DeepSeek, Z.AI and Qwen come with their formats, endpoints, authentication and capability profiles; a custom provider speaks standard Chat Completions and needs a base URL.
+- The console pre-fills the main endpoint. Override a base URL only when the provider or a proxy requires it, and disable a format only when that provider does not support it.
+- Model names must match what the provider uses. Prices are per million tokens in the currency set on the channel. "Discover models" lists the names the provider reports.
+- Add the upstream key. Only its last characters are shown afterwards. The key is encrypted with the instance key. A channel without a key is accepted by the API but cannot serve traffic, so add one before enabling the route.
 - Turn on "allow private network" only for a provider on a private address, such as a self-hosted inference server.
 
-Create a model route. A route maps a public model name to one or more upstream models. The target with the lowest priority number is tried first; targets with equal priority are ordered by weight, and a failed target falls through to the next.
+Create a model route. A route maps a public model name to one or more upstream models. The target with the lowest priority number is tried first; targets with equal priority are chosen in weighted random order.
+
+| Outcome | Falls through to the next target |
+| --- | --- |
+| transient failure, authentication failure, rate limit, target-format conversion failure | yes |
+| policy block, invalid request | no |
 
 Issue an agent key on the project's keys page. The full key is shown once, so copy it then. A key can carry its own rate and concurrency limits. Only an administrator can set a trust level or a role other than the default agent.
 
-If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page edits one ordered CEL rule list; saving validates it and makes it active at once, and the history can restore an earlier version. A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background; add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it.
+If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page maintains one ordered rule table; saving validates it and makes it active at once, and the history can restore an earlier version.
+
+A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background. Add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it.
 
 ## Connect an agent
 
@@ -81,6 +103,8 @@ Give the agent the gateway address and an agent key, and use the public model na
 | Responses          | `http://127.0.0.1:8080/v1` | `Authorization: Bearer <key>`       |
 | Anthropic Messages | `http://127.0.0.1:8080`    | `x-api-key: <key>`                  |
 | Gemini             | `http://127.0.0.1:8080`    | `x-goog-api-key: <key>`, or `?key=` |
+
+An optional `X-SafeAgent-Session` header groups calls from one agent key into one conversation. Identity comes from the agent key. Use `previous_response_id` when the client supports it.
 
 Verification request:
 
@@ -130,5 +154,6 @@ With `secure_cookies = true`, the console requires HTTPS. Serve it through a rev
 ## Related
 
 - [Architecture](architecture.md)
-- [Console](console.md)
+- [Protocol conversion](protocol-conversion.md)
+- [Agent safety](agent-safety.md)
 - [Project README](../../README.md)

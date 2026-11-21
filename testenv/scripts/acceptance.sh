@@ -29,6 +29,7 @@ run() {
 run verify make verify
 run integration make lab-integration
 run protocol make lab-protocol
+run auxiliary make lab-auxiliary
 run agents make lab-agents
 run policy make lab-policy
 run analysis make lab-analysis
@@ -36,6 +37,7 @@ run security make lab-security
 run faults make lab-faults
 run browser make lab-browser
 run performance make lab-load
+run audit make lab-audit
 
 printf '\nacceptance passed; stopping the lab\n' | tee -a "$log"
 if [ "${KEEP_LAB:-0}" = "1" ]; then

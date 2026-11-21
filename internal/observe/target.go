@@ -3,6 +3,7 @@ package observe
 import (
 	"net"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -34,22 +35,30 @@ func TargetOf(name string, input any) observation.Target {
 	if value := firstString(object, urlArguments); value != "" {
 		if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
 			host := strings.ToLower(parsed.Hostname())
-			return observation.Target{Kind: "url", Value: parsed.Scheme + "://" + strings.ToLower(parsed.Host) + parsed.EscapedPath(), Scheme: strings.ToLower(parsed.Scheme), Host: host, Path: parsed.EscapedPath()}
+			cleanPath := cleanURLPath(parsed.Path)
+			return observation.Target{Kind: "url", Value: parsed.Scheme + "://" + strings.ToLower(parsed.Host) + (&url.URL{Path: cleanPath}).EscapedPath(), Scheme: strings.ToLower(parsed.Scheme), Host: host, Path: cleanPath}
 		}
 		return observation.Target{Kind: "url", Value: value}
 	}
 	if value := firstString(object, hostArguments); value != "" {
 		return observation.Target{Kind: "host", Value: strings.ToLower(value), Host: targetHost(value)}
 	}
-	if value := firstString(object, pathArguments); value != "" {
-		cleaned := filepath.Clean(value)
-		return observation.Target{Kind: "file", Value: cleaned, Path: cleaned}
-	}
 	if value := firstString(object, commandArguments); value != "" {
 		executable := commandName.FindString(value)
 		return observation.Target{Kind: "command", Value: executable, Command: filepath.Base(executable)}
 	}
+	if value := firstString(object, pathArguments); value != "" {
+		cleaned := filepath.Clean(value)
+		return observation.Target{Kind: "file", Value: cleaned, Path: cleaned}
+	}
 	return observation.Target{Kind: "tool", Value: name}
+}
+
+func cleanURLPath(value string) string {
+	if value == "" {
+		return "/"
+	}
+	return path.Clean(value)
 }
 
 func targetHost(value string) string {
@@ -200,8 +209,6 @@ func TagsForTool(name, description string, target observation.Target) observatio
 	if containsAny(value, "delete", "write", "sudo", "admin") {
 		tags.Boundary = "privileged"
 	}
-	for _, capability := range Capabilities(name, target) {
-		tags.Tags = append(tags.Tags, capability)
-	}
+	tags.Tags = append(tags.Tags, Capabilities(name, target)...)
 	return tags
 }

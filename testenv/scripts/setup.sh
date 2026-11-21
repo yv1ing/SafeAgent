@@ -19,7 +19,7 @@ upstream() {
   local value=${!specific:-}
   if [ -z "$value" ]; then
     case "$suffix" in
-      KEY|MODEL|VENDOR)
+      KEY|MODEL|PROVIDER)
         local shared="SAFEAGENT_UPSTREAM_${suffix}"
         value=${!shared:-}
         ;;
@@ -30,9 +30,9 @@ upstream() {
 
 formats=(chat responses messages gemini)
 declare -A channel_format=([chat]=openai_chat [responses]=openai_responses [messages]=anthropic_messages [gemini]=google_gemini)
-declare -A default_vendor=([chat]=openai [responses]=openai [messages]=anthropic [gemini]=google)
+declare -A default_provider=([chat]=openai [responses]=openai [messages]=anthropic [gemini]=google)
 available=()
-declare -A channel_model channel_vendor channel_url channel_key
+declare -A channel_model channel_provider channel_url channel_key
 
 for format in "${formats[@]}"; do
   url=$(upstream "$format" URL)
@@ -47,8 +47,8 @@ for format in "${formats[@]}"; do
   channel_url[$format]=$url
   channel_key[$format]=$key
   channel_model[$format]=$model
-  channel_vendor[$format]=$(upstream "$format" VENDOR)
-  channel_vendor[$format]=${channel_vendor[$format]:-${default_vendor[$format]}}
+  channel_provider[$format]=$(upstream "$format" PROVIDER)
+  channel_provider[$format]=${channel_provider[$format]:-${default_provider[$format]}}
 done
 
 if [ ${#available[@]} -eq 0 ]; then
@@ -138,7 +138,7 @@ project=$(post /projects '{"name":"Protocol Lab","retention_days":30,"requests_p
 
 channel_body() {
   local format=$1
-  local headers count_tokens limit
+  local headers limit
   headers=$(upstream "$format" HEADERS_JSON)
   if [ -z "$headers" ]; then
     headers='{}'
@@ -147,18 +147,16 @@ channel_body() {
     echo "SAFEAGENT_UPSTREAM_${format^^}_HEADERS_JSON must be a JSON object" >&2
     exit 1
   }
-  count_tokens=$(upstream "$format" COUNT_TOKENS_URL)
   limit=$(upstream "$format" DEFAULT_MAX_OUTPUT_TOKENS)
   jq -nc \
     --arg name "Lab $format" \
+    --arg provider "${channel_provider[$format]}" \
     --arg format "${channel_format[$format]}" \
-    --arg vendor "${channel_vendor[$format]}" \
     --arg endpoint "${channel_url[$format]}" \
     --arg model "${channel_model[$format]}" \
-    --arg count_tokens "$count_tokens" \
     --argjson headers "$headers" \
     --argjson limit "${limit:-0}" \
-    '{name:$name,format:$format,vendor:$vendor,endpoint:$endpoint,count_tokens_endpoint:$count_tokens,headers:$headers,default_max_output_tokens:$limit,models:[{name:$model}],currency:"USD",enabled:true,allow_private_network:true}'
+    '{name:$name,provider_id:$provider,endpoints:[{format:$format,base_url:$endpoint}],headers:$headers,default_max_output_tokens:$limit,models:[{name:$model}],currency:"USD",enabled:true,allow_private_network:true}'
 }
 
 declare -A channel_id route_name
@@ -168,8 +166,8 @@ for format in "${available[@]}"; do
     "$(jq -nc --arg secret "${channel_key[$format]}" '{label:"lab",secret:$secret}')" >/dev/null
   route_name[$format]="lab-$format"
   post "/projects/$project/routes" \
-    "$(jq -nc --arg name "${route_name[$format]}" --arg channel "${channel_id[$format]}" --arg model "${channel_model[$format]}" \
-      '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,priority:0,weight:1}]}')" >/dev/null
+    "$(jq -nc --arg name "${route_name[$format]}" --arg channel "${channel_id[$format]}" --arg model "${channel_model[$format]}" --arg route_format "${channel_format[$format]}" \
+      '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,format:$route_format,priority:0,weight:1}]}')" >/dev/null
 done
 
 key() {
@@ -221,6 +219,7 @@ SAFEAGENT_LAB_GID=$lab_gid
 EOF
 for format in "${available[@]}"; do
   printf 'SAFEAGENT_%s_ROUTE=%s\n' "${format^^}" "${route_name[$format]}" >> "$runtime/env"
+  printf 'SAFEAGENT_%s_CHANNEL=%s\n' "${format^^}" "${channel_id[$format]}" >> "$runtime/env"
 done
 
 if [ "$(id -u)" = "0" ]; then

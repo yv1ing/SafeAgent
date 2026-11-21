@@ -16,10 +16,26 @@
 | metrics | `traffic_rollups` |
 | operations | `operation_logs`, `quota_usage`, `system_state` |
 
+## Channels and routes
+
+A channel stores `provider_id`, a `custom` flag, per-format endpoint overrides (`endpoints`), machine-written `capability_overrides`, headers, forwarded-header names, a model/price list, a default output limit, timeouts, a private-network flag and the enabled flag. The wire format, base URL, auth style and capability profile come from the provider catalog in code. An endpoint entry overrides the catalog; an absent entry keeps its default; `disabled` hides the format.
+
+A route target is `{channel_id, upstream_model, format?, priority, weight, max_output_tokens}`. An empty `format` lets the gateway expand every format the channel exposes and prefer the client's own; a non-empty value pins one.
+
+A call records `kind`, `client_format`, `client_transport` (`sse` or `json`), `endpoint_format`, `session_id`, `parent_call_id`, `message_offset` and, for Responses, `response_store`, `response_deleted_at` and `cancelled_at`. For a generation call, `kind` is the client wire format (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`); for an auxiliary call, it is the operation (`count_tokens`, `models`, `embeddings`, `moderations`, `responses_retrieve`, `responses_input_items`, `responses_cancel`, `responses_delete`). `client_format` holds the wire format in both cases.
+
+## Audit columns
+
+`events` stores `sequence`, `kind`, `schema_version`, `payload`, `prev_hash` and `hash`. The payload is canonical JSON. Events are HMAC-chained per call; see [Audit](audit.md).
+
+`calls` stores `audit_head` and `audit_events`, written in the seal transaction. They anchor the event chain even when a tail is removed.
+
+`decisions.phase` accepts `request`, `tool_call`, `tool_result` and `response`; `action` accepts `block` and `record`.
+
 ## Ownership and cascades
 
 - A project owns its keys, routes, rules, policy versions, calls, analyses, batches and traffic rollups. Most project-owned rows cascade from `projects`; `calls.agent_key_id` also cascades so the order of the two project cascades cannot make the delete fail.
-- A call owns its events, tool index, redaction snapshot, decisions and analyses. Deleting the call removes all of them in the database.
+- A call owns its events, tool index, redaction snapshot, decisions and analyses. Deleting the call removes all of them.
 - `analyses` owns findings and flows. A failed analysis is a row, not an absent one.
 - `analysis_jobs` is the outbox: a job is written in the call's seal transaction with a dedupe key, so a crash between seal and enqueue does not lose the work. A batch and its jobs are written in one transaction.
 
@@ -33,20 +49,21 @@
 
 ## Rollups and indexes
 
-`traffic_rollups` is the monitor read model. It is recomputed from `calls` for hour and day buckets; the lookback is aligned to a bucket edge, so a partial bucket is never overwritten with a truncated count. The `1d` window recomputes only the last seven days, so a one-minute tick does not scan years. Project statistics, finding views and model views read `calls` and the stored analyses directly, so no rollup tables exist for them.
+`traffic_rollups` is the monitor read model. It is recomputed from `calls` for hour and day buckets; the lookback is aligned to a bucket edge, so a partial bucket is never overwritten with a truncated count. The hourly window recomputes 90 days and the daily window 31 days, so a one-minute tick does not scan all history. Project statistics, finding views and model views read `calls` and the stored analyses directly.
 
 Indexes cover the paths that grow with traffic: project and agent-key call listings, analysis identity, flows by analysis, agent and call, batch and job maintenance, and the monitor series. The index list is part of `schema.sql`; adding an index is a schema change and recreates the database.
 
 ## Retention
 
-Pruning runs in batches of 1,000 rows. Calls older than the project's `retention_days` are deleted with their analyses, findings, flows, decisions, snapshots and tool index; the child rows go with the call cascade, so there is no unbounded standalone delete. Policy history and decision model configuration last for the project's lifetime. `analysis_batches` and `traffic_rollups` follow the project retention window; `operation_logs` use the configured operation-log retention and `quota_usage` keeps seven days. Finished, failed and canceled jobs are removed after seven days; pending and running jobs are not pruned by age.
+Pruning runs in batches of 1,000 rows. Calls older than the project's `retention_days` are deleted with their analyses, findings, flows, decisions, snapshots and tool index; the child rows go with the call cascade. Policy history and decision model configuration last for the project's lifetime. `analysis_batches` and `traffic_rollups` follow the project retention window; `operation_logs` use the configured operation-log retention and `quota_usage` keeps seven days. Finished, failed and canceled jobs are removed after seven days; pending and running jobs are not pruned by age.
 
 ## Secrets
 
-Audit payloads use event schema version 3: the request and response are stored as item/part structures, together with the effective instructions and tools, the agent-key principal snapshot and the loss/repair ledger. Raw values are stored as sent. Read access is role-based: members see the redacted view, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; only masked prefixes or suffixes are returned by the API. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers and forwarded-header names are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
+Audit payloads use event schema version 5: the request and response are stored as item/part structures, together with the effective instructions and tools, the agent-key principal snapshot, the loss/repair ledger and the session source. Raw values are stored as sent. Read access is role-based: members see the redacted view and the metadata-only timeline, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; channel key suffixes are returned by the API, and the decision model key is reported only as `api_key_set`. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers and forwarded-header names are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
 
 ## Related
 
+- [Audit](audit.md)
 - [Analysis](analysis.md)
 - [Development](development.md)
 - [Agent guide](README.md)

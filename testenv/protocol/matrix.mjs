@@ -44,7 +44,7 @@ if (enabled('SAFEAGENT_TEST_STRUCTURED', '1'))
   cases.push({ kind: 'structured', retry: 2, optional: true });
 if (enabled('SAFEAGENT_TEST_SERVER_TOOLS', '1'))
   cases.push({ kind: 'server_tool', retry: 2, optional: true });
-cases.push({ kind: 'reject', retry: 1, noUpstream: true });
+cases.push({ kind: 'reject', retry: 1 });
 
 const chatTools = [
   {
@@ -203,7 +203,7 @@ function requestFor(client, route, kind, stream) {
                   },
                 }),
       expect: (value) => /\b(2\/7|two sevenths)\b/i.test(value.text) || /0\.28/.test(value.text),
-      optional: (value) => value.reasoning.length === 0,
+      optional: (value) => (value.reasoning ?? []).length === 0,
     };
   }
   if (kind === 'media') {
@@ -434,7 +434,9 @@ function requestFor(client, route, kind, stream) {
         optional: (value, response) =>
           response === 422 ||
           /unsupported|not supported|server tool|web_search|web search/i.test(value.error ?? '') ||
-          (value.toolCalls.length === 0 && value.text.trim() === '' && value.reasoning.length > 0),
+          (value.toolCalls.length === 0 &&
+            value.text.trim() === '' &&
+            (value.reasoning ?? []).length > 0),
       };
     }
     return {
@@ -445,28 +447,46 @@ function requestFor(client, route, kind, stream) {
       optional: (value, response) =>
         response === 422 ||
         /unsupported|not supported|server tool|web_search|web search/i.test(value.error ?? '') ||
-        (value.toolCalls.length === 0 && value.text.trim() === '' && value.reasoning.length > 0),
+        (value.toolCalls.length === 0 &&
+          value.text.trim() === '' &&
+          (value.reasoning ?? []).length > 0),
     };
   }
   if (kind === 'reject') {
     if (client === 'chat') {
+      if (route === 'chat' && stream) {
+        return {
+          body: chatBody(route, stream, 'hello', { n: 2 }),
+          reject: { status: 422, code: 'unsupported_multi_choice' },
+          rejectOptional: true,
+        };
+      }
       return {
         body: chatBody(route, stream, 'hello', { n: 2 }),
         reject: { status: 422, code: 'unsupported_multi_choice' },
       };
     }
     if (client === 'gemini') {
+      if (route === 'gemini' && stream) {
+        return {
+          body: geminiBody(route, stream, 'hello', {
+            generationConfig: { maxOutputTokens: 16, candidateCount: 2 },
+          }),
+          reject: { status: 422, message: 'Multiple candidates' },
+          rejectOptional: true,
+        };
+      }
       return {
         body: geminiBody(route, stream, 'hello', {
           generationConfig: { maxOutputTokens: 16, candidateCount: 2 },
         }),
-        reject: { status: 422, message: 'Multiple candidates are not supported.' },
+        reject: { status: 422, message: 'Multiple candidates' },
       };
     }
     if (client === 'responses') {
       return {
-        body: responsesBody(route, stream, 'hello', { store: true }),
-        reject: { status: 422, code: 'state_not_supported' },
+        body: responsesBody(route, stream, 'hello', { background: true }),
+        reject: { status: 422, code: 'background_not_supported' },
       };
     }
     return {
@@ -851,10 +871,12 @@ async function call(client, route, kind, stream) {
           : `HTTP ${response.status}: ${raw.slice(0, 300)}`,
       };
     }
-    return {
-      okay: false,
-      detail: `expected rejection, got HTTP ${response.status}: ${raw.slice(0, 300)}`,
-    };
+    if (!definition.rejectOptional) {
+      return {
+        okay: false,
+        detail: `expected rejection, got HTTP ${response.status}: ${raw.slice(0, 300)}`,
+      };
+    }
   }
   if (!response.ok) {
     const optional = definition.optional?.({ error: raw }, response.status);

@@ -113,6 +113,8 @@ for client in chat responses messages gemini; do
     if jq -e --arg injection prompt_injection --arg exfiltration exfiltration_link '
       (.analyses | map(select(.state == "completed")) | first) as $analysis |
       .call.redaction_hits > 0 and
+      (.timeline | length > 0) and
+      (.integrity.status == "verified") and
       if $analysis == null then false else
         ($analysis.coverage.complete == true) and
         ($analysis.verdict.value == "unsafe") and

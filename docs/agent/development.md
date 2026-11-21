@@ -12,29 +12,30 @@ This document covers the build, configuration and test workflow, and the extensi
 ## Commands
 
 ```text
-make deps         # go mod download + npm ci
-make generate     # OpenAPI -> web/src/api/generated
-make format       # format Go, frontend, testenv JavaScript and documentation
-make check        # gofmt, go vet, TypeScript, prettier, contract diff
-make test         # go test -race ./..., node --test
-make verify       # run check and test
-make build        # web build + embedded Go binary
-make integration  # repository tests against SAFEAGENT_TEST_DATABASE
-make lab-setup    # start the Docker acceptance lab; see testenv.md
-make lab-protocol # live conversion matrix
-make lab-agents   # four agent CLIs against every configured route
-make lab-policy   # request and tool-call enforcement
-make lab-analysis # asynchronous diagnosis and redaction acceptance
-make lab-security # authentication, quotas, isolation and console permissions
-make lab-faults   # failover, truncation, tool holds, headers and default limits
-make lab-browser  # desktop console CRUD and mobile page checks
-make lab-integration # repository tests on a separate database in the lab
-make lab-load     # quick four-protocol performance smoke
+make deps           # go mod download + npm ci
+make generate       # OpenAPI -> web/src/api/generated
+make format         # format Go, frontend, testenv JavaScript and documentation
+make check          # gofmt, staticcheck, go vet, TypeScript, prettier, contract diff
+make test           # go test -race ./..., node --test
+make verify         # run check and test
+make build          # web build + embedded Go binary
+make integration    # repository tests against SAFEAGENT_TEST_DATABASE
+make lab-setup      # start the Docker acceptance lab; see testenv.md
+make lab-protocol   # live conversion matrix
+make lab-auxiliary  # models, counting, Responses lifecycle and WebSocket
+make lab-agents     # four agent CLIs against every configured route
+make lab-policy     # request, tool-result and tool-call enforcement
+make lab-analysis   # diagnosis, redaction, timeline and audit-integrity acceptance
+make lab-security   # authentication, quotas, isolation and console permissions
+make lab-faults     # failover, truncation, tool holds, headers and default limits
+make lab-browser    # desktop console CRUD and mobile page checks
+make lab-audit      # verify every stored call audit chain on the lab database
+make lab-load       # quick four-protocol performance smoke
 make lab-acceptance # every lab suite in order
-make security     # SBOM + govulncheck + npm audit
+make security       # SBOM + govulncheck + npm audit
 ```
 
-`cmd/safeagent` also provides `schema` and `openapi` subcommands. `schema` prints the baseline DDL, and `openapi` writes the contract to the requested output path.
+`cmd/safeagent` also provides `schema`, `openapi` and `verify-audit` subcommands. `schema` prints the baseline DDL, `openapi` writes the contract to the requested output path, and `verify-audit` reads the stored schema state and HMAC secret and checks call event chains without creating anything. Global flags precede the command: `safeagent -config config.toml verify-audit -call <id>`. `make lab-integration` runs the repository tests against a separate database in the lab.
 
 ## Configuration
 
@@ -67,20 +68,24 @@ Response text is stored and checked for concealed Unicode asynchronously; it is 
 | `internal/analysis/builtin` | role split, schema checks, trailing JSON, flow relations, secret flow, redacted evidence |
 | `internal/analysis/decision` | answer interpretation, both adapters against fake servers, private endpoint rejection, malformed answer rejection |
 | `internal/observe` | origin and trust, sink inference, two views, stored-event replay, history expansion |
-| `internal/service/gateway` | admission, redaction, request and tool checkpoints, tool hold, veto, veto failure, streaming, failover, quotas, SSE timing, clean EOF, verified history linking |
-| `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by gateway tests, and idempotency by repository integration tests |
+| `internal/pipeline` | admission, redaction, four checkpoints, tool hold, veto, streaming, failover, quotas, session linking, auxiliary endpoints, audit |
+| `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by pipeline tests, and idempotency by repository integration tests |
 | `internal/service/console` | permission rules, name bounds, password policy, policy member restrictions |
-| `internal/api/console` | project summary rendering and OpenAPI contract consistency |
-| `internal/protocol/format` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
+| `internal/transport/console` | forwarded headers, format defaults, project summary rendering and error labels |
+| `internal/llm/model` | assembler invariants, journal reconstruction, signatures, losses, repairs |
+| `internal/llm/codec` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
+| `internal/llm/provider` | built-in URL, format, auth, compatibility and discovery snapshots |
+| `internal/llm/stream` | commit boundary, tool hold/release/reject, overflow, restoration, raw forwarding |
 | `internal/app` | direct and transitive dependency boundaries |
-| `internal/storage/repository` | schema documentation consistency; integration tests require `SAFEAGENT_TEST_DATABASE` and are run by the operator |
+| `internal/storage/auditevent` | canonical JSON, NUL sanitization, signing, chain verification, decoding and timeline |
+| `internal/storage/repository` | schema documentation consistency, audit chain verification and tamper detection; integration tests require `SAFEAGENT_TEST_DATABASE` and are run by the operator |
 | `testenv/load` | SSE and JSON response validation, percentile calculation and the performance smoke |
 
 Browser acceptance is automated by `make lab-browser`; see the [acceptance lab](testenv.md).
 
 ## Acceptance lab
 
-[`testenv/`](../../testenv/) is a disposable Docker lab for live protocol, agent, security and console acceptance. PostgreSQL, Claude Code, Codex, Gemini CLI, Pi and the Playwright browser run in containers; the gateway and the fault upstream run on the host so a change can be rebuilt without an image build. The complete topology, provider contract, suite expectations, performance smoke and troubleshooting guide is [`testenv.md`](testenv.md). `make lab-acceptance` runs every suite in order; the individual targets are `lab-setup`, `lab-restart`, `lab-protocol`, `lab-agents`, `lab-policy`, `lab-analysis`, `lab-security`, `lab-faults`, `lab-browser`, `lab-integration`, `lab-load` and `lab-down`. The lab is not part of the product deployment; its runtime directory and `testenv/.env` are ignored.
+[`testenv/`](../../testenv/) is a disposable Docker lab for live protocol, agent, security and console acceptance. PostgreSQL, the agent CLIs and the Playwright browser run in containers; the gateway and the fault upstream run on the host so a change can be rebuilt without an image build. The complete topology, provider contract, suite expectations, performance smoke and troubleshooting guide is [the acceptance lab guide](testenv.md). The lab is not part of the product deployment; its runtime directory and `testenv/.env` are ignored.
 
 ## Contracts
 
@@ -89,18 +94,18 @@ Five contracts define what the rest of the system may rely on. Treat a change to
 | Contract | Authority | Consumers |
 | --- | --- | --- |
 | Observation model | `internal/observation` | detectors, policy, console read models |
-| Stored audit events | `internal/storage/auditevent` | gateway writer, observation adapter, diagnosis |
-| Canonical wire model | `internal/protocol` | all four codecs and the gateway |
-| Console API | DTO tags and `internal/api/console/openapi.go` | `web/openapi.json`, generated client, console |
-| Policy document | `internal/analysis/policy` | policy editor, gateway evaluation |
+| Canonical wire model | `internal/llm/model` | all four codecs, the stream engine and the gateway |
+| Audit events and chain | `internal/storage/auditevent` | pipeline writer, every reader, `verify-audit`, console timeline |
+| Console API | DTO tags and `internal/transport/console/openapi.go` | `web/openapi.json`, generated client, console |
+| Policy document | `internal/analysis/policy` | policy editor, four online checkpoints |
 
-The observation and audit contracts carry explicit version numbers. A stored event records the schema version it was written with. Startup checks the DDL fingerprint and refuses a database whose events carry a different `auditevent.SchemaVersion`; changing either contract therefore requires recreating the database. The console contract is generated from Go types: `make generate` rewrites `web/openapi.json` and `web/src/api/generated`, and `make check` fails when either is stale. Neither generated file is edited by hand.
+The observation and audit contracts carry explicit version numbers. A stored event records the schema version it was written with. Startup checks the DDL fingerprint and refuses a database whose events carry a different `auditevent.SchemaVersion`; changing either contract therefore requires recreating the database. Every event is HMAC-chained; see [Audit](audit.md). The console contract is generated from Go types: `make generate` rewrites `web/openapi.json` and `web/src/api/generated`, and `make check` fails when either is stale. Neither generated file is edited by hand.
 
-A protocol conversion that cannot carry a field must emit a `protocol.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture. A same-format raw overlay may preserve the original bytes, but it does not replace a canonical mapping and an explicit loss for other targets.
+A protocol conversion that cannot carry a field must emit a `model.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture. A same-format raw overlay may preserve the original bytes, but it does not replace a canonical mapping and an explicit loss for other targets.
 
 ## Conventions
 
-- A package has one responsibility. `observation` models a call, `observe` adapts protocols, `analysis` judges, `storage` persists, `service` orchestrates and `api` transports.
+- A package has one responsibility. `llm/model` describes the wire, `llm/codec` converts, `llm/provider` catalogs upstreams, `llm/stream` drives a response, `pipeline` orchestrates, `observation` models a call, `observe` adapts protocols, `analysis` judges, `storage` persists, `service` holds use cases and `transport` serves them.
 - Package names are singular nouns that state the responsibility. Protocol names such as `messages` and `responses` keep the provider's spelling. A package that groups utilities is named for the group (`platform`, `storage`), not for a layer of the product.
 - File names describe one topic in lower case; an underscore separates words only when the joined form would be ambiguous (`channel_keys.go`, not `channelkeys.go`). Exported identifiers use full words and the usual Go initialisms (`ID`, `URL`, `HTTP`).
 - Do not add a second mechanism for an existing concept. If a field, table or endpoint has no reader, remove it; do not document it.
@@ -128,7 +133,11 @@ Policy values are server-side. Text arguments and targets are supplied in their 
 
 ## Adding a protocol field
 
-Add the field to the canonical model, decode it in each codec that has it, encode it where an equivalent exists, and add an explicit loss where one does not. Extend the matrix fixture; do not add a same-format passthrough. A new protocol also needs a gateway route in `internal/api/gateway/gateway.go` and a codec registration.
+Add the field to the canonical model, decode it in each codec that has it, encode it where an equivalent exists, and add an explicit loss where one does not. Extend the matrix fixture; raw overlays must not replace a canonical mapping. A new protocol also needs a gateway route in `internal/transport/http/gateway.go` and a codec registration in `pipeline.New`.
+
+## Adding a provider
+
+Add one file under `internal/llm/provider/builtin` returning a `provider.ProviderSpec`, and one line in `builtin.All()`. Declare only capabilities the official documentation guarantees; a compatibility flag belongs in `Compat`, not in a codec branch. Add the provider to the catalog snapshot test. The console gets the provider in its dropdown from the registry, and channel creation needs nothing beyond the provider id and a key (plus a base URL for a custom provider).
 
 ## Security review
 
@@ -150,4 +159,6 @@ Raw audit data is plaintext by design. Access is controlled by role-based visibi
 - [Storage contract](storage.md)
 - [Analysis model](analysis.md)
 - [Protocol layer](protocol.md)
+- [Audit](audit.md)
+- [Roadmap](roadmap.md)
 - [Agent guide](README.md)

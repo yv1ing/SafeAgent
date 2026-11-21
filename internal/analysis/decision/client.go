@@ -9,9 +9,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/yv1ing/SafeAgent/internal/platform/netguard"
 )
 
 const (
@@ -324,10 +327,7 @@ func dialPublic(ctx context.Context, network, address string, allowPrivate bool)
 	return nil, errors.New("the decision model endpoint has no public address")
 }
 
-var carrierNetwork = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
-
 func privateAddress(address net.IP) bool {
-	return address.IsLoopback() || address.IsPrivate() || address.IsLinkLocalUnicast() ||
-		address.IsLinkLocalMulticast() || address.IsUnspecified() || address.IsMulticast() ||
-		carrierNetwork.Contains(address)
+	parsed, ok := netip.AddrFromSlice(address)
+	return !ok || netguard.Restricted(parsed.Unmap())
 }

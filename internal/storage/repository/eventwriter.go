@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -49,7 +50,7 @@ func (writer *EventWriter) signal() {
 }
 
 func (writer *EventWriter) Append(event entity.Event) error {
-	event.Payload = escapeNUL(event.Payload)
+	event.Payload = auditevent.SanitizePayload(event.Payload)
 	timeout := time.NewTimer(appendTimeout)
 	defer timeout.Stop()
 	for {
@@ -144,6 +145,16 @@ func (writer *EventWriter) settle(callID string, failure error) {
 	writer.signal()
 }
 
+// sealedCallColumns are the fields the seal owns. CancelledAt and ResponseDeletedAt are written by
+// CancelResponse and DeleteResponse on a different instance, so they must not be overwritten here.
+var sealedCallColumns = []string{
+	"public_model", "client_format", "kind", "client_transport", "stream", "session_id", "parent_call_id", "message_offset",
+	"state", "error_code", "terminated_at", "first_token_milliseconds", "duration_milliseconds", "input_tokens", "output_tokens",
+	"cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "usage_known", "cost_micros", "currency",
+	"redaction_hits", "losses", "repairs", "attempts", "response_id", "response_store", "conversation_hash",
+	"channel_id", "upstream_model", "endpoint_format", "audit_head", "audit_events", "analysis_state",
+}
+
 // Seal terminates a call: it waits for the call's in-flight batches, then writes the remaining
 // events, the final call row and its tool call index in one transaction. When the transaction fails the events go back
 // to the queue so the caller can abandon the call and mark it failed.
@@ -158,7 +169,7 @@ func (writer *EventWriter) Seal(ctx context.Context, call *entity.Call, toolCall
 				return err
 			}
 		}
-		if _, err := transaction.NewUpdate().Model(call).WherePK().Exec(ctx); err != nil {
+		if _, err := transaction.NewUpdate().Model(call).Column(sealedCallColumns...).WherePK().Exec(ctx); err != nil {
 			return err
 		}
 		if err := registerTools(ctx, transaction, call, toolCallIDs); err != nil {
@@ -248,32 +259,6 @@ func (writer *EventWriter) Close() {
 	writer.stopping = true
 	writer.mu.Unlock()
 	<-writer.done
-}
-
-// escapeNUL rewrites the JSON escape \u0000, which jsonb rejects. An escaped backslash followed by
-// the text u0000 is data, not an escape, hence the parity check.
-func escapeNUL(payload []byte) []byte {
-	const nul = `\u0000`
-	result := payload
-	copied := false
-	for index := 0; index+len(nul) <= len(payload); index++ {
-		if payload[index] != '\\' || string(payload[index:index+len(nul)]) != nul {
-			continue
-		}
-		backslashes := 0
-		for before := index - 1; before >= 0 && payload[before] == '\\'; before-- {
-			backslashes++
-		}
-		if backslashes%2 == 1 {
-			continue
-		}
-		if !copied {
-			result = append([]byte(nil), payload...)
-			copied = true
-		}
-		copy(result[index:], `\ufffd`)
-	}
-	return result
 }
 
 func registerTools(ctx context.Context, transaction bun.Tx, call *entity.Call, toolCallIDs []string) error {

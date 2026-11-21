@@ -5,24 +5,23 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
+import type { ConsoleChannelEndpointView } from './consoleChannelEndpointView.ts';
 import type { ConsoleChannelModelView } from './consoleChannelModelView.ts';
 import type { ConsoleUpdateChannelInputHeaders } from './consoleUpdateChannelInputHeaders.ts';
 
 export interface ConsoleUpdateChannelInput {
   allow_private_network?: boolean;
-  count_tokens_endpoint?: string;
   currency?: string;
-  /** Applied to an Anthropic Messages upstream when the client omits a limit */
+  /** Applied to an upstream that requires an output limit when the client omits one */
   default_max_output_tokens?: number;
   enabled?: boolean;
-  endpoint: string;
+  endpoints?: ConsoleChannelEndpointView[];
   first_byte_timeout_seconds?: number;
-  format: string;
   forward_headers?: string[];
   headers?: ConsoleUpdateChannelInputHeaders;
   models?: ConsoleChannelModelView[];
   name: string;
+  provider_id: string;
   timeout_seconds?: number;
-  vendor?: string;
   version?: number;
 }

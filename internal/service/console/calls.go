@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -91,6 +90,8 @@ type CallDetail struct {
 	Decisions  []entity.Decision
 	Attempts   []CallAttempt
 	Events     []entity.Event
+	Timeline   []auditevent.Entry
+	Integrity  auditevent.ChainReport
 }
 
 // CallDetail assembles the replay of one call: the conversation up to and including it, every analysis
@@ -118,34 +119,31 @@ func (service *CallService) Detail(ctx context.Context, actor Actor, projectID, 
 		return nil, err
 	}
 	detail.Decisions = decisions
-	// Raw events can approach the stream limit. Members receive attempts built from the small
-	// attempt events, while the full payload set is loaded only for administrators.
-	if actor.Administrator {
-		events, err := service.store.CallEvents(ctx, projectID, call.ID)
-		if err != nil {
-			return nil, err
-		}
-		detail.Events = events
-		detail.Attempts = Attempts(call, events)
-		return detail, nil
-	}
-	attemptEvents, err := service.store.EventsOfKinds(ctx, []string{call.ID},
-		auditevent.KindAttempt, auditevent.KindAttemptFailed, auditevent.KindFirstToken)
+	events, err := service.store.CallEvents(ctx, projectID, call.ID)
 	if err != nil {
 		return nil, err
 	}
-	detail.Attempts = Attempts(call, attemptEvents)
+	detail.Attempts = Attempts(call, events)
+	records := make([]auditevent.Record, 0, len(events))
+	for _, event := range events {
+		records = append(records, auditevent.Record{
+			CallID: event.CallID, Sequence: event.Sequence, ProjectID: event.ProjectID,
+			Kind: event.Kind, SchemaVersion: event.SchemaVersion, Payload: event.Payload,
+			CreatedAt: event.CreatedAt, PrevHash: event.PrevHash, Hash: event.Hash,
+		})
+	}
+	if detail.Timeline, err = auditevent.BuildTimeline(records); err != nil {
+		return nil, err
+	}
+	detail.Integrity, err = service.store.VerifyCallAudit(ctx, projectID, call.ID)
+	if err != nil {
+		detail.Integrity = auditevent.ChainReport{Status: auditevent.StatusUnavailable, Error: "verification unavailable"}
+	}
+	// Raw events can approach the stream limit; only administrators receive the payloads.
+	if actor.Administrator {
+		detail.Events = events
+	}
 	return detail, nil
-}
-
-type attemptPayload struct {
-	ChannelID     string `json:"channel_id"`
-	ChannelName   string `json:"channel_name"`
-	UpstreamModel string `json:"upstream_model"`
-	KeyID         string `json:"key_id"`
-	Code          string `json:"code"`
-	Class         string `json:"class"`
-	Milliseconds  int64  `json:"milliseconds"`
 }
 
 // Attempts rebuilds the upstream attempt waterfall from the attempt events of a call.
@@ -154,24 +152,27 @@ func Attempts(call *entity.Call, events []entity.Event) []CallAttempt {
 	open := false
 	offset := func(at time.Time) int64 { return max(at.Sub(call.CreatedAt).Milliseconds(), 0) }
 	for _, event := range events {
-		var payload attemptPayload
-		switch event.Kind {
-		case auditevent.KindAttempt, auditevent.KindAttemptFailed, auditevent.KindFirstToken:
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				continue
-			}
-		default:
+		decoded, err := auditevent.Decode(event.Kind, event.Payload)
+		if err != nil {
 			continue
 		}
 		switch event.Kind {
 		case auditevent.KindAttempt:
+			if decoded.Attempt == nil {
+				continue
+			}
+			payload := decoded.Attempt
 			attempts = append(attempts, CallAttempt{ChannelID: payload.ChannelID, ChannelName: payload.ChannelName, UpstreamModel: payload.UpstreamModel, KeyID: payload.KeyID, StartOffset: offset(event.CreatedAt), Result: "running"})
 			open = true
 		case auditevent.KindFirstToken:
-			if open {
-				attempts[len(attempts)-1].FirstTokenOffset = payload.Milliseconds
+			if open && decoded.FirstToken != nil {
+				attempts[len(attempts)-1].FirstTokenOffset = decoded.FirstToken.Milliseconds
 			}
 		case auditevent.KindAttemptFailed:
+			if decoded.AttemptFailure == nil {
+				continue
+			}
+			payload := decoded.AttemptFailure
 			if !open {
 				attempts = append(attempts, CallAttempt{ChannelID: payload.ChannelID, KeyID: payload.KeyID, StartOffset: offset(event.CreatedAt)})
 			}

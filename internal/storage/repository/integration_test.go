@@ -451,7 +451,7 @@ func TestProjectAndChannelUpdatesPersistGatewayDefaults(t *testing.T) {
 		t.Fatalf("project output limit = %d", updatedProject.DefaultMaxOutputTokens)
 	}
 
-	channel, err := database.CreateChannel(ctx, &entity.Channel{Name: "c", Format: "openai_chat", Vendor: "openai", Endpoint: "https://example.com/v1/chat/completions", Currency: "USD", Enabled: true})
+	channel, err := database.CreateChannel(ctx, &entity.Channel{Name: "c", ProviderID: "openai", Endpoints: []entity.ChannelEndpoint{{Format: "openai_chat", BaseURL: "https://example.com"}}, Currency: "USD", Enabled: true})
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -516,5 +516,82 @@ func TestRequestMessagesReturnsTheItemsTheCallAdded(t *testing.T) {
 	}
 	if !strings.Contains(string(events[0].Payload), `"items"`) || !strings.Contains(string(events[0].Payload), `"hello"`) {
 		t.Fatalf("the summary payload must contain the item list: %s", events[0].Payload)
+	}
+}
+
+func TestAuditChainVerifiesAndLocatesTampering(t *testing.T) {
+	database := prepared(t)
+	seeded := seed(t, database, 30)
+	ctx := context.Background()
+	call := seeded.call("call_audit", "session", time.Now().UTC())
+	if err := database.CreateCall(ctx, call); err != nil {
+		t.Fatalf("create call: %v", err)
+	}
+	previous := ""
+	for index, payload := range []string{`{"items":[]}`, `{"state":"completed"}`} {
+		kind := auditevent.KindRequest
+		if index == 1 {
+			kind = auditevent.KindTerminal
+		}
+		event := &auditevent.ChainEvent{
+			CallID: call.ID, Sequence: int64(index + 1), ProjectID: seeded.project.ID,
+			Kind: kind, SchemaVersion: auditevent.SchemaVersion, Payload: []byte(payload),
+			CreatedAt: time.Now().UTC(), PrevHash: previous,
+		}
+		if err := auditevent.Sign(event, database.Secret); err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		previous = event.Hash
+		if err := database.AppendEvent(&entity.Event{
+			CallID: event.CallID, Sequence: event.Sequence, ProjectID: event.ProjectID,
+			Kind: event.Kind, SchemaVersion: event.SchemaVersion, Payload: event.Payload,
+			CreatedAt: event.CreatedAt, PrevHash: event.PrevHash, Hash: event.Hash,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	call.AuditHead = previous
+	call.AuditEvents = 2
+	if err := database.SealCall(ctx, call, "completed", "", nil, entity.SealAnalysis{}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	report, err := database.VerifyCallAudit(ctx, seeded.project.ID, call.ID)
+	if err != nil || report.Status != auditevent.StatusVerified {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if _, err := database.DB.ExecContext(ctx, `UPDATE events SET payload = '{"items":[1]}' WHERE call_id = ? AND sequence = 1`, call.ID); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	report, err = database.VerifyCallAudit(ctx, seeded.project.ID, call.ID)
+	if err != nil || report.Status != auditevent.StatusBroken || report.BrokenAt != 1 {
+		t.Fatalf("tampered report=%+v err=%v", report, err)
+	}
+}
+
+func TestSealPreservesCancellationAndDeletionTimestamps(t *testing.T) {
+	database := prepared(t)
+	fixture := seed(t, database, 30)
+	ctx := context.Background()
+	call := &entity.Call{
+		ID: "call_seal", ProjectID: fixture.project.ID, AgentKeyID: fixture.key.ID,
+		ClientFormat: "openai_chat", Kind: "openai_chat", State: "running",
+		SessionID: "call_seal", ResponseID: "resp_seal", ResponseStore: true, CreatedAt: time.Now().UTC(),
+	}
+	if err := database.CreateCall(ctx, call); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteResponse(ctx, fixture.key.ID, "resp_seal"); err != nil {
+		t.Fatal(err)
+	}
+	database.MarkCallCancelled(ctx, call.ID)
+	if err := database.SealCall(ctx, call, "completed", "", nil, entity.SealAnalysis{}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.Call(ctx, fixture.project.ID, call.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CancelledAt == nil || stored.ResponseDeletedAt == nil {
+		t.Fatalf("seal must not overwrite cancellation or deletion: %+v", stored)
 	}
 }

@@ -46,7 +46,7 @@ func evaluateFlow(ctx context.Context, trace *observation.Trace) []analysis.Find
 			break
 		}
 		item := ref.Item
-		if item.Kind != observation.ItemToolCall || item.ToolCall == nil || !item.ToolCall.Sink.HasSideEffect() {
+		if item.Kind != observation.ItemToolCall || item.ToolCall == nil || !couldAct(item.ToolCall.Sink) {
 			continue
 		}
 		sink := flowSink{ref: ref, call: item.ToolCall}
@@ -101,6 +101,12 @@ func evaluateFlow(ctx context.Context, trace *observation.Trace) []analysis.Find
 		))
 	}
 	return findings
+}
+
+// couldAct includes Unknown: a call whose destination could not be classified may still act, so the
+// relation detector must not silently treat it as a read-only call.
+func couldAct(sink observation.Sink) bool {
+	return sink.HasSideEffect() || sink == observation.SinkUnknown
 }
 
 func collectSources(trace *observation.Trace) []flowSource {

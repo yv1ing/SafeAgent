@@ -2,13 +2,50 @@
 
 [中文](architecture_zh.md)
 
-SafeAgent mediates agent traffic. It keeps operator data inside the boundary, stops requests and tool calls when project policy forbids them, and leaves an audit record that can be read without trusting the agent.
+SafeAgent sits between agents and model providers. It collapses four wire protocols into one processing path and applies project policy at four points: request admission, tool-result forwarding, tool-call release and non-streaming response write. It also keeps a verifiable audit record, so an operator can reconstruct a call without relying on the agent's own account.
 
 ## Trust boundary
 
-The gateway is the trust boundary. The database, audit trail, policy, console and instance keys belong to the operator. Agents, model providers, tool output and any content a tool returns are outside it and are treated as data.
+The gateway is the trust boundary. The database, audit chain, policy, console and instance key belong to the operator. Agents, model providers, tool output and tool descriptions lie outside it and are treated as data. Tool output does not gain instruction authority because its text is phrased as an instruction.
 
-Tool output and tool descriptions are labelled untrusted even when their text reads like an instruction. Caller identity comes from the authenticated agent key. Request metadata supplies context for display and policy conditions; it does not establish who is calling.
+Caller identity comes only from the authenticated agent key. Request metadata can be displayed and used by detectors, but it does not establish who is calling and is never exposed as a policy field. The optional session header groups calls under one agent key; it does not carry identity either.
+
+## Components and dependencies
+
+```mermaid
+flowchart TB
+    Agent["agent or HTTP client"] --> HTTP["gateway HTTP and WebSocket routes"]
+    HTTP --> Codec["protocol conversion"]
+    Catalog["provider catalog"] --> Codec
+    Codec --> Canon["canonical model"]
+    Canon --> Stream["stream session: commit boundary and tool hold"]
+    Canon --> Redact["reversible redaction"]
+    Redact --> Observe["protocol-neutral observation: origin, trust, sink"]
+    Observe --> Gate["request, tool-result, tool-call and response checkpoints"]
+    Gate -->|allowed| Upstream["upstream provider"]
+    Gate -->|blocked| Agent
+    Upstream --> Stream
+    Stream --> Restore["restore placeholders and write back"]
+    Restore --> Agent
+    Stream --> Audit["signed audit events"]
+    Gate --> Decisions["online decisions"]
+    Audit --> DB[("PostgreSQL")]
+    Decisions --> DB
+    DB --> Worker["background diagnosis"]
+    Worker --> Findings["findings, flows, model labels"]
+    Findings --> DB
+    DB --> Console["operator console"]
+```
+
+Dependencies point in one direction:
+
+| Module | Depends on |
+| --- | --- |
+| Canonical model | the standard library |
+| Protocol conversion and provider catalog | the canonical model |
+| Stream session | the canonical model and the protocol contract |
+| Call pipeline | orchestrates the modules above |
+| Observation, analysis and redaction | domain layer only; no dependency on codecs, the gateway or transport |
 
 ## One call
 
@@ -18,73 +55,101 @@ sequenceDiagram
     participant Gateway
     participant Provider
     participant Database
-    participant Worker
+    participant Diagnosis
     participant Console
 
-    Agent->>Gateway: request
-    Gateway->>Gateway: decode, redact, observe
-    Gateway->>Gateway: request checkpoint
-    alt a block rule matched
+    Agent->>Gateway: request in one of four protocols
+    Gateway->>Gateway: decode, redact, observe, request checkpoint
+    alt request blocked
         Gateway-->>Agent: protocol-shaped error
     else allowed
+        Gateway->>Gateway: tool-result checkpoint for new results
         Gateway->>Provider: forward the redacted request
         Provider-->>Gateway: stream or complete response
-        Gateway-->>Agent: restored text
-        Gateway->>Gateway: hold and check each complete tool call
-        Gateway-->>Agent: release checked tool calls
+        Gateway->>Gateway: tool-call checkpoint
+        Gateway-->>Agent: release text and restore placeholders
+        Gateway->>Gateway: non-streaming response checkpoint
+        Gateway-->>Agent: release or protocol-shaped refusal
     end
-    Gateway->>Database: store events, decisions and an analysis job
-    Worker->>Database: claim the job and read the events
-    Worker->>Worker: detectors, relations, optional decision model
-    Worker->>Database: store findings, relations and model labels
-    Console->>Database: read calls, decisions and analyses
+    Gateway->>Database: signed events, decisions and analysis job
+    Diagnosis->>Database: claim the job and rebuild the trace
+    Diagnosis->>Diagnosis: detectors, relations, optional decision model
+    Diagnosis->>Database: findings, flows and model labels
+    Console->>Database: calls, timeline, integrity, analyses
 ```
 
-A request is decoded and observed before the request checkpoint runs; redaction happens before the upstream call. A block returns an error in the caller's protocol and skips the upstream call. Otherwise the gateway forwards the redacted request and restores masked values before the response reaches the client. Each completed tool call, including a provider-executed server tool, is held until its verdict is ready, then released or refused.
+After admission, the gateway decodes the request, redacts it and builds the trace. Text and reasoning deltas are forwarded immediately; a tool call enters a hold once its arguments are complete and is released or discarded after the verdict.
 
-Policy evaluation does not wait for response text. In a stream, text is forwarded to the client as it arrives; only tool-call frames wait for a verdict. When the call ends, its events, online decisions and analysis job are stored together.
+When the call ends, events, online decisions and the analysis job are written in one transaction.
 
-## Online enforcement
+## Streaming
 
-The request checkpoint sees the client request, the instructions, the declared tools and every message. Detectors read the raw values; policy arguments and targets use the redacted view when redaction changed them. It runs the structural and content detectors and evaluates request-phase rules.
+Text and reasoning are forwarded as they arrive; a complete tool call waits for its verdict and is then released or discarded. No header is written before the first forwardable content, so a failure before that point can fail over, while a failure after it becomes a protocol error. Terminal frames wait for audit settlement, and a cancel records what the client already received as a partial response.
 
-The tool checkpoint sees the same trajectory plus one complete tool call. It runs the structural, content and relation detectors and evaluates tool-call-phase rules. A client-executed tool's frames are still held, so a block prevents the side effect. A provider-executed tool has already run at the provider; a block withholds its result but cannot undo that execution.
+Keepalive follows the protocol: an SSE comment for Chat and Responses, `event: ping` for Messages, nothing for Gemini. It starts only after the response is committed.
 
-When a detector or rule cannot finish, the phase outcome depends on the project's rules. A project with a blocking rule in that phase fails closed; a record-only project stores a visible "guard unavailable" decision and continues. After the rules allow a side-effecting call, the decision model may add a veto. A model failure leaves the policy outcome unchanged.
+The four behaviors and their edge cases are described in [protocol conversion](protocol-conversion.md).
+
+## Four checkpoints
+
+| Checkpoint | When | What it can stop |
+| --- | --- | --- |
+| Request | after decode and redaction, before routing and quota | the whole request; the upstream is not called |
+| Tool result | after the request adds tool results, before routing and quota | the whole request; the model never sees the blocked output |
+| Tool call | when arguments are complete and frames are still held | the side effect before a client executes the tool; a committed stream ends with a protocol error |
+| Response | before a non-streaming body is written | the body is replaced by a protocol error; reported usage is still settled |
+
+Streaming response text has no online checkpoint: a token that reached the client cannot be recalled, so it is diagnosed after the call. Provider-executed server tools have already run when the gateway sees the result; the gateway can withhold the result but cannot undo the execution.
 
 ## Audit and diagnosis
 
-Stored events are the record of the call. Diagnosis rebuilds the trajectory from those events, the call's redaction snapshot and the agent key's identity, so a new detector or model can re-examine history without extra gateway state.
+Audit events are the single source of truth for a call. Each event carries a stable sequence, a type, a normalized payload, a previous hash and its own hash; when a call ends, the chain head and event count are stored with it. The HMAC key is derived from the instance key; the chain locates a modified event and detects a deleted tail.
 
-Diagnosis never applies policy. It stores findings, relation edges and optional model labels. Each result records its input hash and versions, and a re-analysis creates a new record beside the earlier one. Comparison is available when the input, detector and catalogue versions match.
+The timeline is generated from events and contains metadata only. The console shows admission, upstream attempts, first token, tool calls and results, policy decisions, cancellation, response summaries and termination in order. Raw text is not exposed in the timeline and stays behind the existing role-based views.
 
-Coverage limits without a high-severity finding produce `unknown`. A safe verdict requires complete coverage, no medium or high finding and no unsafe model answer.
+After the call, background diagnosis rebuilds the trace from events, expands a bounded ancestor conversation, runs every detector and, when a decision model is configured, asks for trajectory-level labels. Diagnosis is a separate record and never changes online policy.
 
-## Labels
+## Policy and verdict
 
-Every observed item records an origin and a trust level; every tool call records a sink. A deterministic finding fills only the three-axis fields that its code, origin and sink justify. An empty axis means "not established".
+Each project maintains one ordered rule table, and rule fields are checked when the document is saved. The online path stores only decisions; the asynchronous path stores only findings, relations and model labels. Versions, input hashes and evidence can be compared in the console.
 
-The optional decision model labels the whole trajectory on the full taxonomy. Its answers are stored beside the findings and leave the deterministic labels unchanged.
+A call ends with `safe`, `unsafe` or `unknown`: a high-severity finding yields `unsafe`, incomplete coverage without one yields `unknown`, and `safe` requires complete evidence. The [agent safety](agent-safety.md) page describes the conditions and the decision model.
 
-## Policy
+## Sessions and chains
 
-A project owns one ordered list of typed conditions. Conditions read the agent principal, the tool, flattened arguments, the target, the tool chain, the findings and the current phase. A misspelled field is rejected at save time.
+A call joins a session through the previous-response identifier, the latest tool result, a conversation-prefix fingerprint or the optional session header. A session header that conflicts with a previous-response parent returns 409 and records the refusal; a heuristic parent in another session is dropped without rejecting the request.
 
-Saving validates the document and activates a new version in one transaction. Earlier versions remain available for review and can be restored as a new version. Each call pins the active version at admission. Members may edit record rules but cannot set priorities. Blocking policy rules, blocking redaction rules, priorities, version restore and decision model configuration belong to administrators.
+Session ids are scoped to the agent key and cannot link tenants.
 
-## Durability and failure
+The console conversation page shows the call tree, and the call detail shows the parent, session source and timeline. A session is only a grouping; it does not change authentication or promote a client-supplied value into a trusted identity.
 
-PostgreSQL is the only durable store. The call, its online decisions and its analysis job are stored in one transaction, so a finished call always has work queued. The in-process worker claims from the database and retries with backoff. Failures remain visible as failed jobs or failed analyses.
+## Deployment and persistence
 
-The schema is a fresh baseline with a fingerprint. A build with a different fingerprint refuses to start and the database must be recreated. There is no migration path.
+One Go process serves the console, gateway and health check, backed by one PostgreSQL database. Background analysis claims jobs from the database in the same process; no message broker, Redis or separate background service is required. The database is the only coordination point, and this version runs a single instance.
 
-## Deployment
+## Failure and boundaries
 
-One process serves the console, gateway and health check, backed by one PostgreSQL database. When the console is reachable beyond loopback, serve it through a reverse proxy that handles TLS. The database is the coordination point, and the current design runs one instance.
+| Failure | Behavior |
+| --- | --- |
+| Upstream fails before content | Fail over to another channel or key; the client sees nothing |
+| Upstream fails after content | Write a protocol error; do not fail over |
+| Client disconnects | Stop writing, cancel upstream, record a partial response and a cancellation event |
+| Tool hold exceeds its limit | Return a resource error, not a policy refusal |
+| Audit write fails | Mark the call failed; never present a successful response |
+| Policy or detector unavailable | Fail closed when that phase has a blocking rule; otherwise record and continue |
+| Schema fingerprint mismatch | Refuse to start; the database must be recreated |
+
+## Design trade-offs
+
+- **Gateway scope.** Coverage depends on where the gateway is deployed.
+- **Text-only redaction.** Images, audio and other binary payloads are not rewritten.
+- **Heuristic relations.** Tool destinations and content relations rely on names, arguments and literal matches; findings need human confirmation.
+- **Single instance.** PostgreSQL is the only coordination point; there is no distributed queue or multi-instance mode.
+- **Schema changes.** A schema change requires recreating the database; the audit contract stays deterministic.
 
 ## Related
 
-- [Console](console.md)
-- [Agent threat modeling](threat-modeling.md)
-- [Getting started](getting-started.md)
-- [Agent guide](../agent/README.md)
+- [Protocol conversion](protocol-conversion.md)
+- [Agent safety](agent-safety.md)
+- [Landscape](landscape.md)
+- [Verification](verification.md)

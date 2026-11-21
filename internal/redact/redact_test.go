@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yv1ing/SafeAgent/internal/protocol"
+	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 )
 
@@ -31,8 +31,8 @@ func regex(pattern, label string, action redact.Action) redact.Rule {
 	return redact.Rule{Kind: redact.KindRegex, Pattern: pattern, Label: label, Action: action, Enabled: true}
 }
 
-func userRequest(text string) *protocol.Request {
-	return &protocol.Request{Items: []protocol.Item{protocol.MessageItem(protocol.RoleUser, text)}}
+func userRequest(text string) *model.Request {
+	return &model.Request{Items: []model.Item{model.MessageItem(model.RoleUser, text)}}
 }
 
 func stream(restorer *redact.Restorer, text string, chunk int) string {
@@ -365,24 +365,24 @@ func TestApplyRequestCoversEveryTextPosition(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
 	address := "ops@example.com"
 	mediaData := base64.StdEncoding.EncodeToString([]byte("note: " + address))
-	request := &protocol.Request{
+	request := &model.Request{
 		Instructions:   "instructions " + address,
 		User:           address,
 		PromptCacheKey: "cache-" + address,
 		Metadata:       map[string]string{"owner-" + address: "value " + address, "plain": "p"},
-		ResponseFormat: &protocol.ResponseFormat{Kind: "json_schema", Name: "answer", Description: "desc " + address, Schema: []byte(`{"title":"` + address + `"}`)},
-		Raw:            &protocol.Raw{Format: protocol.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`{"a":"` + address + `"}`)}},
-		Items: []protocol.Item{
-			{Kind: protocol.ItemMessage, Role: protocol.RoleDeveloper, Parts: []protocol.Part{{Kind: protocol.PartText, Text: "dev " + address}}, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"m": json.RawMessage(`"` + address + `"`)}}},
-			{Kind: protocol.ItemMessage, Role: protocol.RoleUser, Parts: []protocol.Part{
-				{Kind: protocol.PartText, Text: "hi " + address, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"b": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "cited " + address, Title: "title " + address}}},
-				{Kind: protocol.PartMedia, Media: &protocol.Media{Kind: "document", MIMEType: "text/plain", Data: mediaData}, Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"e": json.RawMessage(`"` + address + `"`)}}, Citations: []protocol.Citation{{CitedText: "media " + address}}},
+		ResponseFormat: &model.ResponseFormat{Kind: "json_schema", Name: "answer", Description: "desc " + address, Schema: []byte(`{"title":"` + address + `"}`)},
+		Raw:            &model.Raw{Format: model.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`{"a":"` + address + `"}`)}},
+		Items: []model.Item{
+			{Kind: model.ItemMessage, Role: model.RoleDeveloper, Parts: []model.Part{{Kind: model.PartText, Text: "dev " + address}}, Raw: &model.Raw{Fields: map[string]json.RawMessage{"m": json.RawMessage(`"` + address + `"`)}}},
+			{Kind: model.ItemMessage, Role: model.RoleUser, Parts: []model.Part{
+				{Kind: model.PartText, Text: "hi " + address, Raw: &model.Raw{Fields: map[string]json.RawMessage{"b": json.RawMessage(`"` + address + `"`)}}, Citations: []model.Citation{{CitedText: "cited " + address, Title: "title " + address}}},
+				{Kind: model.PartMedia, Media: &model.Media{Kind: "document", MIMEType: "text/plain", Data: mediaData}, Raw: &model.Raw{Fields: map[string]json.RawMessage{"e": json.RawMessage(`"` + address + `"`)}}, Citations: []model.Citation{{CitedText: "media " + address}}},
 			}},
-			{Kind: protocol.ItemToolResult, Role: protocol.RoleTool, CallID: "c1", Parts: []protocol.Part{{Kind: protocol.PartText, Text: "result " + address}}},
-			{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: "c1", Name: "send", Arguments: `{"to":"` + address + `"}`}},
-			{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolCustom, ID: "c2", Name: "patch", Arguments: "raw " + address}},
+			{Kind: model.ItemToolResult, Role: model.RoleTool, CallID: "c1", Parts: []model.Part{{Kind: model.PartText, Text: "result " + address}}},
+			{Kind: model.ItemToolCall, Role: model.RoleAssistant, ToolCall: &model.ToolCall{Kind: model.ToolFunction, ID: "c1", Name: "send", Arguments: `{"to":"` + address + `"}`}},
+			{Kind: model.ItemToolCall, Role: model.RoleAssistant, ToolCall: &model.ToolCall{Kind: model.ToolCustom, ID: "c2", Name: "patch", Arguments: "raw " + address}},
 		},
-		Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "send", Description: "tool " + address, Parameters: []byte(`{"description":"` + address + `"}`), Raw: &protocol.Raw{Fields: map[string]json.RawMessage{"t": json.RawMessage(`"` + address + `"`)}}}},
+		Tools: []model.Tool{{Kind: model.ToolFunction, Name: "send", Description: "tool " + address, Parameters: []byte(`{"description":"` + address + `"}`), Raw: &model.Raw{Fields: map[string]json.RawMessage{"t": json.RawMessage(`"` + address + `"`)}}}},
 	}
 	scope := compiled.NewScope()
 	result, err := scope.ApplyRequest(request)
@@ -422,18 +422,18 @@ func TestApplyRequestMediaEdgeCases(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
 	binary := base64.StdEncoding.EncodeToString([]byte("a@example.com"))
 	untouched := userRequest("")
-	untouched.Items[0].Parts = []protocol.Part{{Kind: protocol.PartMedia, Media: &protocol.Media{Kind: "image", MIMEType: "image/png", Data: binary}}}
+	untouched.Items[0].Parts = []model.Part{{Kind: model.PartMedia, Media: &model.Media{Kind: "image", MIMEType: "image/png", Data: binary}}}
 	if _, err := compiled.NewScope().ApplyRequest(untouched); err != nil || untouched.Items[0].Parts[0].Media.Data != binary {
 		t.Fatalf("binary media must not be touched: %v", err)
 	}
 
-	for _, media := range []*protocol.Media{
+	for _, media := range []*model.Media{
 		{Kind: "document", MIMEType: "text/plain", Data: "***not base64***"},
 		{Kind: "document", URL: "https://example.com/?u=a@example.com"},
 		{Kind: "document", Filename: "a@example.com.txt"},
 	} {
 		request := userRequest("")
-		request.Items[0].Parts = []protocol.Part{{Kind: protocol.PartMedia, Media: media}}
+		request.Items[0].Parts = []model.Part{{Kind: model.PartMedia, Media: media}}
 		if _, err := compiled.NewScope().ApplyRequest(request); !errors.Is(err, redact.ErrImmutablePosition) {
 			t.Fatalf("expected immutable position for %+v, got %v", media, err)
 		}
@@ -442,18 +442,18 @@ func TestApplyRequestMediaEdgeCases(t *testing.T) {
 
 func TestApplyRequestRejectsImmutablePositions(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
-	call := func(id, name string) *protocol.Request {
-		return &protocol.Request{Items: []protocol.Item{{Kind: protocol.ItemToolCall, Role: protocol.RoleAssistant, ToolCall: &protocol.ToolCall{Kind: protocol.ToolFunction, ID: id, Name: name, Arguments: "{}"}}}}
+	call := func(id, name string) *model.Request {
+		return &model.Request{Items: []model.Item{{Kind: model.ItemToolCall, Role: model.RoleAssistant, ToolCall: &model.ToolCall{Kind: model.ToolFunction, ID: id, Name: name, Arguments: "{}"}}}}
 	}
-	cases := map[string]*protocol.Request{
+	cases := map[string]*model.Request{
 		"tool call id":   call("a@example.com", "read"),
 		"tool call name": call("c1", "a@example.com"),
-		"tool name":      {Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "a@example.com"}}},
+		"tool name":      {Tools: []model.Tool{{Kind: model.ToolFunction, Name: "a@example.com"}}},
 		"stop sequence":  {Stop: []string{"a@example.com"}},
-		"tool choice":    {ToolChoice: &protocol.ToolChoice{Mode: "tool", Names: []string{"a@example.com"}}},
-		"schema name":    {ResponseFormat: &protocol.ResponseFormat{Kind: "json_schema", Name: "a@example.com"}},
-		"json key":       {Tools: []protocol.Tool{{Kind: protocol.ToolFunction, Name: "t", Parameters: []byte(`{"a@example.com":1}`)}}},
-		"json number":    {Raw: &protocol.Raw{Format: protocol.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`13812345678`)}}},
+		"tool choice":    {ToolChoice: &model.ToolChoice{Mode: "tool", Names: []string{"a@example.com"}}},
+		"schema name":    {ResponseFormat: &model.ResponseFormat{Kind: "json_schema", Name: "a@example.com"}},
+		"json key":       {Tools: []model.Tool{{Kind: model.ToolFunction, Name: "t", Parameters: []byte(`{"a@example.com":1}`)}}},
+		"json number":    {Raw: &model.Raw{Format: model.Chat, Fields: map[string]json.RawMessage{"x": json.RawMessage(`13812345678`)}}},
 	}
 	numeric := engine(t, builtin("email", "EMAIL"), builtin("cn_mobile", "PHONE"))
 	for name, request := range cases {
@@ -495,13 +495,13 @@ func TestApplyRequestBlockedAndEmpty(t *testing.T) {
 
 func TestReasoningSignatureSurvivesRedactionOfTheTextItWasIssuedFor(t *testing.T) {
 	compiled := engine(t, builtin("email", "EMAIL"))
-	build := func(text, digest string) *protocol.Request {
+	build := func(text, digest string) *model.Request {
 		request := userRequest("")
-		request.Items = []protocol.Item{{Kind: protocol.ItemReasoning, Role: protocol.RoleAssistant, Parts: []protocol.Part{{Kind: protocol.PartReasoningText, Text: text}}, Reasoning: &protocol.Reasoning{Visibility: "full", Signature: &protocol.Signature{Blob: "b", TextDigest: digest}}}}
+		request.Items = []model.Item{{Kind: model.ItemReasoning, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartReasoningText, Text: text}}, Reasoning: &model.Reasoning{Visibility: "full", Signature: &model.Signature{Blob: "b", TextDigest: digest}}}}
 		return request
 	}
 	shown := "mail a@example.com"
-	issued := build(shown, protocol.TextDigest(shown))
+	issued := build(shown, model.TextDigest(shown))
 	if _, err := compiled.NewScope().ApplyRequest(issued); err != nil || issued.Items[0].Reasoning.Signature == nil {
 		t.Fatalf("re-redacting the shown text restores the provider's text, so the signature stays: %v", err)
 	}
@@ -551,5 +551,38 @@ func TestUnterminatedPrivateKeyStopsAtTheKeyMaterial(t *testing.T) {
 	replaced, _ := engine(t, builtin("pem_private_key", "PRIVATE_KEY")).NewScope().Replace(text, "text")
 	if strings.Contains(replaced, "MIIEvQ") || !strings.Contains(replaced, "see you tomorrow") {
 		t.Fatalf("the key must be redacted and the prose after it kept: %q", replaced)
+	}
+}
+
+func TestAuxiliaryBodyRedactsValuesAndPreservesModel(t *testing.T) {
+	compiled := engine(t, builtin("email", "EMAIL"))
+	scope := compiled.NewScope()
+	out, result, err := scope.ApplyAuxiliaryBody([]byte(`{"model":"m","input":"me@example.com"}`))
+	if err != nil || result.Blocked {
+		t.Fatalf("apply: %v %+v", err, result)
+	}
+	if !strings.Contains(string(out), `"model":"m"`) {
+		t.Fatalf("the model must stay intact: %s", out)
+	}
+	if strings.Contains(string(out), "me@example.com") || !strings.Contains(string(out), "EMAIL") {
+		t.Fatalf("the auxiliary value must be redacted: %s", out)
+	}
+}
+
+func TestAuxiliaryBodyRefusesASensitiveKey(t *testing.T) {
+	compiled := engine(t, builtin("email", "EMAIL"))
+	scope := compiled.NewScope()
+	_, _, err := scope.ApplyAuxiliaryBody([]byte(`{"model":"m","input":{"me@example.com":"value"}}`))
+	if !errors.Is(err, redact.ErrImmutablePosition) {
+		t.Fatalf("a sensitive object key must be refused, got %v", err)
+	}
+}
+
+func TestStructuralRequestFieldsAreChecked(t *testing.T) {
+	compiled := engine(t, builtin("email", "EMAIL"))
+	request := userRequest("hello")
+	request.Stop = []string{"me@example.com"}
+	if _, err := compiled.NewScope().ApplyRequest(request); !errors.Is(err, redact.ErrImmutablePosition) {
+		t.Fatalf("a matched stop sequence must be refused, got %v", err)
 	}
 }

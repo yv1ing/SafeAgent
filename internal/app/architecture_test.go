@@ -29,30 +29,36 @@ func joined(paths ...string) []string {
 	return values
 }
 
-// The module is one direction of dependency: transport, then use cases, then storage. The wire
-// contract and the protocol-neutral domain libraries sit beside that chain. Platform packages are
-// utilities with no knowledge of either.
+// The module is one direction of dependency: transport, then pipeline, then use cases, then
+// storage. The wire model, the codecs, the provider catalog and the stream engine sit below the
+// pipeline. Platform packages are utilities with no knowledge of any of them.
 func boundaries() []boundary {
-	above := joined("storage/entity", "storage/repository", "storage/auditevent", "service", "api", "app", "testkit")
-	domains := joined("protocol", "observation", "observe", "analysis", "redact")
+	above := joined("storage/entity", "storage/repository", "storage/auditevent", "service", "pipeline", "transport", "app", "testkit")
+	llmPackages := joined("llm/model", "llm/codec", "llm/provider", "llm/stream")
+	domains := append(append([]string{}, llmPackages...), joined("observation", "observe", "analysis", "redact")...)
 	platform := joined("platform/config", "platform/limit", "platform/routing", "platform/secure")
 	return []boundary{
-		{packagePath: "api", forbidden: append(joined("storage/repository", "app"), bun)},
-		{packagePath: "service", forbidden: append(joined("api", "app"), gin, bun)},
-		{packagePath: "service/console", forbidden: joined("api", "app")},
-		{packagePath: "storage/repository", forbidden: append(joined("service", "api", "app", "redact", "routing", "protocol", "analysis", "observation", "observe", "testkit"), gin)},
-		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "api", "app", "protocol", "redact", "analysis", "observation", "observe", "platform/routing", "testkit"), gin)},
-		{packagePath: "storage/auditevent", forbidden: append(joined("storage/repository", "service", "api", "app", "analysis", "observation", "observe", "testkit"), gin)},
-		{packagePath: "protocol", forbidden: append(append([]string{}, above...), platform...)},
+		{packagePath: "transport", forbidden: append(joined("storage/repository", "app"), bun)},
+		{packagePath: "pipeline", forbidden: append(joined("transport", "app"), gin, bun)},
+		{packagePath: "service", forbidden: append(joined("transport", "app"), gin, bun)},
+		{packagePath: "service/console", forbidden: joined("transport", "app")},
+		{packagePath: "storage/repository", forbidden: append(joined("service", "pipeline", "transport", "app", "redact", "routing", "llm", "analysis", "observation", "observe", "testkit"), gin)},
+		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "llm", "redact", "analysis", "observation", "observe", "platform/routing", "testkit"), gin)},
+		{packagePath: "storage/auditevent", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "analysis", "observation", "observe", "testkit"), gin)},
+		{packagePath: "llm/model", forbidden: append(append([]string{}, above...), platform...)},
+		{packagePath: "llm/codec", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider", "llm/stream")...)},
+		{packagePath: "llm/provider", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/codec", "llm/stream")...)},
+		{packagePath: "llm/stream", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider")...)},
 		{packagePath: "observation", forbidden: append(append([]string{}, above...), platform...)},
-		{packagePath: "observe", forbidden: joined("storage/entity", "storage/repository", "service", "api", "app", "analysis", "testkit")},
-		{packagePath: "analysis", forbidden: append(append([]string{}, above...), platform...)},
+		{packagePath: "observe", forbidden: joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "analysis", "llm/codec", "llm/provider", "llm/stream", "testkit")},
+		{packagePath: "analysis", forbidden: append(append([]string{}, above...), append(append([]string{}, platform...), llmPackages...)...)},
 		{packagePath: "redact", forbidden: append(append([]string{}, above...), platform...)},
 		{packagePath: "platform/config", forbidden: append(append([]string{}, above...), domains...)},
 		{packagePath: "platform/secure", forbidden: append(append([]string{}, above...), domains...)},
 		{packagePath: "platform/limit", forbidden: append(append([]string{}, above...), domains...)},
 		{packagePath: "platform/routing", forbidden: append(append([]string{}, above...), domains...)},
-		{packagePath: "testkit", forbidden: joined("api", "app")},
+		{packagePath: "platform/netguard", forbidden: append(append([]string{}, above...), domains...)},
+		{packagePath: "testkit", forbidden: joined("transport", "app")},
 	}
 }
 
@@ -69,37 +75,39 @@ func TestDependencyBoundaries(t *testing.T) {
 	}
 }
 
-func TestAnalysisHasNoTransitiveProtocolDependency(t *testing.T) {
+func TestAnalysisHasNoTransitiveLLMDependency(t *testing.T) {
 	for _, path := range []string{"./internal/analysis", "./internal/analysis/policy", "./internal/observation"} {
 		deps := goListDependencies(t, path)
 		for _, dependency := range deps {
-			if dependency == module+"protocol" || strings.HasPrefix(dependency, module+"protocol/") {
+			if dependency == module+"llm" || strings.HasPrefix(dependency, module+"llm/") {
 				t.Fatalf("%s must not depend on %s, directly or transitively", path, dependency)
 			}
 		}
 	}
 }
 
-// The console reads observations and analysis read models. It must not name the wire model; the
+// The console reads observations and provider descriptions. It must not name the wire model; the
 // observation adapter is the only package allowed to bridge the two sides.
-func TestConsoleDoesNotImportTheProtocolModel(t *testing.T) {
-	for _, directory := range []string{"api/console", "service/console"} {
+func TestConsoleDoesNotImportTheWireModel(t *testing.T) {
+	for _, directory := range []string{"service/console", "transport/console"} {
 		for _, imported := range packageImports(t, filepath.Join("..", directory)) {
-			if imported == module+"protocol" || strings.HasPrefix(imported, module+"protocol/") {
-				t.Fatalf("internal/%s must not import %s", directory, imported)
+			for _, forbidden := range joined("llm/model", "llm/codec", "llm/stream") {
+				if imported == forbidden || strings.HasPrefix(imported, forbidden+"/") {
+					t.Fatalf("internal/%s must not import %s", directory, imported)
+				}
 			}
 		}
 	}
 }
 
 func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
-	for _, library := range []string{"protocol", "observation", "observe", "analysis", "redact", "platform/config", "platform/limit", "platform/routing", "platform/secure"} {
+	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/stream", "observation", "observe", "analysis", "redact", "platform/config", "platform/limit", "platform/routing", "platform/secure"} {
 		imports := packageImports(t, filepath.Join("..", library))
 		if library == "analysis" {
 			imports = append(imports, packageImports(t, filepath.Join("..", "analysis", "policy"))...)
 		}
 		for _, imported := range imports {
-			for _, layer := range []string{module + "storage/entity", module + "storage/repository", module + "service", module + "api"} {
+			for _, layer := range []string{module + "storage/entity", module + "storage/repository", module + "service", module + "transport"} {
 				if imported == layer || strings.HasPrefix(imported, layer+"/") {
 					t.Fatalf("internal/%s must not import the %s layer", library, strings.TrimPrefix(layer, module))
 				}
@@ -108,10 +116,10 @@ func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
 	}
 }
 
-func TestProtocolDependsOnlyOnTheStandardLibrary(t *testing.T) {
-	for _, imported := range packageImports(t, filepath.Join("..", "protocol")) {
-		if strings.Contains(imported, ".") && !strings.HasPrefix(imported, module+"protocol") {
-			t.Fatalf("internal/protocol must depend only on the standard library, found %s", imported)
+func TestWireModelDependsOnlyOnTheStandardLibrary(t *testing.T) {
+	for _, imported := range packageImports(t, filepath.Join("..", "llm", "model")) {
+		if strings.Contains(imported, ".") && !strings.HasPrefix(imported, module+"llm/model") {
+			t.Fatalf("internal/llm/model must depend only on the standard library, found %s", imported)
 		}
 	}
 }

@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/yv1ing/SafeAgent/internal/observation"
@@ -54,18 +53,18 @@ func (service *CallService) ConversationTrace(ctx context.Context, projectID, ca
 		requestFound := false
 		for _, event := range events {
 			totalBytes += len(event.Payload)
+			decoded, err := auditevent.Decode(event.Kind, event.Payload)
+			if err != nil {
+				return Transcript{}, fmt.Errorf("%s event of %s: %w", event.Kind, call.ID, err)
+			}
 			switch event.Kind {
 			case auditevent.KindRequest:
-				if err := json.Unmarshal(event.Payload, &request); err != nil {
-					return Transcript{}, fmt.Errorf("request event of %s: %w", call.ID, err)
+				if decoded.Request != nil {
+					request = *decoded.Request
 				}
 				requestFound = true
 			case auditevent.KindResponse:
-				decoded := new(auditevent.Response)
-				if err := json.Unmarshal(event.Payload, decoded); err != nil {
-					return Transcript{}, fmt.Errorf("response event of %s: %w", call.ID, err)
-				}
-				response = decoded
+				response = decoded.Response
 			}
 		}
 		if !requestFound {

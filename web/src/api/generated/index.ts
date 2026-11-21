@@ -15,6 +15,7 @@ export * from './operation-logs/operation-logs.ts';
 export * from './operations/operations.ts';
 export * from './policies/policies.ts';
 export * from './projects/projects.ts';
+export * from './providers/providers.ts';
 export * from './risk/risk.ts';
 export * from './routes/routes.ts';
 export * from './rules/rules.ts';

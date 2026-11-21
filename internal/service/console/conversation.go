@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -78,37 +79,21 @@ func truncateSummary(text string, length int) string {
 	return string(runes[:length])
 }
 
-// summaryFromPayload reads only the user text of the stored message list; it deliberately does not
-// depend on the protocol model so the console read path stays free of wire types.
+// summaryFromPayload reads the request event through the audit contract; the console never parses
+// the stored item shape on its own.
 func summaryFromPayload(payload json.RawMessage, redactor observe.Redactor) string {
-	var record struct {
-		Items []struct {
-			Kind  string `json:"kind"`
-			Role  string `json:"role"`
-			Parts []struct {
-				Kind string `json:"kind"`
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(payload, &record); err != nil {
+	decoded, err := auditevent.Decode(auditevent.KindRequest, payload)
+	if err != nil || decoded.Request == nil {
 		return ""
 	}
-	messages := record.Items
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role != "user" || messages[index].Kind != "message" {
-			continue
-		}
-		for position := len(messages[index].Parts) - 1; position >= 0; position-- {
-			if text := messages[index].Parts[position].Text; text != "" {
-				if redactor != nil {
-					text, _ = redactor(text, "summary")
-				}
-				return truncateSummary(text, 120)
-			}
-		}
+	text := auditevent.LastUserText(decoded.Request)
+	if text == "" {
+		return ""
 	}
-	return ""
+	if redactor != nil {
+		text, _ = redactor(text, "summary")
+	}
+	return truncateSummary(text, 120)
 }
 
 func (service *CallService) Conversations(ctx context.Context, actor Actor, projectID string, cursor Cursor) (Page[entity.Conversation], error) {

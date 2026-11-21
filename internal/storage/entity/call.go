@@ -14,6 +14,9 @@ type Call struct {
 	ProjectID              string     `json:"project_id"`
 	AgentKeyID             string     `json:"agent_key_id"`
 	ClientFormat           string     `json:"client_format"`
+	Kind                   string     `json:"kind"`
+	ClientTransport        string     `json:"client_transport"`
+	EndpointFormat         string     `json:"endpoint_format"`
 	PublicModel            string     `json:"public_model"`
 	UpstreamModel          string     `json:"upstream_model"`
 	ChannelID              string     `json:"channel_id"`
@@ -36,10 +39,15 @@ type Call struct {
 	Repairs                []Repair   `bun:"type:jsonb" json:"repairs"`
 	Attempts               int        `json:"attempts"`
 	ResponseID             string     `json:"response_id"`
+	ResponseStore          bool       `json:"response_store"`
+	ResponseDeletedAt      *time.Time `json:"response_deleted_at,omitempty"`
+	CancelledAt            *time.Time `json:"cancelled_at,omitempty"`
 	SessionID              string     `json:"session_id"`
 	ParentCallID           string     `json:"parent_call_id"`
 	ConversationHash       string     `json:"conversation_hash"`
 	MessageOffset          int        `json:"message_offset"`
+	AuditHead              string     `json:"audit_head"`
+	AuditEvents            int64      `json:"audit_events"`
 	AnalysisState          string     `json:"analysis_state"`
 	LatestAnalysisID       string     `json:"latest_analysis_id"`
 	FindingCount           int        `json:"finding_count"`

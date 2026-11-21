@@ -12,4 +12,6 @@ export type ConsoleDecisionViewPhase =
 export const ConsoleDecisionViewPhase = {
   request: 'request',
   tool_call: 'tool_call',
+  tool_result: 'tool_result',
+  response: 'response',
 } as const;

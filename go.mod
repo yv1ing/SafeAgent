@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	cel.dev/cel-go v0.32.0
+	github.com/coder/websocket v1.8.13
 	github.com/gin-gonic/gin v1.10.1
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/swaggest/jsonschema-go v0.3.78

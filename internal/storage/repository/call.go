@@ -22,6 +22,9 @@ func (store *Store) CreateCall(ctx context.Context, call *entity.Call) error {
 	if call.Losses == nil {
 		call.Losses = []entity.Loss{}
 	}
+	if call.Repairs == nil {
+		call.Repairs = []entity.Repair{}
+	}
 	return store.DB.RunInTx(ctx, nil, func(ctx context.Context, transaction bun.Tx) error {
 		if _, err := transaction.NewInsert().Model(call).Exec(ctx); err != nil {
 			return err
@@ -128,6 +131,28 @@ func (store *Store) CallChain(ctx context.Context, callID string) ([]entity.Call
 		return nil, ErrNotFound
 	}
 	return calls, nil
+}
+
+// DeleteResponse soft-deletes a stored response: retrieve and previous_response_id both stop
+// working while the audit record stays.
+func (store *Store) DeleteResponse(ctx context.Context, agentKeyID, responseID string) error {
+	result, err := store.DB.NewUpdate().Model((*entity.Call)(nil)).
+		Set("response_deleted_at = ?", time.Now().UTC()).
+		Where("agent_key_id = ? AND response_id = ? AND response_deleted_at IS NULL", agentKeyID, responseID).Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MarkCallCancelled records that a client canceled a running call.
+func (store *Store) MarkCallCancelled(ctx context.Context, callID string) {
+	_, _ = store.DB.NewUpdate().Model((*entity.Call)(nil)).
+		Set("cancelled_at = ?", time.Now().UTC()).
+		Where("id = ? AND state = 'running'", callID).Exec(ctx)
 }
 
 // Conversations lists the newest conversations of a project, keyed on (last_at, id).

@@ -318,6 +318,40 @@
         ],
         "type": "object"
       },
+      "ConsoleAuditIntegrityView": {
+        "properties": {
+          "broken_at": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "events": {
+            "type": "integer"
+          },
+          "head": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "verified",
+              "in_progress",
+              "incomplete",
+              "broken",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "events",
+          "head",
+          "broken_at",
+          "error"
+        ],
+        "type": "object"
+      },
       "ConsoleAxesView": {
         "properties": {
           "harm": {
@@ -416,6 +450,15 @@
             },
             "type": "array"
           },
+          "integrity": {
+            "$ref": "#/components/schemas/ConsoleAuditIntegrityView"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleTimelineEntryView"
+            },
+            "type": "array"
+          },
           "transcript": {
             "$ref": "#/components/schemas/ConsoleTranscriptView"
           }
@@ -426,6 +469,8 @@
           "decisions",
           "analyses",
           "attempts",
+          "timeline",
+          "integrity",
           "events",
           "hits"
         ],
@@ -588,32 +633,67 @@
         ],
         "type": "object"
       },
+      "ConsoleCapabilityOverrideView": {
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "field"
+        ],
+        "type": "object"
+      },
+      "ConsoleChannelEndpointView": {
+        "properties": {
+          "base_url": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "type": "object"
+      },
       "ConsoleChannelInput": {
         "properties": {
           "allow_private_network": {
             "type": "boolean"
           },
-          "count_tokens_endpoint": {
-            "type": "string"
-          },
           "currency": {
             "type": "string"
           },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "description": "Applied to an upstream that requires an output limit when the client omits one",
             "type": "integer"
           },
           "enabled": {
             "type": "boolean"
           },
-          "endpoint": {
-            "type": "string"
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelEndpointView"
+            },
+            "type": "array"
           },
           "first_byte_timeout_seconds": {
             "type": "integer"
-          },
-          "format": {
-            "type": "string"
           },
           "forward_headers": {
             "items": {
@@ -636,11 +716,11 @@
           "name": {
             "type": "string"
           },
+          "provider_id": {
+            "type": "string"
+          },
           "timeout_seconds": {
             "type": "integer"
-          },
-          "vendor": {
-            "type": "string"
           },
           "version": {
             "type": "integer"
@@ -648,8 +728,7 @@
         },
         "required": [
           "name",
-          "format",
-          "endpoint"
+          "provider_id"
         ],
         "type": "object"
       },
@@ -698,8 +777,11 @@
       },
       "ConsoleChannelOption": {
         "properties": {
-          "format": {
-            "type": "string"
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -752,27 +834,38 @@
           "allow_private_network": {
             "type": "boolean"
           },
-          "count_tokens_endpoint": {
-            "type": "string"
+          "capability_overrides": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleCapabilityOverrideView"
+            },
+            "type": "array"
           },
           "currency": {
             "type": "string"
           },
+          "custom": {
+            "type": "boolean"
+          },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
             "type": "integer"
           },
           "enabled": {
             "type": "boolean"
           },
-          "endpoint": {
-            "type": "string"
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelEndpointView"
+            },
+            "type": "array"
           },
           "first_byte_timeout_seconds": {
             "type": "integer"
           },
-          "format": {
-            "type": "string"
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "forward_headers": {
             "items": {
@@ -798,11 +891,11 @@
           "name": {
             "type": "string"
           },
+          "provider_id": {
+            "type": "string"
+          },
           "timeout_seconds": {
             "type": "integer"
-          },
-          "vendor": {
-            "type": "string"
           },
           "version": {
             "type": "integer"
@@ -810,7 +903,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "provider_id"
         ],
         "type": "object"
       },
@@ -1157,7 +1251,9 @@
           "phase": {
             "enum": [
               "request",
-              "tool_call"
+              "tool_call",
+              "tool_result",
+              "response"
             ],
             "type": "string"
           },
@@ -1263,6 +1359,17 @@
           "before_count",
           "after_count"
         ],
+        "type": "object"
+      },
+      "ConsoleDiscoveryView": {
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "ConsoleEventView": {
@@ -2286,6 +2393,36 @@
         ],
         "type": "object"
       },
+      "ConsoleProviderView": {
+        "properties": {
+          "custom": {
+            "type": "boolean"
+          },
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "hosts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
       "ConsoleRedactionView": {
         "properties": {
           "hits": {
@@ -2861,6 +2998,111 @@
         ],
         "type": "object"
       },
+      "ConsoleTimelineEntryView": {
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "response": {
+            "$ref": "#/components/schemas/ConsoleTimelineResponse"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "at",
+          "kind",
+          "category",
+          "label",
+          "status",
+          "code",
+          "message",
+          "tool_call_id",
+          "tool_name",
+          "is_error",
+          "channel_id",
+          "upstream_model",
+          "key_id"
+        ],
+        "type": "object"
+      },
+      "ConsoleTimelineResponse": {
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          },
+          "finish": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "finish",
+          "items",
+          "input_tokens",
+          "output_tokens",
+          "partial",
+          "truncated",
+          "blocked"
+        ],
+        "type": "object"
+      },
       "ConsoleToolCallView": {
         "properties": {
           "arguments": {
@@ -3081,27 +3323,24 @@
           "allow_private_network": {
             "type": "boolean"
           },
-          "count_tokens_endpoint": {
-            "type": "string"
-          },
           "currency": {
             "type": "string"
           },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "description": "Applied to an upstream that requires an output limit when the client omits one",
             "type": "integer"
           },
           "enabled": {
             "type": "boolean"
           },
-          "endpoint": {
-            "type": "string"
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleChannelEndpointView"
+            },
+            "type": "array"
           },
           "first_byte_timeout_seconds": {
             "type": "integer"
-          },
-          "format": {
-            "type": "string"
           },
           "forward_headers": {
             "items": {
@@ -3124,11 +3363,11 @@
           "name": {
             "type": "string"
           },
+          "provider_id": {
+            "type": "string"
+          },
           "timeout_seconds": {
             "type": "integer"
-          },
-          "vendor": {
-            "type": "string"
           },
           "version": {
             "type": "integer"
@@ -3136,8 +3375,7 @@
         },
         "required": [
           "name",
-          "format",
-          "endpoint"
+          "provider_id"
         ],
         "type": "object"
       },
@@ -3610,6 +3848,51 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConsoleChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}/discover-models": {
+      "post": {
+        "operationId": "discoverChannelModels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleDiscoveryView"
                 }
               }
             },
@@ -6411,6 +6694,44 @@
         ],
         "tags": [
           "stats"
+        ]
+      }
+    },
+    "/console/api/providers": {
+      "get": {
+        "operationId": "listProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleProviderView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "providers"
         ]
       }
     },

@@ -47,19 +47,19 @@ fi
 
 project=$(post /projects '{"name":"Fault Lab","retention_days":1,"requests_per_minute":0,"concurrency":0,"daily_token_quota":0}' | jq -r .id)
 channel() {
-  local name=$1 format=$2 vendor=$3 endpoint=$4 static_header=${5:-}
+  local name=$1 format=$2 provider=$3 endpoint=$4 static_header=${5:-}
   local headers='{}'
   [ -n "$static_header" ] && headers=$(jq -nc --arg value "$static_header" '{"X-Lab-Static":$value}')
-  post /channels "$(jq -nc --arg name "$name" --arg format "$format" --arg vendor "$vendor" --arg endpoint "$endpoint" --argjson headers "$headers" \
-    '{name:$name,format:$format,vendor:$vendor,endpoint:$endpoint,headers:$headers,models:[{name:"fault-model"}],currency:"USD",enabled:true,allow_private_network:true}')" | jq -r .id
+  post /channels "$(jq -nc --arg name "$name" --arg provider "$provider" --arg format "$format" --arg endpoint "$endpoint" --argjson headers "$headers" \
+    '{name:$name,provider_id:$provider,endpoints:[{format:$format,base_url:"http://127.0.0.1:18080",path:$endpoint}],headers:$headers,models:[{name:"fault-model"}],currency:"USD",enabled:true,allow_private_network:true}')" | jq -r .id
 }
 
-text_channel=$(channel "Fault Text" openai_chat openai http://127.0.0.1:18080/chat/text)
-fail_channel=$(channel "Fault Fail" openai_chat openai http://127.0.0.1:18080/chat/fail)
-partial_channel=$(channel "Fault Partial" openai_chat openai http://127.0.0.1:18080/chat/partial)
-tool_channel=$(channel "Fault Tool" openai_chat openai http://127.0.0.1:18080/chat/tool)
-echo_channel=$(channel "Fault Echo" openai_chat openai http://127.0.0.1:18080/chat/echo yes)
-messages_channel=$(channel "Fault Messages" anthropic_messages anthropic http://127.0.0.1:18080/messages/echo)
+text_channel=$(channel "Fault Text" openai_chat openai /chat/text)
+fail_channel=$(channel "Fault Fail" openai_chat openai /chat/fail)
+partial_channel=$(channel "Fault Partial" openai_chat openai /chat/partial)
+tool_channel=$(channel "Fault Tool" openai_chat openai /chat/tool)
+echo_channel=$(channel "Fault Echo" openai_chat openai /chat/echo yes)
+messages_channel=$(channel "Fault Messages" anthropic_messages anthropic /messages/echo)
 
 for id in "$text_channel" "$fail_channel" "$partial_channel" "$tool_channel" "$echo_channel" "$messages_channel"; do
   post "/channels/$id/keys" '{"label":"fault","secret":"fault-key"}' >/dev/null
@@ -114,7 +114,7 @@ fi
 jq -nc '{document:{rules:[{id:"fault-tool",name:"Fault tool",enabled:true,priority:100,phase:"tool_call",when:"tool.name == '\''get_weather'\''",action:"block",severity:"high",reason:"fault test"}]},note:"fault"}' |
   curl -fsS -b "$jar" "${marker[@]}" -X POST "$api/projects/$project/policies" -d @- >/dev/null
 http=$(send_chat fault-tool "$runtime/fault-tool.json" '{"model":"fault-tool","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"call get_weather"}]}')
-if [ "$http" = "200" ] && ! grep -q "Paris" "$runtime/fault-tool.json" && grep -q "tool_call_blocked" "$runtime/fault-tool.json"; then
+if [ "$http" = "403" ] && ! grep -q "Paris" "$runtime/fault-tool.json" && grep -q "tool_call_blocked" "$runtime/fault-tool.json"; then
   pass "a held tool call is blocked before its arguments are released"
 else
   fail "tool hold: HTTP $http $(head -c 300 "$runtime/fault-tool.json")"
@@ -146,11 +146,11 @@ else
 fi
 http=$(curl -sS -o "$runtime/fault-state.json" -w '%{http_code}' -m 60 "$base/v1/responses" \
   -H "Authorization: Bearer $fault_key" -H 'Content-Type: application/json' \
-  -d '{"model":"fault-failover","store":true,"input":"hello"}')
-if [ "$http" = "422" ] && grep -qiE "store|state|unsupported" "$runtime/fault-state.json"; then
-  pass "provider state is rejected before the upstream"
+  -d '{"model":"fault-failover","background":true,"input":"hello"}')
+if [ "$http" = "422" ] && grep -q "background_not_supported" "$runtime/fault-state.json"; then
+  pass "background responses are rejected before the upstream"
 else
-  fail "state rejection: HTTP $http $(head -c 300 "$runtime/fault-state.json")"
+  fail "background rejection: HTTP $http $(head -c 300 "$runtime/fault-state.json")"
 fi
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"

@@ -65,10 +65,10 @@ CREATE INDEX IF NOT EXISTS agent_keys_project ON agent_keys (project_id, created
 CREATE TABLE IF NOT EXISTS channels (
     id text PRIMARY KEY,
     name text NOT NULL,
-    format text NOT NULL,
-    vendor text NOT NULL,
-    endpoint text NOT NULL,
-    count_tokens_endpoint text NOT NULL DEFAULT '',
+    provider_id text NOT NULL,
+    custom boolean NOT NULL DEFAULT false,
+    endpoints jsonb NOT NULL DEFAULT '[]',
+    capability_overrides jsonb NOT NULL DEFAULT '[]',
     headers jsonb NOT NULL DEFAULT '{}',
     models jsonb NOT NULL DEFAULT '[]',
     forward_headers jsonb NOT NULL DEFAULT '[]',
@@ -135,6 +135,9 @@ CREATE TABLE IF NOT EXISTS calls (
     project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     agent_key_id text NOT NULL REFERENCES agent_keys(id) ON DELETE CASCADE,
     client_format text NOT NULL,
+    kind text NOT NULL DEFAULT '',
+    client_transport text NOT NULL DEFAULT '',
+    endpoint_format text NOT NULL DEFAULT '',
     public_model text NOT NULL DEFAULT '',
     upstream_model text NOT NULL DEFAULT '',
     channel_id text NOT NULL DEFAULT '',
@@ -157,10 +160,15 @@ CREATE TABLE IF NOT EXISTS calls (
     repairs jsonb NOT NULL DEFAULT '[]',
     attempts integer NOT NULL DEFAULT 0,
     response_id text NOT NULL DEFAULT '',
+    response_store boolean NOT NULL DEFAULT false,
+    response_deleted_at timestamptz,
+    cancelled_at timestamptz,
     session_id text NOT NULL DEFAULT '',
     parent_call_id text NOT NULL DEFAULT '',
     conversation_hash text NOT NULL DEFAULT '',
     message_offset integer NOT NULL DEFAULT 0,
+    audit_head text NOT NULL DEFAULT '',
+    audit_events bigint NOT NULL DEFAULT 0,
     analysis_state text NOT NULL DEFAULT 'pending',
     latest_analysis_id text NOT NULL DEFAULT '',
     finding_count integer NOT NULL DEFAULT 0,
@@ -191,9 +199,11 @@ CREATE TABLE IF NOT EXISTS events (
     sequence bigint NOT NULL,
     project_id text NOT NULL,
     kind text NOT NULL,
-    schema_version integer NOT NULL DEFAULT 3,
+    schema_version integer NOT NULL DEFAULT 5,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL,
+    prev_hash text NOT NULL DEFAULT '',
+    hash text NOT NULL DEFAULT '',
     PRIMARY KEY (call_id, sequence)
 );
 CREATE INDEX IF NOT EXISTS events_project_kind ON events (project_id, kind, created_at DESC);
@@ -358,7 +368,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     reason text NOT NULL DEFAULT '',
     attributes jsonb NOT NULL DEFAULT '{}',
     created_at timestamptz NOT NULL,
-    CONSTRAINT decisions_phase CHECK (phase IN ('request','tool_call')),
+    CONSTRAINT decisions_phase CHECK (phase IN ('request','tool_call','tool_result','response')),
     CONSTRAINT decisions_action CHECK (action IN ('block','record'))
 );
 CREATE INDEX IF NOT EXISTS decisions_call ON decisions (call_id, created_at);

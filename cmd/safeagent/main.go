@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/api/console"
 	"github.com/yv1ing/SafeAgent/internal/app"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/transport/console"
 	"github.com/yv1ing/SafeAgent/web"
 )
 
@@ -67,9 +69,72 @@ func run() error {
 			return err
 		}
 		return app.Run(ctx, configuration, database, frontend)
+	case "verify-audit":
+		return verifyAudit(ctx, configuration.DatabaseURL, flag.Args()[1:])
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}
+}
+
+func verifyAudit(ctx context.Context, databaseURL string, args []string) error {
+	flags := flag.NewFlagSet("verify-audit", flag.ContinueOnError)
+	callID := flags.String("call", "", "verify one call id")
+	projectID := flags.String("project", "", "verify one project")
+	sinceText := flags.String("since", "", "only calls created after a duration (24h) or date (2026-01-02)")
+	limit := flags.Int("limit", 1000, "maximum calls to verify (at most 5000)")
+	jsonOutput := flags.Bool("json", false, "print a JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	scope := repository.AuditScope{ProjectID: *projectID, CallID: *callID, Limit: *limit}
+	if *sinceText != "" {
+		since, err := parseSince(*sinceText)
+		if err != nil {
+			return err
+		}
+		scope.Since = since
+	}
+	database := repository.Open(databaseURL)
+	defer database.Close()
+	if err := database.LoadAuditSecret(ctx); err != nil {
+		return err
+	}
+	reports, err := database.VerifyAudit(ctx, scope)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		payload, err := json.MarshalIndent(reports, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(payload))
+	} else {
+		for _, report := range reports {
+			line := fmt.Sprintf("call %s: %s events=%d head=%s", report.CallID, report.Report.Status, report.Report.Events, report.Report.Head)
+			if report.Report.Error != "" {
+				line += " error=" + report.Report.Error
+			}
+			fmt.Println(line)
+		}
+	}
+	for _, report := range reports {
+		if report.Report.Status != "verified" && report.Report.Status != "in_progress" {
+			return fmt.Errorf("audit verification failed for %s", report.CallID)
+		}
+	}
+	return nil
+}
+
+func parseSince(value string) (time.Time, error) {
+	if duration, err := time.ParseDuration(value); err == nil {
+		return time.Now().UTC().Add(-duration), nil
+	}
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid -since value %q", value)
+	}
+	return date.UTC(), nil
 }
 
 func write(path string, payload []byte) error {

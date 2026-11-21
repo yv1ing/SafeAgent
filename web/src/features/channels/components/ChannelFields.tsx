@@ -1,23 +1,13 @@
+import { useListProviders } from '../../../api/generated/providers/providers';
 import type { ConsoleChannelInput } from '../../../api/generated/models';
 import { Field } from '../../../components/form/Field';
 import { Input, IntegerInput } from '../../../components/ui/input';
 import { Select } from '../../../components/ui/select';
 import { Switch } from '../../../components/ui/switch';
 import { useLocale } from '../../../i18n';
-import { currencies, formats, vendors } from '../constants';
+import { currencies } from '../constants';
 
 const options = (values: string[]) => values.map((value) => ({ value, label: value }));
-
-const endpointPlaceholders: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  anthropic: 'https://api.anthropic.com',
-  google: 'https://generativelanguage.googleapis.com',
-};
-
-const getEndpointPlaceholder = (vendor: string | undefined) => {
-  if (!vendor) return 'https://api.example.com';
-  return endpointPlaceholders[vendor] || 'https://api.example.com';
-};
 
 export function ChannelFields({
   draft,
@@ -29,7 +19,27 @@ export function ChannelFields({
   basic?: boolean;
 }) {
   const { t } = useLocale();
+  const providers = useListProviders();
+  const catalog = providers.data ?? [];
+  const selected = catalog.find((provider) => provider.id === draft.provider_id);
+  const formats = selected?.formats ?? [];
+  const endpoints = draft.endpoints ?? [];
+  const endpointFor = (format: string) => endpoints.find((entry) => entry.format === format);
   const set = (patch: Partial<ConsoleChannelInput>) => onChange({ ...draft, ...patch });
+  const setEndpoint = (format: string, baseURL: string) => {
+    const rest = endpoints.filter((entry) => entry.format !== format);
+    set({
+      endpoints: baseURL ? [...rest, { format, base_url: baseURL }] : rest,
+    });
+  };
+  const selectProvider = (providerID: string) => {
+    const provider = catalog.find((entry) => entry.id === providerID);
+    const available = new Set(provider?.formats ?? []);
+    set({
+      provider_id: providerID,
+      endpoints: endpoints.filter((entry) => available.has(entry.format)),
+    });
+  };
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <Field label={t.common.name}>
@@ -42,29 +52,39 @@ export function ChannelFields({
           />
         )}
       </Field>
-      <Field label={t.channels.format}>
+      <Field label={t.channels.provider} hint={t.channels.providerHint}>
         {(id) => (
           <Select
             id={id}
-            value={draft.format}
-            options={options(formats)}
-            onValueChange={(format) => set({ format })}
+            value={draft.provider_id ?? ''}
+            options={catalog.map((provider) => ({
+              value: provider.id,
+              label: provider.label ?? provider.id,
+            }))}
+            onValueChange={selectProvider}
           />
         )}
       </Field>
-      <Field label={t.channels.endpoint} className="md:col-span-2">
-        {(id) => (
-          <Input
-            id={id}
-            required
-            type="url"
-            className="font-mono"
-            placeholder={getEndpointPlaceholder(draft.vendor)}
-            value={draft.endpoint}
-            onChange={(event) => set({ endpoint: event.target.value })}
-          />
-        )}
-      </Field>
+      {!basic &&
+        formats.map((format) => (
+          <Field
+            key={format}
+            label={`${t.channels.baseUrl} · ${format}`}
+            hint={t.channels.baseUrlHint}
+            className="md:col-span-2"
+          >
+            {(id) => (
+              <Input
+                id={id}
+                type="url"
+                className="font-mono"
+                placeholder={selected?.hosts?.[format] ?? 'https://api.example.com'}
+                value={endpointFor(format)?.base_url ?? ''}
+                onChange={(event) => setEndpoint(format, event.target.value)}
+              />
+            )}
+          </Field>
+        ))}
       <Field label={t.channels.currency}>
         {(id) => (
           <Select
@@ -77,32 +97,6 @@ export function ChannelFields({
       </Field>
       {!basic && (
         <>
-          <Field label={t.channels.vendor}>
-            {(id) => (
-              <Select
-                id={id}
-                value={draft.vendor ?? ''}
-                options={options(vendors)}
-                onValueChange={(vendor) => set({ vendor })}
-              />
-            )}
-          </Field>
-          <Field
-            label={t.channels.countEndpoint}
-            hint={t.channels.countEndpointHint}
-            className="md:col-span-2"
-          >
-            {(id) => (
-              <Input
-                id={id}
-                type="url"
-                className="font-mono"
-                placeholder={getEndpointPlaceholder(draft.vendor)}
-                value={draft.count_tokens_endpoint ?? ''}
-                onChange={(event) => set({ count_tokens_endpoint: event.target.value })}
-              />
-            )}
-          </Field>
           <Field label={t.channels.timeout} hint={t.channels.timeoutHint}>
             {(id) => (
               <IntegerInput

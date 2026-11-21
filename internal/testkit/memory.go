@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
@@ -22,6 +23,7 @@ type Memory struct {
 	Route    *entity.Route
 	Channel  []entity.Channel
 	Secrets  []entity.ChannelKey
+	Registry *provider.Registry
 
 	Calls      []*entity.Call
 	Events     []entity.Event
@@ -49,23 +51,14 @@ func NewMemory(upstreamURL, upstreamFormat string) *Memory {
 		RuleList: []entity.Rule{{ID: "r1", ProjectID: "project_1", Kind: "builtin", Detector: "email", Label: "EMAIL", Action: "replace", Enabled: true, Version: 1}},
 		Route:    &entity.Route{ID: "route_1", ProjectID: "project_1", Name: "gpt-5", Targets: []entity.Target{{ChannelID: "channel_1", UpstreamModel: "gpt-5-upstream", Priority: 1, Weight: 1}}},
 		Channel: []entity.Channel{{
-			ID: "channel_1", Name: "mock", Format: upstreamFormat, Vendor: vendorOf(upstreamFormat), Endpoint: upstreamURL,
+			ID: "channel_1", Name: "mock", ProviderID: "test",
 			Enabled: true, Version: 1, AllowPrivateNetwork: true, Currency: "USD",
 			Models: []entity.ChannelModel{{Name: "gpt-5-upstream", InputPrice: 1_000_000, OutputPrice: 2_000_000}},
 		}},
 		Secrets:   []entity.ChannelKey{{ID: "ck_1", ChannelID: "channel_1", Secret: sealed, Enabled: true}},
 		ToolCalls: map[string]string{},
+		Registry:  ProviderRegistry(upstreamFormat, upstreamURL),
 	}
-}
-
-func vendorOf(format string) string {
-	switch format {
-	case "anthropic_messages":
-		return "anthropic"
-	case "google_gemini":
-		return "google"
-	}
-	return "openai"
 }
 
 func (store *Memory) AgentKeyByHash(_ context.Context, hash string) (*entity.AgentKey, error) {
@@ -100,6 +93,47 @@ func (store *Memory) Channels(context.Context) ([]entity.Channel, error) { retur
 
 func (store *Memory) EnabledChannelKeys(context.Context) ([]entity.ChannelKey, error) {
 	return store.Secrets, nil
+}
+
+func (store *Memory) AddCapabilityOverride(_ context.Context, channelID, format, field, reason string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for index := range store.Channel {
+		if store.Channel[index].ID != channelID {
+			continue
+		}
+		for _, existing := range store.Channel[index].CapabilityOverrides {
+			if existing.Format == format && existing.Field == field {
+				return nil
+			}
+		}
+		store.Channel[index].CapabilityOverrides = append(store.Channel[index].CapabilityOverrides, entity.CapabilityOverride{Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
+		store.Channel[index].Version++
+		return nil
+	}
+	return repository.ErrNotFound
+}
+
+func (store *Memory) DeleteResponse(_ context.Context, _, responseID string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, call := range store.Calls {
+		if call.ResponseID == responseID && responseID != "" && call.ResponseDeletedAt == nil {
+			now := time.Now().UTC()
+			call.ResponseDeletedAt = &now
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
+func (store *Memory) MarkCallCancelled(_ context.Context, callID string) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if call := store.callByID(callID); call != nil {
+		now := time.Now().UTC()
+		call.CancelledAt = &now
+	}
 }
 
 func (store *Memory) ReserveTokens(_ context.Context, _ string, estimate, limit int64) (bool, time.Time, error) {
@@ -191,7 +225,7 @@ func (store *Memory) CallByResponseID(_ context.Context, _, responseID string) (
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	for _, call := range store.Calls {
-		if call.ResponseID == responseID && responseID != "" {
+		if call.ResponseID == responseID && responseID != "" && call.ResponseDeletedAt == nil {
 			return call, nil
 		}
 	}

@@ -56,7 +56,8 @@ func Load(path string) (Config, error) {
 	}
 	if configuration.PublicOrigin != "" {
 		origin, err := url.Parse(configuration.PublicOrigin)
-		if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.Path != "" {
+		if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" ||
+			origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
 			return configuration, errors.New("public_origin must be an absolute HTTP or HTTPS URL")
 		}
 	}

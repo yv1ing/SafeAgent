@@ -82,9 +82,14 @@ func TestEvaluateAcceptsRelativeBudget(t *testing.T) {
 		LatencyMS: latency{P95: 1200}, ThroughputRPS: 4.6,
 		ErrorCounts: map[string]int{},
 	}
-	for _, item := range evaluate(baseline, candidate, thresholds{
+	checks := checksByName(evaluate(baseline, candidate, thresholds{
 		maxP95Ratio: 1.2, maxP95AddMS: 100, minThroughput: 0.9, maxErrorDeltaPct: 0.5,
-	}) {
+	}))
+	for _, name := range []string{"same scenario", "baseline valid", "gateway errors", "error delta", "p95 latency", "throughput"} {
+		item, found := checks[name]
+		if !found {
+			t.Fatalf("%s was not evaluated", name)
+		}
 		if !item.pass {
 			t.Fatalf("%s failed: %s", item.name, item.detail)
 		}
@@ -123,12 +128,22 @@ func TestEvaluateRejectsInvalidBaseline(t *testing.T) {
 		ErrorCounts: map[string]int{"http_429": 6},
 	}
 	candidate := baseline
-	checks := evaluate(baseline, candidate, thresholds{
+	checks := checksByName(evaluate(baseline, candidate, thresholds{
 		maxP95Ratio: 1.2, maxP95AddMS: 100, minThroughput: 0.9, maxErrorDeltaPct: 0.5,
-	})
-	for _, item := range checks {
-		if item.name == "baseline valid" && item.pass {
-			t.Fatal("a baseline with 429 responses must be invalid")
-		}
+	}))
+	item, found := checks["baseline valid"]
+	if !found {
+		t.Fatal("baseline validity was not evaluated")
 	}
+	if item.pass {
+		t.Fatal("a baseline with 429 responses must be invalid")
+	}
+}
+
+func checksByName(checks []check) map[string]check {
+	index := make(map[string]check, len(checks))
+	for _, item := range checks {
+		index[item.name] = item
+	}
+	return index
 }

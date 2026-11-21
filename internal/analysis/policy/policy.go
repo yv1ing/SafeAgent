@@ -21,8 +21,10 @@ import (
 )
 
 const (
-	PhaseRequest  = "request"
-	PhaseToolCall = "tool_call"
+	PhaseRequest    = "request"
+	PhaseToolCall   = "tool_call"
+	PhaseToolResult = "tool_result"
+	PhaseResponse   = "response"
 
 	ActionBlock  = "block"
 	ActionRecord = "record"
@@ -112,6 +114,23 @@ type Finding struct {
 	Confidence float64 `cel:"confidence"`
 }
 
+type ToolResult struct {
+	CallID  string `cel:"call_id"`
+	Name    string `cel:"name"`
+	IsError bool   `cel:"is_error"`
+	Text    string `cel:"text"`
+	Trust   string `cel:"trust"`
+}
+
+type Response struct {
+	Status    string `cel:"status"`
+	Finish    string `cel:"finish"`
+	Text      string `cel:"text"`
+	ItemCount int    `cel:"item_count"`
+	ToolCalls int    `cel:"tool_calls"`
+	Truncated bool   `cel:"truncated"`
+}
+
 type Env struct {
 	Phase string `cel:"phase"`
 }
@@ -119,7 +138,7 @@ type Env struct {
 var typedValues = []any{
 	reflect.TypeOf(Principal{}), reflect.TypeOf(Tool{}), reflect.TypeOf(Target{}),
 	reflect.TypeOf(Step{}), reflect.TypeOf(Trace{}), reflect.TypeOf(Finding{}),
-	reflect.TypeOf(Env{}),
+	reflect.TypeOf(ToolResult{}), reflect.TypeOf(Response{}), reflect.TypeOf(Env{}),
 }
 
 // Input is everything one rule evaluation can see.
@@ -130,6 +149,8 @@ type Input struct {
 	Tags      observation.ToolTags
 	Trace     *observation.Trace
 	Findings  []analysis.Finding
+	Results   []ToolResult
+	Response  Response
 }
 
 type Outcome struct {
@@ -165,6 +186,8 @@ func newEnvironment() (*cel.Env, error) {
 		cel.Variable("target", cel.ObjectType("policy.Target")),
 		cel.Variable("trace", cel.ObjectType("policy.Trace")),
 		cel.Variable("findings", cel.ListType(cel.ObjectType("policy.Finding"))),
+		cel.Variable("results", cel.ListType(cel.ObjectType("policy.ToolResult"))),
+		cel.Variable("response", cel.ObjectType("policy.Response")),
 		cel.Variable("env", cel.ObjectType("policy.Env")),
 		cel.Variable("args", cel.MapType(cel.StringType, cel.DynType)),
 	)
@@ -217,8 +240,10 @@ func validateRule(rule Rule, seen map[string]bool) error {
 	if seen[rule.ID] {
 		return fmt.Errorf("duplicate rule id %q", rule.ID)
 	}
-	if rule.Phase != PhaseRequest && rule.Phase != PhaseToolCall {
-		return fmt.Errorf("phase must be %q or %q", PhaseRequest, PhaseToolCall)
+	switch rule.Phase {
+	case PhaseRequest, PhaseToolCall, PhaseToolResult, PhaseResponse:
+	default:
+		return fmt.Errorf("phase must be one of %q, %q, %q, %q", PhaseRequest, PhaseToolCall, PhaseToolResult, PhaseResponse)
 	}
 	if rule.Action != ActionBlock && rule.Action != ActionRecord {
 		return fmt.Errorf("action must be %q or %q", ActionBlock, ActionRecord)
@@ -273,9 +298,18 @@ func activationFor(input Input) map[string]any {
 		"target":    targetValue(policyTarget(input.Tool)),
 		"trace":     Trace{Steps: stepValues(input.Trace)},
 		"findings":  findingValues(input.Findings),
+		"results":   resultValues(input.Results),
+		"response":  input.Response,
 		"env":       Env{Phase: input.Phase},
 		"args":      flatArguments(policyInput(input.Tool)),
 	}
+}
+
+func resultValues(results []ToolResult) []ToolResult {
+	if len(results) == 0 {
+		return []ToolResult{}
+	}
+	return results
 }
 
 // policyTarget selects the view the call page shows. A policy must not receive a value that
@@ -372,9 +406,17 @@ func flatten(result map[string]any, prefix string, value any, depth int) {
 				flatten(result, prefix, entry, depth+1)
 			}
 		}
-	case string, bool, float64, int, int64, json.Number:
+	case string, bool, float64, int, int64:
 		if prefix != "" {
 			result[prefix] = typed
+		}
+	case json.Number:
+		if prefix != "" {
+			if integer, err := typed.Int64(); err == nil {
+				result[prefix] = integer
+			} else if number, err := typed.Float64(); err == nil {
+				result[prefix] = number
+			}
 		}
 	}
 }

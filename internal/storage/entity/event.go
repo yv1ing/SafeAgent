@@ -16,4 +16,6 @@ type Event struct {
 	SchemaVersion int             `json:"schema_version"`
 	Payload       json.RawMessage `bun:"type:jsonb" json:"payload"`
 	CreatedAt     time.Time       `json:"created_at"`
+	PrevHash      string          `json:"prev_hash"`
+	Hash          string          `json:"hash"`
 }

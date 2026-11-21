@@ -138,18 +138,18 @@ func (service *Service) BuildTrace(ctx context.Context, call *entity.Call) (*obs
 	var response *auditevent.Response
 	requestFound := false
 	for _, event := range events {
+		decoded, err := auditevent.Decode(event.Kind, event.Payload)
+		if err != nil {
+			return nil, request, response, nil, fmt.Errorf("%s event of %s: %w", event.Kind, call.ID, err)
+		}
 		switch event.Kind {
 		case auditevent.KindRequest:
-			if err := json.Unmarshal(event.Payload, &request); err != nil {
-				return nil, request, response, nil, fmt.Errorf("request event of %s: %w", call.ID, err)
+			if decoded.Request != nil {
+				request = *decoded.Request
 			}
 			requestFound = true
 		case auditevent.KindResponse:
-			decoded := new(auditevent.Response)
-			if err := json.Unmarshal(event.Payload, decoded); err != nil {
-				return nil, request, response, nil, fmt.Errorf("response event of %s: %w", call.ID, err)
-			}
-			response = decoded
+			response = decoded.Response
 		}
 	}
 	if !requestFound {
@@ -223,16 +223,18 @@ func (service *Service) expandHistory(ctx context.Context, call *entity.Call, re
 		size := 0
 		for _, event := range events {
 			size += len(event.Payload)
+			decoded, err := auditevent.Decode(event.Kind, event.Payload)
+			if err != nil {
+				continue
+			}
 			switch event.Kind {
 			case auditevent.KindRequest:
-				if json.Unmarshal(event.Payload, &record) == nil {
+				if decoded.Request != nil {
+					record = *decoded.Request
 					requestFound = true
 				}
 			case auditevent.KindResponse:
-				decoded := new(auditevent.Response)
-				if json.Unmarshal(event.Payload, decoded) == nil {
-					response = decoded
-				}
+				response = decoded.Response
 			}
 		}
 		if total+size > maximumHistoryBytes {

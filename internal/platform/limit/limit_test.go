@@ -44,11 +44,17 @@ func TestLimiter(t *testing.T) {
 
 	t.Run("rejection counts nothing", func(t *testing.T) {
 		now = now.Add(time.Hour)
-		if _, err := limiter.Acquire(project(limit.Limit{RequestsPerMinute: 1}), key("z", limit.Limit{Concurrency: 1})); err != nil {
+		projectLimit := project(limit.Limit{RequestsPerMinute: 2})
+		release, err := limiter.Acquire(projectLimit, key("z", limit.Limit{Concurrency: 1}))
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := limiter.Acquire(project(limit.Limit{RequestsPerMinute: 5}), key("z", limit.Limit{Concurrency: 1})); !errors.Is(err, limit.ErrExceeded) {
+		defer release()
+		if _, err := limiter.Acquire(projectLimit, key("z", limit.Limit{Concurrency: 1})); !errors.Is(err, limit.ErrExceeded) {
 			t.Fatalf("key concurrency must reject, got %v", err)
+		}
+		if _, err := limiter.Acquire(projectLimit, key("other", limit.Limit{})); err != nil {
+			t.Fatalf("the rejected attempt must not consume the project request budget: %v", err)
 		}
 	})
 
@@ -86,7 +92,13 @@ func TestBucketCountsOnlyRecordedFailures(t *testing.T) {
 	if bucket.Blocked("ip|user") {
 		t.Fatal("reset did not clear the key")
 	}
-	if !bucket.Allow("k") || !bucket.Allow("k") || bucket.Allow("k") {
+	if !bucket.Allow("k") {
+		t.Fatal("the first request must be admitted")
+	}
+	if !bucket.Allow("k") {
+		t.Fatal("the second request must be admitted")
+	}
+	if bucket.Allow("k") {
 		t.Fatal("Allow must admit exactly the maximum")
 	}
 }

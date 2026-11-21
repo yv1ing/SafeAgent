@@ -1,86 +1,112 @@
 # Protocol layer
 
-This document describes the canonical item model, the stream contract, the loss ledger and the conversion rules shared by the four protocol codecs.
+This document describes the canonical model, the stream session, the provider catalog, the loss ledger and the conversion rules shared by the four codecs.
+
+## Packages
+
+| Package | Responsibility |
+| --- | --- |
+| `internal/llm/model` | Canonical request, response, item, event, loss and profile types. Standard library only. |
+| `internal/llm/codec` | Codec contract, shared conversion helpers and the `chat`, `responses`, `messages`, `gemini` codecs. |
+| `internal/llm/provider` | `ProviderSpec`, `EndpointSpec`, `Capability`, `Compat`, endpoint URL/auth construction and model discovery parsing. |
+| `internal/llm/provider/builtin` | One file per built-in provider; `All()` registers them. |
+| `internal/llm/stream` | One streaming session per call: commit boundary, tool holds, restoration, keepalive, raw pass-through and JSON synthesis. |
+| `internal/pipeline` | Admission, redaction, four policy checkpoints, routing, attempts, audit and auxiliary endpoints. |
+| `internal/transport/http` | HTTP and WebSocket routes, body limits and Gemini framing. |
+
+Codecs never branch on a vendor name. They read `Peer.Profile`, which carries the endpoint's `Capability` and `Compat`; the provider catalog supplies it.
 
 ## Canonical model
 
-`internal/protocol` is standard-library only. The four formats (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`) map onto one item model:
+The four formats (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`) map onto one item model:
 
-- `Request`: model, instructions, ordered items, tools, tool choice, parallel policy, response format, reasoning, limits, stop, stream options, provider-state fields (`store`, `background`, `conversation`, `include`, `truncation`, `max_tool_calls`, `prompt_cache_retention`), identity and raw overlay.
-- `Item`: message, reasoning, tool call, tool result, server tool call, server tool result or native provider object. Items carry a stable ID, an ordinal and an optional role/status. A message owns ordered parts; a tool call owns `ToolCall`; a tool result owns `CallID`, `Name`, `IsError` and ordered content parts.
-- `Part`: text, refusal, reasoning text/summary, redacted reasoning, tool arguments, media or native payload. Citations and prompt-cache markers attach to parts.
-- `Response`: items, `Finish` (kind, raw value, stop sequence, incomplete reason), usage with a raw breakdown, failure, metadata and raw overlay.
-- `Raw`: unknown fields at request, item, part, tool, citation, usage and response level, tagged with the source format. Same-format nodes replay them; every other target records `extras_dropped`.
+- `Request`: model, instructions, ordered items, tools, tool choice, parallel policy, response format, reasoning, limits, stop, stream options, choice count, safety settings, provider-state fields (`store`, `background`, `conversation`, `include`, `truncation`, `max_tool_calls`, `prompt_cache_retention`), identity and raw overlay.
+- `Item`: message, reasoning, tool call, tool result, server tool call, server tool result or native provider object. A server item carries `Server *ServerInfo{Format, Type, Capability, Config}` so the same format replays it exactly.
+- `Part`: text, refusal, reasoning text/summary, redacted reasoning, tool arguments, media or native payload. Citations, logprobs and prompt-cache markers attach to parts.
+- `Response`: items, `Status`, `Finish`, `Usage`, failure, `Meta` (id, model, created, fingerprint, service tier) and raw overlay.
+- `Raw`: unknown fields at request, item, part, tool, citation, usage, event and response level, tagged with the source format.
 
-For every protocol the codec captures the fields it does not model into `Raw`; the encoder re-emits them only towards the same format. Unknown content blocks become native items or native parts, so array positions survive.
+`Event` kinds stay `message_start`, `item_start`, `part_start`, `part_delta`, `part_stop`, `item_stop`, `message_delta`, `message_stop`, `error` and `ping`. `Event.Raw` carries the unknown fields of a terminal envelope.
 
-## Item kinds and mapping
+`model.Assembler` is the decoder-side state machine: it numbers items and parts, guarantees one start and one stop per node, materializes tool arguments and implements clean EOF. `model.Journal` is the session-side state: it folds the events the client actually received into the response the audit stores, including items that were still open when a call was cancelled.
 
-| Protocol | Message | Reasoning | Tool call | Tool result | Server tool |
-| --- | --- | --- | --- | --- | --- |
-| Chat | `messages[].content` | `reasoning_content` | `tool_calls` / `function_call` | `role:"tool"` | not native |
-| Responses | `input`/`output` message items | reasoning items with summary/content/encrypted_content | `function_call` / `custom_tool_call` | `function_call_output` | provider items |
-| Messages | `content` text/image/document | `thinking` / `redacted_thinking` | `tool_use` | `tool_result` | `server_tool_use`/results |
-| Gemini | `parts[].text` | `text` with `thought` | `functionCall` | `functionResponse` | built-in tool calls |
+## Stream session
 
-Consecutive text and media parts share one message item; reasoning, tool and native blocks become their own items and split the surrounding message so the original order survives. Tool arguments stream through a `tool_arguments` part and are materialized on `Item.ToolCall.Arguments` when the item stops.
+Each call creates its own `stream.Session`, which tracks four behaviors:
 
-## Stream contract
+1. **Commit boundary.** No HTTP status or SSE header is written before the first forwardable content. A failure before that point can still fail over to another channel or key. Once a frame is written, the response is committed.
+2. **Holding.** Text and reasoning deltas are forwarded immediately. A complete tool item is queued until the gate returns; queued frames are then released or discarded. If a tool item is the first content, the response remains uncommitted while it is held. Holding is bounded by `ToolHoldBytes`; exceeding it is a resource error (`tool_call_too_large`), not a policy verdict.
+3. **Termination.** The session stages terminal frames, merges losses and lets the pipeline seal the call before writing them. A failed committed stream writes a protocol-native error frame. An uncommitted failure returns an HTTP error and can fail over.
+4. **Cancellation.** When the client disconnects, the session stops writing and the pipeline cancels upstream. A committed stream's already-sent content is stored as a partial response.
 
-`Event` kinds: `message_start`, `item_start`, `part_start`, `part_delta`, `part_stop`, `item_stop`, `message_delta`, `message_stop`, `error`, `ping`.
+Keepalive frames are protocol-native: an SSE comment for Chat and Responses, `event: ping` for Messages, nothing for Gemini. They start only after the response is committed.
 
-- Items and parts may be open concurrently; each start/stop pair is balanced and a stop snapshot's streamed content equals the concatenated deltas.
-- Encoders that require sequential blocks (Messages, Gemini, Responses) rely on the gateway releasing held items in order.
-- `message_delta` carries usage, finish and failure; `message_stop` is terminal.
-- Protocol-native errors are produced by `StreamEncoder.Fail`: Chat writes an error object followed by `[DONE]`, Responses writes `response.failed` with the next sequence number, Messages writes an `error` event, Gemini writes an error JSON object. A Responses stream that fails before its first frame writes an `error` event with sequence 0.
-- `Continuable.Resume` lets an encoder continue after the gateway forwarded some items verbatim.
-- Response headers are committed as soon as the first upstream stream is accepted, followed by an SSE keepalive comment except for Gemini; the Gemini CLI treats an unconsumed comment as an incomplete JSON segment. Frames stay buffered until the first content delta, so an attempt that fails before content can still fail over. If every attempt fails after the headers, the client receives a protocol-native error frame and terminal frame instead of a second HTTP status.
+A decoder that reaches a clean EOF synthesizes the terminal event and records `clean_eof_synthesized`. An incomplete stream is a failure.
 
-### Clean EOF
+## Raw pass-through
 
-A provider may close the connection without its terminal frame. The decoder synthesizes a terminal event only when the response is complete: at least one content item exists and every function tool call with arguments has valid JSON. Free-text custom tools are exempt. Otherwise `End` returns `ErrTruncated`. A synthesized end carries `LossCleanEOF`.
+A same-format request may be forwarded as raw bytes only when all of the following hold:
+
+- source and target format are the same;
+- redaction made no hit and no signature was unsealed;
+- history was not expanded and no repair ran;
+- the endpoint's `rawSafe` conditions pass (for Messages, an output limit is present; for Responses, `previous_response_id` is empty and `store` is false/absent);
+- no reasoning item is missing.
+
+Only `model`, `stream`, Chat `include_usage` and Responses state fields are patched. Responses never uses the raw response fast path; other same-format responses are forwarded raw while every part is text, refusal or reasoning text/summary. A tool, media, native item or incompatible ID switches to the canonical encoder. Losses and the request-side summary are still recorded; the summary is returned as `X-SafeAgent-Losses` (unique codes) and `X-SafeAgent-Loss-Count`, while a streaming response keeps its response-side losses in the audit record. A non-streaming response is encoded before its headers are sent, so its response conversion losses are included in the same headers.
+
+## Provider catalog
+
+Each provider is one `ProviderSpec` with an `EndpointSpec` per format. An endpoint declares the base URL, path, count-token path, auth style, static headers, capability, compatibility quirks, discovery path/shape, transport mode, model aliases and auxiliary endpoints.
+
+A channel stores `provider_id`, per-format endpoint overrides (base URL, path, disabled), capability overrides, headers and limits. An endpoint entry overrides the catalog; an absent entry keeps the provider default; a disabled entry hides that format. See [Providers](providers.md) for the full override semantics.
 
 ## Loss ledger
 
 `Ledger` holds `Losses` and `Repairs`. Every loss has a path, a code, a class, the source/target formats and an item key:
 
 - `fatal`: the target cannot represent core semantics. The gateway rejects before any upstream call. Media that cannot be carried and a required server tool with no equivalent are fatal.
-- `degraded`: private or secondary data is dropped while the request continues. Foreign signatures, private provider fields, citation subfields, usage breakdowns and mapped tool kinds are degraded.
+- `degraded`: private or secondary data is dropped while the request continues. Foreign signatures, provider fields, citation subfields, usage breakdowns, logprobs and mapped tool kinds are degraded.
 
-`RepairRequest` restores target invariants and records each change: empty items, unanswered calls, orphan results, duplicate results, reasoning order for Messages and an impossible tool choice.
+Additional codes include `server_tool_mapped`, `tool_arg_granularity`, `signature_resealed`, `media_fetched`, `media_unavailable`, `capability_field_removed`, `multi_choice_requires_passthrough`, `count_estimated`, `usage_estimated` and `http200_failed_status`.
 
-## Same-format pass-through
-
-The gateway decodes every request and response as a shadow so redaction and policy always see the content.
-
-- Request bytes are forwarded unchanged (except the model, stream flag and the usage-in-stream option) only when source and target formats match, redaction produced no hits, the request carries no signature, no history was expanded and no repair was needed. Messages without a limit are not passed through because the gateway must apply its default; a Responses request is passed through only when it already asks for `reasoning.encrypted_content`.
-- A streaming Chat, Messages or Gemini response is forwarded verbatim while it contains only plain text. Responses streams are always encoded canonically because their terminal snapshot lists every output item. When a tool call or an unsupported item appears, the gateway resumes a canonical encoder with the already-sent item/part counts and sequence number, so held tool calls are still judged and the stream keeps a valid terminal sequence. Non-streaming responses are always encoded canonically with raw overlays.
+`RepairRequest` restores target invariants and records each change: empty items, unanswered calls, orphan results, tool results after their assistant turn, assistant text before tool calls in Responses, reasoning order for Responses and Messages, and an impossible tool choice.
 
 ## Conversion policy
 
 Important mappings:
 
-- IDs: `resp_`, `msg_`, `chatcmpl-` prefixes are preserved only when they match the target; otherwise a target-native gateway-stable ID is synthesized. Gemini call IDs are synthesized with a per-call salt when absent and paired to `functionResponse` by name and order.
-- Usage: `Input` is gross input including cache reads/writes. Cost prices uncached input separately. Chat audio and prediction buckets are kept in `Usage.Details`; cache, reasoning and Gemini thought counts stay in their typed fields, and cache-write TTL buckets are preserved where the target has them.
+- IDs: `resp_`, `msg_` and `chatcmpl-` prefixes are preserved only when they match the target; otherwise a target-native gateway-stable ID is synthesized. Gemini call IDs are synthesized with a per-call salt when absent and paired to `functionResponse` by name and order.
+- Usage: `Input` is gross input including cache reads/writes. Chat audio and prediction buckets are kept in `Usage.Details`; cache, reasoning and Gemini thought counts stay in their typed fields.
 - Finish: every target maps the canonical kind and records `finish_mapped` when the exact meaning is lost.
-- Output limit: an Anthropic Messages upstream requires one. An explicit client value wins, then the route target default, the channel default, the project default, and finally 8192. A defaulted limit is recorded; 4096 is never applied. Chat, Responses and Gemini requests that omit a limit are left to the provider.
-- Headers: a protocol-aware allowlist forwards `anthropic-version`, `anthropic-beta`, `OpenAI-Beta`, `OpenAI-Organization`, `OpenAI-Project` and `x-goog-api-client`, plus channel-configured names. Credentials, cookies and hop-by-hop headers are never forwarded; a source-only protocol header is recorded.
-- Reasoning signatures are sealed towards clients and verified on echo; a foreign signature is stripped with a loss and never passed off as another provider's. The envelope also carries the reasoning text, because some clients echo only the opaque signature; the gateway restores the text from the verified envelope. When a Gemini stream contains reasoning but no upstream signature, the gateway seals a SafeAgent envelope and records `gemini_dummy_signature`, because the Gemini CLI drops thought text that has no signature. Redacted reasoning survives only towards its originating protocol.
-- When an assistant tool call has no reasoning at all, target reasoning is disabled and `reasoning_not_replayable` is recorded. Gemini CLI drops thought parts before its next turn, so this keeps the conversation valid without inventing reasoning.
-- Responses keeps reasoning first in its assistant turn and the tool calls of that turn together, with the outputs after the call group. DeepSeek rejects an output placed between two calls when reasoning is replayed, while other providers accept the grouped form.
-- Server tool calls are mapped by capability (`web_search`, `code_execution`); unmatched server tools are dropped with a loss unless a required tool choice names one, which is fatal. A mapped server tool call enters the same tool checkpoint as a client tool and is held until the verdict.
+- Output limit: an endpoint with `RequireMaxTokens` needs one. An explicit client value wins, then the route target default, the channel default, the project default, the endpoint default, and finally 8192. A defaulted limit is recorded.
+- Headers: a protocol-aware allowlist forwards `anthropic-version`, `anthropic-beta`, `OpenAI-Beta`, `OpenAI-Organization`, `OpenAI-Project` and `x-goog-api-client`, plus channel-configured names. Credentials, cookies, hop-by-hop headers and every `X-SafeAgent-*` header are never forwarded; a source-only protocol header is recorded. `X-SafeAgent-Model` selects the public model of a request and must still name a route in the caller's project.
+- Reasoning signatures are sealed towards clients and verified on echo; a foreign signature is stripped with a loss. The envelope also carries the reasoning text. Gemini reasoning without an upstream signature receives a gateway envelope so the Gemini CLI keeps it.
+- When an assistant tool call has no reasoning, target reasoning is disabled and `reasoning_not_replayable` is recorded.
+- Server tool calls are replayed natively towards their own format and mapped by capability (`web_search`, `code_execution`) across formats. An unmatched required server tool is fatal.
 - Media: the capability descriptor decides whether each carrier (URL, inline data, file ID, tool-result media) is available. Core media that cannot be represented is rejected before the upstream.
-- Responses state: `previous_response_id` is expanded from gateway history, including tools and instructions; `store=true`, `background` and `conversation` are rejected. `store` is always sent as false upstream.
-- Multiple Chat choices (`n>1`) and Gemini candidates (`candidateCount>1`) are rejected with `unsupported_multi_choice`. Responses has no multiple-choice field.
+- Responses state: the gateway owns it. `previous_response_id` is expanded from gateway history; `store=true` is served by the gateway while the upstream always receives `store=false`. `background` and `conversation` are rejected.
+- Multiple candidates (`n>1` or `candidateCount>1`) are served only by a streaming same-format pass-through with no redaction or history expansion. Any other combination is refused with `unsupported_multi_choice`.
+
+## Session linking
+
+The optional `X-SafeAgent-Session` header groups calls from one agent key. The value is trimmed, limited to 128 bytes and rejected if it contains control characters; the stored id is `sess_` plus a SHA-256 prefix over the agent key and the raw value. It is never an identity and never replaces authentication.
+
+Parent resolution order: `previous_response_id`, then the latest tool result, then the conversation-prefix fingerprint. The explicit header does not discover a parent; it names the session that groups the call. An explicit header that conflicts with a `previous_response_id` parent returns 409 `session_conflict` and the call is recorded as rejected. A heuristic parent in another session is dropped without rejecting the call. `auditevent.Request.SessionSource` records which source was used.
+
+## Checkpoints and auxiliary endpoints
+
+Online policy runs at four points: request admission, added tool result, completed tool call and non-streaming response. Request and tool-result blocks run before the upstream; a tool-call block runs before the call is released to the client; the response checkpoint runs before a JSON response is written. Streaming response text has no online checkpoint.
+
+The gateway serves model listing and retrieval in OpenAI, Anthropic and Gemini shapes, native token counting (`/v1/messages/count_tokens`, `/v1/responses/input_tokens`, `/v1beta/models/{model}:countTokens`), Responses retrieve/input_items/cancel/delete, and same-format embeddings and moderations passthrough. Counting falls back to a local estimate and sets `X-SafeAgent-Token-Estimate: true`; embeddings and moderations return `auxiliary_unsupported` when no channel declares them. Every generation, counting, model, passthrough and Responses lifecycle call is authenticated, rate-limited and audited; a begin or seal failure refuses the operation.
 
 ## Tests
 
-- `internal/protocol/format/format_test.go` checks the 4×4 request and response matrix in stream and JSON mode, plus defaults, capabilities, headers and usage buckets.
-- Codec packages test terminal/truncation, tool aggregation, thinking signatures, server tools, media in tool results and multi-choice rejection.
-- `internal/service/gateway/gateway_test.go` covers redaction restoration, tool holds, failover boundaries, same-format pass-through and native error frames.
+The test map, including the 4×4 codec matrix and the pipeline suites, is in [Development](development.md).
 
 ## Related
 
-- [Model](model.md)
+- [Providers](providers.md)
+- [Audit](audit.md)
 - [Development](development.md)
 - [Agent guide](README.md)

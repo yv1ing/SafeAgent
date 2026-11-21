@@ -52,12 +52,12 @@ func TestPlanOrdersByPriorityThenSticky(t *testing.T) {
 	f := newFixture()
 	targets := []routing.Target{{ChannelID: "b", Priority: 2, Weight: 1}, {ChannelID: "a", Priority: 1, Weight: 1}}
 	keys := keysFor("a", "b")
-	plan := f.selector.Plan(targets, keys, "")
+	plan := f.selector.Plan(targets, keys, "", "")
 	if len(plan) != 2 || plan[0].Target.ChannelID != "a" {
 		t.Fatalf("priority order was ignored: %+v", plan)
 	}
 	f.selector.RecordSuccess("session", admit(t, f.selector, plan[1]))
-	if pinned := f.selector.Plan(targets, keys, "session"); pinned[0].Target.ChannelID != "b" {
+	if pinned := f.selector.Plan(targets, keys, "session", ""); pinned[0].Target.ChannelID != "b" {
 		t.Fatalf("sticky target was not preferred over priority: %+v", pinned)
 	}
 }
@@ -67,7 +67,7 @@ func TestStickyTargetKeepsTheRestInPriorityOrder(t *testing.T) {
 	targets := []routing.Target{{ChannelID: "a", Priority: 1}, {ChannelID: "b", Priority: 2}, {ChannelID: "c", Priority: 3}}
 	keys := keysFor("a", "b", "c")
 	f.selector.RecordSuccess("session", admit(t, f.selector, routing.Candidate{Target: targets[2]}))
-	plan := f.selector.Plan(targets, keys, "session")
+	plan := f.selector.Plan(targets, keys, "session", "")
 	if len(plan) != 3 || plan[0].Target.ChannelID != "c" || plan[1].Target.ChannelID != "a" || plan[2].Target.ChannelID != "b" {
 		t.Fatalf("the sticky target goes first and the rest keep their priority: %+v", plan)
 	}
@@ -77,7 +77,7 @@ func TestStickyDistinguishesUpstreamModels(t *testing.T) {
 	f := newFixture()
 	targets := []routing.Target{{ChannelID: "a", UpstreamModel: "one", Priority: 1}, {ChannelID: "a", UpstreamModel: "two", Priority: 1}}
 	f.selector.RecordSuccess("session", admit(t, f.selector, routing.Candidate{Target: targets[1]}))
-	plan := f.selector.Plan(targets, keysFor("a"), "session")
+	plan := f.selector.Plan(targets, keysFor("a"), "session", "")
 	if len(plan) != 2 || plan[0].Target.UpstreamModel != "two" {
 		t.Fatalf("sticky target was not preferred: %+v", plan)
 	}
@@ -89,7 +89,7 @@ func TestPlanReservesNothing(t *testing.T) {
 	trip(f.breakers, target.Backend())
 	f.now = f.now.Add(31 * time.Second)
 	for range 3 {
-		if plan := f.selector.Plan([]routing.Target{target}, keysFor("a"), ""); len(plan) != 1 {
+		if plan := f.selector.Plan([]routing.Target{target}, keysFor("a"), "", ""); len(plan) != 1 {
 			t.Fatalf("a planned-but-unused probe must not hide the target: %+v", plan)
 		}
 	}
@@ -181,7 +181,7 @@ func TestKeyPoolCoolsRejectedKeys(t *testing.T) {
 
 func TestPlanSkipsChannelsWithoutKeys(t *testing.T) {
 	f := newFixture()
-	if plan := f.selector.Plan([]routing.Target{{ChannelID: "empty"}}, map[string][]routing.Key{}, ""); len(plan) != 0 {
+	if plan := f.selector.Plan([]routing.Target{{ChannelID: "empty"}}, map[string][]routing.Key{}, "", ""); len(plan) != 0 {
 		t.Fatalf("expected no candidates, got %+v", plan)
 	}
 }

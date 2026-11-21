@@ -9,9 +9,13 @@ flowchart LR
     Compile -->|valid| Version["insert version + activate"]
     Version --> Pin["call pins active version at admission"]
     Pin --> Request["request rules"]
+    Pin --> Result["tool-result rules"]
     Pin --> Tool["tool-call rules"]
+    Pin --> Response["response rules"]
     Request --> Outcome["record decisions and optional block"]
+    Result --> Outcome
     Tool --> Outcome
+    Response --> Outcome
 ```
 
 The API lives under `/console/api`:
@@ -30,10 +34,12 @@ A new project is seeded with version 1 containing an empty rule list, so every p
 
 | Phase | When it runs | What is available |
 | --- | --- | --- |
-| `request` | after the request is decoded and redacted, before the upstream call | principal, trace, request findings, empty tool/target/args |
-| `tool_call` | after the tool call is complete, before its frames are released | everything, including the pending tool call and its sink |
+| `request` | after the request is decoded and redacted, before routing | principal, trace, request findings; empty tool/target/args |
+| `tool_result` | when the request adds tool results, before routing and quota | principal, trace, findings, plus `results` (the new results in request order); empty tool/target/args |
+| `tool_call` | after a tool call is complete, before its frames are released | everything, including the pending tool call and its sink |
+| `response` | before a non-streaming response body is written | principal, trace, findings, plus `response` (status, finish, shown text, counts); empty tool/target/args |
 
-The gateway does not inspect response text online; there is no phase for tool results or response inspection.
+Streaming response text has no phase. A tool result that arrives in a request is checked at `tool_result`; a provider-executed server tool result is held at `tool_call` after the provider has already run it.
 
 ## Typed fields
 
@@ -47,17 +53,21 @@ Conditions are CEL over Go structs. Field names and types are checked when the d
 | `args` | map of flattened scalar arguments, keyed by dotted path |
 | `trace` | `steps` (list of `call_id`, `name`, `kind`, `sink`, `target_kind`, `target_value`, `has_result`, `is_error`) |
 | `findings` | list of `code`, `origin`, `sink`, `severity`, `source`, `mode`, `harm`, `confidence` |
+| `results` | list of `call_id`, `name`, `is_error`, `text`, `trust` |
+| `response` | `status`, `finish`, `text`, `item_count`, `tool_calls`, `truncated` |
 | `env` | `phase` |
 
-The principal comes from the authenticated agent key. Client-supplied metadata is not copied into it, so a rule cannot be satisfied by a field the client writes.
+`results` and `response` exist in every phase; they are empty outside their phase. `results.text` and `response.text` are the redacted/shown view, so a rule never receives a value the call page hides.
 
-`args` is the only untyped value. Nested objects and lists are flattened to scalar entries; a rule that needs the exact JSON shape should match a finding code instead (for example `findings.exists(f, f.code == 'missing_required_argument')`). When redaction changed the arguments, `args`, `target` and the target fields of `trace.steps` are built from the redacted view; the policy never receives a value that the call view hides.
+The principal comes from the authenticated agent key. Client-supplied metadata is not copied into it, so a rule cannot be satisfied by a field the client writes. `args` is the only untyped value: nested objects and lists are flattened to scalar entries; a rule that needs the exact JSON shape should match a finding code instead.
 
 ## Semantics
 
 - The default is no decision.
 - Every matching record rule produces one stored decision.
-- If any block rule matches, the call is blocked; only the highest-priority block is stored as the blocking decision, while record decisions still appear in the call view.
+- If any block rule matches, the phase blocks; only the highest-priority block is stored as the blocking decision, while record decisions still appear in the call view.
+- A `request` or `tool_result` block returns a protocol-shaped error before the upstream is called. A `tool_call` block prevents the call from reaching the client; before the stream commits it returns an HTTP error, and after the stream commits the error is in-band.
+- A `response` block withholds the generated JSON, records a non-retrievable response summary, settles the reported usage and returns a protocol error.
 - Rules are ordered by `priority` descending, then `id`; order only decides which block is reported.
 
 ## Lifecycle
@@ -77,4 +87,4 @@ A detector or CEL error blocks the phase only when the document contains a block
 
 - [Model](model.md)
 - [Analysis](analysis.md)
-- [Storage](storage.md)
+- [Audit](audit.md)

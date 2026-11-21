@@ -284,7 +284,7 @@ func inspectArgumentValue(ref observation.ItemRef, item observation.Item, value,
 		}
 		if pathKeys[normalized] {
 			if sensitive, found := sensitivePath(typed); found {
-				start := strings.Index(typed, sensitive)
+				start := indexFold(typed, sensitive)
 				if start < 0 {
 					start = 0
 				}
@@ -329,7 +329,7 @@ func inspectArgumentText(ref observation.ItemRef, item observation.Item, text, s
 	}
 	for _, word := range commandSeparators.Split(text, -1) {
 		if sensitive, found := sensitivePath(word); found {
-			start := strings.Index(strings.ToLower(text), sensitive)
+			start := indexFold(text, sensitive)
 			if start < 0 {
 				start = 0
 			}
@@ -389,6 +389,16 @@ func sensitivePath(value string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// indexFold finds a case-insensitive match without changing byte offsets: lower-casing the whole
+// value can change its length, so evidence would point at the wrong slice.
+func indexFold(value, pattern string) int {
+	expression := regexp.MustCompile("(?i)" + regexp.QuoteMeta(pattern))
+	if match := expression.FindStringIndex(value); match != nil {
+		return match[0]
+	}
+	return -1
 }
 
 func hasAnySuffix(value string, suffixes []string) bool {

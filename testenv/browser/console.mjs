@@ -342,7 +342,6 @@ await step('channel settings', async () => {
   await page.getByRole('button', { name: 'New channel' }).click();
   const form = await dialog();
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Endpoint').fill('https://example.invalid/v1/chat/completions');
   await form.getByRole('button', { name: 'Create', exact: true }).click();
   await page.waitForURL(/\/channels\/[^/]+$/, { timeout: 15_000 });
   await waitForPage();

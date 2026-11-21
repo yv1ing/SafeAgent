@@ -7,7 +7,7 @@
  */
 
 export interface ConsoleChannelOption {
-  format?: string;
+  formats?: string[];
   id: string;
   models?: string[];
   name: string;

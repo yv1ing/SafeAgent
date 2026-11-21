@@ -206,7 +206,14 @@ func measure(cfg runConfig, key string) (loadReport, error) {
 	endpoint := endpointFor(cfg)
 
 	for i := 0; i < cfg.warmup; i++ {
-		res := call(client, cfg, endpoint, key, body)
+		var res result
+		for attempt := 0; attempt < 3; attempt++ {
+			res = call(client, cfg, endpoint, key, body)
+			if res.outcome.ok || (res.outcome.kind != "network" && res.outcome.kind != "timeout") {
+				break
+			}
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
 		if !res.outcome.ok {
 			return loadReport{}, fmt.Errorf("warm-up request %d failed: %s %s", i+1, res.outcome.kind, res.outcome.detail)
 		}

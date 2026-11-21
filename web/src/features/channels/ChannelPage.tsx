@@ -8,6 +8,7 @@ import { Page } from '../../components/layout/Page';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { QueryState } from '../../components/feedback/QueryState';
 import { TableSkeleton } from '../../components/data/DataTable';
+import { Sparkles } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
 import { useLocale } from '../../i18n';
@@ -15,15 +16,13 @@ import { ChannelFields } from './components/ChannelFields';
 import { HeaderEditor, type HeaderRow } from './components/HeaderEditor';
 import { KeyPool } from './components/KeyPool';
 import { ModelPrices } from './components/ModelPrices';
-import { useUpdateChannel } from './hooks';
+import { useDiscoverChannelModels, useUpdateChannel } from './hooks';
 
 function channelInput(channel: ConsoleChannelView): ConsoleUpdateChannelInput {
   return {
     name: channel.name,
-    format: channel.format ?? '',
-    vendor: channel.vendor,
-    endpoint: channel.endpoint ?? '',
-    count_tokens_endpoint: channel.count_tokens_endpoint,
+    provider_id: channel.provider_id ?? '',
+    endpoints: channel.endpoints ?? [],
     currency: channel.currency,
     forward_headers: channel.forward_headers,
     default_max_output_tokens: channel.default_max_output_tokens,
@@ -39,7 +38,21 @@ function channelInput(channel: ConsoleChannelView): ConsoleUpdateChannelInput {
 function ChannelEditor({ channel }: { channel: ConsoleChannelView }) {
   const { t } = useLocale();
   const update = useUpdateChannel(channel.id);
+  const discover = useDiscoverChannelModels(channel.id);
   const [draft, setDraft] = useState(() => channelInput(channel));
+  const mergeModels = (view: { models?: string[] }) => {
+    const known = new Set((draft.models ?? []).map((entry) => entry.name));
+    const added = (view.models ?? [])
+      .filter((name) => !known.has(name))
+      .map((name) => ({
+        name,
+        input_price: 0,
+        output_price: 0,
+        cache_read_price: 0,
+        cache_write_price: 0,
+      }));
+    setDraft({ ...draft, models: [...(draft.models ?? []), ...added] });
+  };
   const [headers, setHeaders] = useState<HeaderRow[]>(() => Object.entries(channel.headers ?? {}));
   const save = () =>
     update.mutate({
@@ -61,7 +74,20 @@ function ChannelEditor({ channel }: { channel: ConsoleChannelView }) {
         </div>
       </Card>
       <Card>
-        <CardHeader title={t.channels.models} description={t.channels.modelsHint} />
+        <CardHeader
+          title={t.channels.models}
+          description={t.channels.modelsHint}
+          actions={
+            <Button
+              size="sm"
+              loading={discover.isPending}
+              onClick={() => discover.mutate(undefined, { onSuccess: mergeModels })}
+            >
+              <Sparkles aria-hidden />
+              {t.channels.discoverModels}
+            </Button>
+          }
+        />
         <ModelPrices
           models={draft.models ?? []}
           onChange={(models) => setDraft({ ...draft, models })}
@@ -97,7 +123,12 @@ export function ChannelPage() {
       <QueryState query={channel} loading={<TableSkeleton rows={10} />}>
         {(loaded) => (
           <div className="flex flex-col gap-5">
-            <PageHeader title={loaded.name} description={loaded.endpoint} />
+            <PageHeader
+              title={loaded.name}
+              description={[loaded.provider_id, (loaded.formats ?? []).join(', ')]
+                .filter(Boolean)
+                .join(' · ')}
+            />
             <div className="grid items-start gap-4 xl:grid-cols-3">
               <div className="min-w-0 xl:col-span-2">
                 <ChannelEditor key={loaded.version} channel={loaded} />

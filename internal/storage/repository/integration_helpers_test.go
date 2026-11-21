@@ -18,7 +18,7 @@ func open(t *testing.T) *repository.Store {
 	t.Helper()
 	dsn := os.Getenv("SAFEAGENT_TEST_DATABASE")
 	if dsn == "" {
-		t.Skip("SAFEAGENT_TEST_DATABASE is not set")
+		t.Fatal("SAFEAGENT_TEST_DATABASE is not set; use make lab-integration")
 	}
 	database := repository.Open(dsn)
 	t.Cleanup(func() { _ = database.Close() })
