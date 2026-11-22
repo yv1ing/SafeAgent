@@ -21,6 +21,7 @@ type Memory struct {
 	Proj     *entity.Project
 	RuleList []entity.Rule
 	Route    *entity.Route
+	Models   []entity.Model
 	Channel  []entity.Channel
 	Secrets  []entity.ChannelKey
 	Registry *provider.Registry
@@ -33,7 +34,6 @@ type Memory struct {
 	SealError  error
 	Settled    []int64
 	Reserved   []int64
-	QuotaLimit int64
 	FailCreate bool
 	Policy     *entity.PolicyVersion
 	Analysis   []entity.SealAnalysis
@@ -49,11 +49,16 @@ func NewMemory(upstreamURL, upstreamFormat string) *Memory {
 		Key:      &entity.AgentKey{ID: "key_1", ProjectID: "project_1", Enabled: true, Hash: secure.Digest("agent-key"), Role: "agent"},
 		Proj:     &entity.Project{ID: "project_1", Name: "test", RetentionDays: 30, RequestsPerMinute: 1000, Concurrency: 100},
 		RuleList: []entity.Rule{{ID: "r1", ProjectID: "project_1", Kind: "builtin", Detector: "email", Label: "EMAIL", Action: "replace", Enabled: true, Version: 1}},
-		Route:    &entity.Route{ID: "route_1", ProjectID: "project_1", Name: "gpt-5", Targets: []entity.Target{{ChannelID: "channel_1", UpstreamModel: "gpt-5-upstream", Priority: 1, Weight: 1}}},
+		Route:    &entity.Route{ID: "route_1", ProjectID: "project_1", Name: "gpt-5", Targets: []entity.Target{{ChannelID: "channel_1", ModelID: "model_1", Priority: 1, Weight: 1}}},
+		Models: []entity.Model{{
+			ID: "model_1", ProviderID: "test", UpstreamName: "gpt-5-upstream", Kind: entity.ModelGeneration,
+			Formats: []string{upstreamFormat}, InputPrice: 1_000_000, OutputPrice: 2_000_000,
+			Currency: "USD", Enabled: true, Version: 1,
+		}},
 		Channel: []entity.Channel{{
 			ID: "channel_1", Name: "mock", ProviderID: "test",
-			Enabled: true, Version: 1, AllowPrivateNetwork: true, Currency: "USD",
-			Models: []entity.ChannelModel{{Name: "gpt-5-upstream", InputPrice: 1_000_000, OutputPrice: 2_000_000}},
+			Endpoints: []entity.ChannelEndpoint{{Format: upstreamFormat}}, ModelIDs: []string{"model_1"},
+			Enabled: true, Version: 1, AllowPrivateNetwork: true,
 		}},
 		Secrets:   []entity.ChannelKey{{ID: "ck_1", ChannelID: "channel_1", Secret: sealed, Enabled: true}},
 		ToolCalls: map[string]string{},
@@ -91,11 +96,24 @@ func (store *Memory) Routes(context.Context, string) ([]entity.Route, error) {
 
 func (store *Memory) Channels(context.Context) ([]entity.Channel, error) { return store.Channel, nil }
 
+func (store *Memory) ModelsByIDs(_ context.Context, ids []string) ([]entity.Model, error) {
+	models := make([]entity.Model, 0, len(ids))
+	for _, id := range ids {
+		for _, model := range store.Models {
+			if model.ID == id {
+				models = append(models, model)
+				break
+			}
+		}
+	}
+	return models, nil
+}
+
 func (store *Memory) EnabledChannelKeys(context.Context) ([]entity.ChannelKey, error) {
 	return store.Secrets, nil
 }
 
-func (store *Memory) AddCapabilityOverride(_ context.Context, channelID, format, field, reason string) error {
+func (store *Memory) AddCapabilityOverride(_ context.Context, channelID, modelID, format, field, reason string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	for index := range store.Channel {
@@ -103,11 +121,11 @@ func (store *Memory) AddCapabilityOverride(_ context.Context, channelID, format,
 			continue
 		}
 		for _, existing := range store.Channel[index].CapabilityOverrides {
-			if existing.Format == format && existing.Field == field {
+			if existing.ModelID == modelID && existing.Format == format && existing.Field == field {
 				return nil
 			}
 		}
-		store.Channel[index].CapabilityOverrides = append(store.Channel[index].CapabilityOverrides, entity.CapabilityOverride{Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
+		store.Channel[index].CapabilityOverrides = append(store.Channel[index].CapabilityOverrides, entity.CapabilityOverride{ModelID: modelID, Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
 		store.Channel[index].Version++
 		return nil
 	}

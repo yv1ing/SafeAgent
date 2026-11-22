@@ -152,7 +152,7 @@ var sealedCallColumns = []string{
 	"state", "error_code", "terminated_at", "first_token_milliseconds", "duration_milliseconds", "input_tokens", "output_tokens",
 	"cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "usage_known", "cost_micros", "currency",
 	"redaction_hits", "losses", "repairs", "attempts", "response_id", "response_store", "conversation_hash",
-	"channel_id", "upstream_model", "endpoint_format", "audit_head", "audit_events", "analysis_state",
+	"channel_id", "model_id", "upstream_model", "endpoint_format", "audit_head", "audit_events", "analysis_state",
 }
 
 // Seal terminates a call: it waits for the call's in-flight batches, then writes the remaining

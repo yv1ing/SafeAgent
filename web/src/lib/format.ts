@@ -29,9 +29,19 @@ const currencySymbols: Record<string, string> = {
   GBP: '£',
 };
 
+const microsPerUnit = 1_000_000;
+
+export function priceToMicros(units: number) {
+  return Math.round(units * microsPerUnit) || 0;
+}
+
+export function priceFromMicros(micros: number | null | undefined) {
+  return (micros ?? 0) / microsPerUnit;
+}
+
 export function formatCost(micros: number | null | undefined, currency = 'USD') {
   if (micros === undefined || micros === null) return placeholder;
-  const amount = (micros / 1_000_000).toFixed(4);
+  const amount = priceFromMicros(micros).toFixed(4);
   const symbol = currencySymbols[currency || 'USD'];
   return symbol ? `${symbol}${amount}` : `${amount} ${currency}`;
 }

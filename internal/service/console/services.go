@@ -12,6 +12,7 @@ import (
 type Services struct {
 	Account    *AccountService
 	Project    *ProjectService
+	Model      *ModelService
 	Channel    *ChannelService
 	Key        *KeyService
 	Route      *RouteService
@@ -28,6 +29,7 @@ func NewServices(store *repository.Store, selector *routing.Selector, providers 
 	return Services{
 		Account:    NewAccountService(store),
 		Project:    NewProjectService(store),
+		Model:      NewModelService(store, providers),
 		Channel:    NewChannelService(store, selector, providers),
 		Key:        NewKeyService(store),
 		Route:      NewRouteService(store),

@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
+	"time"
+
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
-	"time"
 )
 
 func (store *Store) CreateChannel(ctx context.Context, channel *entity.Channel) (*entity.Channel, error) {
@@ -19,8 +20,8 @@ func (store *Store) CreateChannel(ctx context.Context, channel *entity.Channel) 
 
 func (store *Store) UpdateChannel(ctx context.Context, id string, channel entity.Channel, version int64) (*entity.Channel, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Channel)(nil)).
-		Set("name = ?, provider_id = ?, custom = ?, endpoints = ?, headers = ?, forward_headers = ?, default_max_output_tokens = ?, models = ?, currency = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
-			channel.Name, channel.ProviderID, channel.Custom, channel.Endpoints, channel.Headers, channel.ForwardHeaders, channel.DefaultMaxOutputTokens, channel.Models, channel.Currency, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
+		Set("name = ?, provider_id = ?, endpoints = ?, model_ids = ?, capability_overrides = ?, headers = ?, forward_headers = ?, default_max_output_tokens = ?, timeout_seconds = ?, first_byte_timeout_seconds = ?, allow_private_network = ?, enabled = ?, version = version + 1",
+			channel.Name, channel.ProviderID, channel.Endpoints, channel.ModelIDs, channel.CapabilityOverrides, channel.Headers, channel.ForwardHeaders, channel.DefaultMaxOutputTokens, channel.TimeoutSeconds, channel.FirstByteTimeoutSeconds, channel.AllowPrivateNetwork, channel.Enabled).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
 		return nil, err
@@ -31,19 +32,30 @@ func (store *Store) UpdateChannel(ctx context.Context, id string, channel entity
 	return store.Channel(ctx, id)
 }
 
-// AddCapabilityOverride records a field an upstream rejected. The write is idempotent per format
-// and field, so concurrent rejections do not accumulate duplicates.
-func (store *Store) AddCapabilityOverride(ctx context.Context, channelID, format, field, reason string) error {
+func (store *Store) DeleteChannel(ctx context.Context, id string) error {
+	result, err := store.DB.NewDelete().Model((*entity.Channel)(nil)).Where("id = ?", id).Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AddCapabilityOverride records a field an upstream rejected. The write is idempotent per
+// channel model format and field, so concurrent rejections do not accumulate duplicates.
+func (store *Store) AddCapabilityOverride(ctx context.Context, channelID, modelID, format, field, reason string) error {
 	channel, err := store.Channel(ctx, channelID)
 	if err != nil {
 		return err
 	}
 	for _, existing := range channel.CapabilityOverrides {
-		if existing.Format == format && existing.Field == field {
+		if existing.ModelID == modelID && existing.Format == format && existing.Field == field {
 			return nil
 		}
 	}
-	channel.CapabilityOverrides = append(channel.CapabilityOverrides, entity.CapabilityOverride{Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
+	channel.CapabilityOverrides = append(channel.CapabilityOverrides, entity.CapabilityOverride{ModelID: modelID, Format: format, Field: field, Reason: reason, CreatedAt: time.Now().UTC()})
 	result, err := store.DB.NewUpdate().Model((*entity.Channel)(nil)).
 		Set("capability_overrides = ?, version = version + 1", channel.CapabilityOverrides).
 		Where("id = ? AND version = ?", channelID, channel.Version).Exec(ctx)
@@ -81,13 +93,6 @@ func (store *Store) DeleteChannelKey(ctx context.Context, channelID, id string) 
 		return ErrNotFound
 	}
 	return nil
-}
-
-func prefix(secret string) string {
-	if len(secret) <= 8 {
-		return secret
-	}
-	return secret[:8]
 }
 
 func (store *Store) Channels(ctx context.Context) ([]entity.Channel, error) {

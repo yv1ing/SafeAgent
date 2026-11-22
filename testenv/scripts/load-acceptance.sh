@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 lab="$root/testenv"
 out="$lab/runtime/load/$(date +%Y%m%dT%H%M%S)"
 
-if [ -f "$lab/.env" ]; then
-  # shellcheck disable=SC1091
-  set -a; . "$lab/.env"; set +a
-fi
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
 if [ ! -f "$lab/runtime/env" ]; then
   echo "the lab is not set up; run make lab-setup first" >&2
   exit 1
 fi
-# shellcheck disable=SC1091
-set -a; . "$lab/runtime/env"; set +a
+lab_env "$lab"
 
 base=${SAFEAGENT_BASE_URL:-http://127.0.0.1:8080}
 requests=${LOAD_REQUESTS:-50}
@@ -27,22 +25,6 @@ if ! curl -fsS "$base/health" >/dev/null; then
   echo "the gateway is not healthy at $base; run make lab-setup or make lab-restart" >&2
   exit 1
 fi
-
-upstream() {
-  local format=$1 suffix=$2
-  local upper=${format^^}
-  local specific="SAFEAGENT_UPSTREAM_${upper}_${suffix}"
-  local value=${!specific:-}
-  if [ -z "$value" ]; then
-    case "$suffix" in
-      KEY|MODEL|PROVIDER)
-        local shared="SAFEAGENT_UPSTREAM_${suffix}"
-        value=${!shared:-}
-        ;;
-    esac
-  fi
-  printf '%s' "$value"
-}
 
 wait_queue() {
   local pending="unknown"
@@ -78,11 +60,11 @@ gateway_endpoint() {
 }
 
 measure() {
-  local label=$1 protocol=$2 endpoint=$3 model=$4 stream=$5 key=$6 report=$7 count=$8
+  local label=$1 protocol=$2 endpoint=$3 model=$4 stream=$5 key=$6 report=$7 count=$8 no_thinking=${9:-1}
   SAFEAGENT_LOAD_KEY="$key" "$out/loadgen" \
     -label "$label" -protocol "$protocol" -endpoint "$endpoint" -model "$model" -stream="$stream" \
     -requests "$count" -concurrency "$concurrency" -warmup "$warmup" \
-    -max-tokens "$max_tokens" -report "$report"
+    -max-tokens "$max_tokens" -no-thinking="$no_thinking" -report "$report"
 }
 
 printf 'profile: %d requests per native run, concurrency %d, warm-up %d, max tokens %d; %d cross requests\n' \
@@ -91,11 +73,7 @@ printf 'profile: %d requests per native run, concurrency %d, warm-up %d, max tok
 status=0
 formats=($SAFEAGENT_AVAILABLE_FORMATS)
 declare -A route
-for format in "${formats[@]}"; do
-  upper=${format^^}
-  var="SAFEAGENT_${upper}_ROUTE"
-  route[$format]=${!var}
-done
+load_routes
 
 for format in "${formats[@]}"; do
   upper=${format^^}
@@ -107,14 +85,16 @@ for format in "${formats[@]}"; do
   fi
   direct_model=$(upstream "$format" MODEL)
   direct_key=$(upstream "$format" KEY)
+  no_thinking=$(upstream "$format" NO_THINKING)
+  no_thinking=${no_thinking:-1}
   for stream in false true; do
     name=$format-$([ "$stream" = "true" ] && echo stream || echo json)
     baseline="$out/baseline-$name.json"
     gateway="$out/gateway-$name.json"
     printf '\n=== %s native\n' "$name"
-    measure "baseline-$name" "$format" "$direct_url" "$direct_model" "$stream" "$direct_key" "$baseline" "$requests"
+    measure "baseline-$name" "$format" "$direct_url" "$direct_model" "$stream" "$direct_key" "$baseline" "$requests" "$no_thinking"
     wait_queue
-    measure "gateway-$name" "$format" "$(gateway_endpoint "$format" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway" "$requests"
+    measure "gateway-$name" "$format" "$(gateway_endpoint "$format" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway" "$requests" "$no_thinking"
     if ! "$out/loadgen" compare "$baseline" "$gateway"; then
       status=1
     fi
@@ -125,9 +105,11 @@ printf '\n=== cross-format sample\n'
 for client in chat responses messages gemini; do
   for format in "${formats[@]}"; do
     route_name=${route[$format]}
+    no_thinking=$(upstream "$format" NO_THINKING)
+    no_thinking=${no_thinking:-1}
     for stream in false true; do
       report="$out/cross-$client-$format-$([ "$stream" = "true" ] && echo stream || echo json).json"
-      measure "cross-$client-$format" "$client" "$(gateway_endpoint "$client" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$report" "$cross_requests" >/dev/null
+      measure "cross-$client-$format" "$client" "$(gateway_endpoint "$client" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$report" "$cross_requests" "$no_thinking" >/dev/null
       if jq -e '.failed == 0 and .succeeded == .requests' "$report" >/dev/null; then
         printf 'PASS cross %s->%s %s\n' "$client" "$format" "$([ "$stream" = "true" ] && echo stream || echo json)"
       else

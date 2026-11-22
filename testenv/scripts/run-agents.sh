@@ -3,11 +3,11 @@ set -euo pipefail
 
 lab=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$lab/runtime"
+umask 077
 cd "$lab"
-set -a
-# shellcheck disable=SC1091
-. "$runtime/env"
-set +a
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 export SAFEAGENT_LAB_UID="${SAFEAGENT_LAB_UID:-1000}" SAFEAGENT_LAB_GID="${SAFEAGENT_LAB_GID:-1000}"
 
 mkdir -p "$runtime/logs"
@@ -15,11 +15,7 @@ docker compose run --rm -T --entrypoint agent-versions claude > "$runtime/logs/a
 
 formats=($SAFEAGENT_AVAILABLE_FORMATS)
 declare -A route
-for format in "${formats[@]}"; do
-  upper=${format^^}
-  var="SAFEAGENT_${upper}_ROUTE"
-  route[$format]=${!var}
-done
+load_routes
 
 declare -A key_name=([claude]=SAFEAGENT_CLAUDE_KEY [codex]=SAFEAGENT_CODEX_KEY [gemini]=SAFEAGENT_GEMINI_KEY [pi]=SAFEAGENT_PI_KEY)
 declare -A native=([claude]=messages [codex]=responses [gemini]=gemini [pi]=chat)
@@ -34,7 +30,11 @@ run() {
   local keyvar=${key_name[$agent]}
   local key=${!keyvar}
   local model=${route[$format]}
-  rm -f "$workspace/answer.txt"
+  rm -f "$workspace/answer.txt" "$workspace/prefix.txt"
+  if [ "$suffix" = "-deep" ]; then
+    printf 'deep-' > "$workspace/prefix.txt"
+    chown "$SAFEAGENT_LAB_UID:$SAFEAGENT_LAB_GID" "$workspace/prefix.txt" 2>/dev/null || true
+  fi
   printf '=== %s -> %s\n' "$agent" "$format"
   set +e
   case "$agent" in
@@ -80,7 +80,7 @@ for agent in claude codex gemini pi; do
   deep=${native[$agent]}
   if [[ " ${formats[*]} " == *" $deep "* ]]; then
     run "$agent" "$deep" "deep-bluebird" \
-      "Read prefix.txt and hello.txt. Then create answer.txt whose only line is the text from prefix.txt immediately followed by the word from hello.txt. Use your file tools." \
+      "Read prefix.txt and hello.txt. Then create answer.txt whose only line is the exact contents of prefix.txt followed directly by the word from hello.txt, keeping every character of prefix.txt including punctuation. Use your file tools." \
       -deep
   else
     printf 'SKIP deep %s: %s upstream is not available\n' "$agent" "$deep"

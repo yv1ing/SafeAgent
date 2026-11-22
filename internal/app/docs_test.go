@@ -54,8 +54,9 @@ func TestAgentDocumentsEndWithRelated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(content), "\n## Related\n") {
-			t.Errorf("%s has no Related section", filepath.Base(file))
+		sections := regexp.MustCompile(`(?m)^## (.+)$`).FindAllStringSubmatch(string(content), -1)
+		if len(sections) == 0 || sections[len(sections)-1][1] != "Related" {
+			t.Errorf("%s must end with a Related section", filepath.Base(file))
 		}
 	}
 }

@@ -72,6 +72,7 @@ func (service *CallService) List(ctx context.Context, actor Actor, projectID str
 type CallAttempt struct {
 	ChannelID        string
 	ChannelName      string
+	ModelID          string
 	UpstreamModel    string
 	KeyID            string
 	StartOffset      int64
@@ -162,7 +163,7 @@ func Attempts(call *entity.Call, events []entity.Event) []CallAttempt {
 				continue
 			}
 			payload := decoded.Attempt
-			attempts = append(attempts, CallAttempt{ChannelID: payload.ChannelID, ChannelName: payload.ChannelName, UpstreamModel: payload.UpstreamModel, KeyID: payload.KeyID, StartOffset: offset(event.CreatedAt), Result: "running"})
+			attempts = append(attempts, CallAttempt{ChannelID: payload.ChannelID, ChannelName: payload.ChannelName, ModelID: payload.ModelID, UpstreamModel: payload.UpstreamModel, KeyID: payload.KeyID, StartOffset: offset(event.CreatedAt), Result: "running"})
 			open = true
 		case auditevent.KindFirstToken:
 			if open && decoded.FirstToken != nil {

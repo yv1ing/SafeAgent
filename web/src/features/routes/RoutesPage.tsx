@@ -20,12 +20,18 @@ export function RoutesPage() {
   const { t } = useLocale();
   const projectId = useProjectId();
   const routes = useListRoutes(projectId);
-  const channels = useListChannelOptions(projectId);
+  const channels = useListChannelOptions(projectId, { query: { refetchOnMount: 'always' } });
   const mutations = useRouteMutations(projectId);
   const [editing, setEditing] = useState<ConsoleRouteView | 'new' | null>(null);
   const [deleting, setDeleting] = useState<ConsoleRouteView | null>(null);
   const channelName = (channelId: string) =>
     channels.data?.find((channel) => channel.id === channelId)?.name ?? channelId;
+  const modelName = (channelId: string, modelId: string) => {
+    const model = channels.data
+      ?.find((channel) => channel.id === channelId)
+      ?.models?.find((entry) => entry.id === modelId);
+    return model?.display_name || model?.name || modelId;
+  };
   const close = () => setEditing(null);
 
   return (
@@ -64,15 +70,14 @@ export function RoutesPage() {
                       {[...row.targets]
                         .sort((left, right) => left.priority - right.priority)
                         .map((target) => (
-                          <li
-                            key={`${target.channel_id}/${target.upstream_model}`}
-                            className="text-xs"
-                          >
+                          <li key={`${target.channel_id}/${target.model_id}`} className="text-xs">
                             <span className="text-muted">
                               P{target.priority} · w{target.weight} ·{' '}
                             </span>
                             {channelName(target.channel_id)} /{' '}
-                            <span className="font-mono">{target.upstream_model}</span>
+                            <span className="font-mono">
+                              {modelName(target.channel_id, target.model_id)}
+                            </span>
                           </li>
                         ))}
                     </ul>

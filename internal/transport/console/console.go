@@ -67,6 +67,7 @@ func (console *Console) register() {
 	console.registerUsers()
 	console.registerProjects()
 	console.registerMembers()
+	console.registerModels()
 	console.registerChannels()
 	console.registerKeys()
 	console.registerModelRoutes()

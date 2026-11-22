@@ -27,7 +27,7 @@ type prepared struct {
 
 func (state *call) prepare(candidate routing.Candidate) (*prepared, *model.Error) {
 	target := candidate.Target
-	endpoint, found := state.endpoints[endpointKey(target.ChannelID, target.UpstreamModel, model.Format(target.Format))]
+	endpoint, found := state.endpoints[endpointKey(target.ChannelID, target.ModelID, model.Format(target.Format))]
 	if !found {
 		return nil, failure("invalid_request", model.ClassInvalid, "unsupported_channel_format", "The channel does not expose this format.", http.StatusUnprocessableEntity)
 	}

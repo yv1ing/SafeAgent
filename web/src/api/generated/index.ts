@@ -10,6 +10,7 @@ export * from './finding-codes/finding-codes.ts';
 export * from './flows/flows.ts';
 export * from './keys/keys.ts';
 export * from './members/members.ts';
+export * from './models/models.ts';
 export * from './monitor/monitor.ts';
 export * from './operation-logs/operation-logs.ts';
 export * from './operations/operations.ts';

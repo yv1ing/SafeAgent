@@ -26,11 +26,11 @@ type Ticket struct {
 	generation uint64
 }
 
-// Backend identifies what a breaker protects: one upstream model on one channel.
+// Backend identifies what a breaker protects: one catalog model on one channel in one format.
 type Backend struct {
-	ChannelID     string
-	UpstreamModel string
-	Format        string
+	ChannelID string
+	ModelID   string
+	Format    string
 }
 
 type Breakers struct {
@@ -156,18 +156,6 @@ func (breakers *Breakers) Failure(ticket Ticket) {
 func (breakers *Breakers) Health(backend Backend) Health {
 	breakers.mu.Lock()
 	defer breakers.mu.Unlock()
-	if backend.Format != "" {
-		value := breakers.entry(backend)
-		return Health{State: value.state, Failures: value.failures, Cooldown: int64(value.cooldown / time.Second)}
-	}
-	result := Health{State: StateClosed, Cooldown: int64(initialCooldown / time.Second)}
-	for key, value := range breakers.entries {
-		if key.ChannelID != backend.ChannelID || key.UpstreamModel != backend.UpstreamModel {
-			continue
-		}
-		if value.failures >= result.Failures {
-			result = Health{State: value.state, Failures: value.failures, Cooldown: int64(value.cooldown / time.Second)}
-		}
-	}
-	return result
+	value := breakers.entry(backend)
+	return Health{State: value.state, Failures: value.failures, Cooldown: int64(value.cooldown / time.Second)}
 }

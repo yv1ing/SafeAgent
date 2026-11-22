@@ -10,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
+	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
+	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
@@ -118,6 +122,7 @@ func TestSealIsTransactionalAndIsolatesBadRows(t *testing.T) {
 	seeded := seed(t, database, 30)
 	ctx := context.Background()
 	good := seeded.call("call_1", "s1", time.Now().UTC())
+	good.ModelID = "model_1"
 	bad := seeded.call("call_2", "s2", time.Now().UTC())
 	for _, call := range []*entity.Call{good, bad} {
 		if err := database.CreateCall(ctx, call); err != nil {
@@ -138,7 +143,7 @@ func TestSealIsTransactionalAndIsolatesBadRows(t *testing.T) {
 		t.Fatalf("sealed events were not persisted: %v %v", events, err)
 	}
 	sealed, err := database.Call(ctx, seeded.project.ID, good.ID)
-	if err != nil || sealed.State != "completed" || sealed.TerminatedAt == nil {
+	if err != nil || sealed.State != "completed" || sealed.TerminatedAt == nil || sealed.ModelID != "model_1" {
 		t.Fatalf("call was not sealed: %+v %v", sealed, err)
 	}
 	issuer, err := database.CallByToolCall(ctx, seeded.project.ID, seeded.key.ID, "tool_1")
@@ -461,7 +466,19 @@ func TestProjectAndChannelUpdatesPersistGatewayDefaults(t *testing.T) {
 		t.Fatalf("project output limit = %d", updatedProject.DefaultMaxOutputTokens)
 	}
 
-	channel, err := database.CreateChannel(ctx, &entity.Channel{Name: "c", ProviderID: "openai", Endpoints: []entity.ChannelEndpoint{{Format: "openai_chat", BaseURL: "https://example.com"}}, Currency: "USD", Enabled: true})
+	model := &entity.Model{ProviderID: "openai", UpstreamName: "gpt-5", Kind: entity.ModelGeneration, Formats: []string{"openai_chat"}, Currency: "USD", Enabled: true}
+	if _, err := database.CreateModel(ctx, model); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	storedModel, err := database.ModelByProviderName(ctx, "openai", "gpt-5")
+	if err != nil || storedModel.Kind != entity.ModelGeneration || len(storedModel.Formats) != 1 {
+		t.Fatalf("stored model = %+v, err = %v", storedModel, err)
+	}
+	channel, err := database.CreateChannel(ctx, &entity.Channel{
+		Name: "c", ProviderID: "openai", Enabled: true,
+		Endpoints: []entity.ChannelEndpoint{{Format: "openai_chat", BaseURL: "https://example.com"}},
+		ModelIDs:  []string{model.ID},
+	})
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -604,4 +621,99 @@ func TestSealPreservesCancellationAndDeletionTimestamps(t *testing.T) {
 	if stored.CancelledAt == nil || stored.ResponseDeletedAt == nil {
 		t.Fatalf("seal must not overwrite cancellation or deletion: %+v", stored)
 	}
+}
+
+func TestRoutingGraphRejectsMutationsThatInvalidateReferences(t *testing.T) {
+	database := prepared(t)
+	ctx := context.Background()
+	providers := provider.NewRegistry(builtin.Custom())
+	selector := routing.NewSelector(routing.NewBreakers(nil), routing.NewKeyPool(nil), routing.NewSticky(nil), 3)
+	models := serviceconsole.NewModelService(database, providers)
+	channels := serviceconsole.NewChannelService(database, selector, providers)
+	routes := serviceconsole.NewRouteService(database)
+	actor := serviceconsole.Actor{Administrator: true}
+
+	project, err := database.CreateProject(ctx, &entity.Project{Name: "graph", RetentionDays: 7}, nil, nil)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	model, err := models.Create(ctx, actor, serviceconsole.ModelInput{
+		ProviderID: "custom", UpstreamName: "graph-model", Kind: "generation",
+		Formats: []string{"openai_chat"}, Currency: "USD", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	channel, err := channels.Create(ctx, actor, serviceconsole.ChannelInput{
+		Name: "graph", ProviderID: "custom", Enabled: true,
+		Endpoints: []entity.ChannelEndpoint{{Format: "openai_chat", BaseURL: "https://example.com"}},
+		ModelIDs:  []string{model.ID}, Headers: map[string]string{"X-Lab": "one"},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	route, err := routes.Create(ctx, actor, project.ID, serviceconsole.RouteInput{
+		Name:    "graph-route",
+		Targets: []entity.Target{{ChannelID: channel.ID, ModelID: model.ID, Priority: 0, Weight: 1}},
+	})
+	if err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+	if err := serviceconsole.ValidateConfiguration(ctx, database, providers); err != nil {
+		t.Fatalf("the accepted graph must validate at startup: %v", err)
+	}
+	loadedModels, err := database.ModelsByIDs(ctx, []string{model.ID})
+	if err != nil || len(loadedModels) != 1 {
+		t.Fatalf("ModelsByIDs = %+v, err = %v", loadedModels, err)
+	}
+	channelInput := serviceconsole.ChannelInput{
+		Name: "graph", ProviderID: "custom", Enabled: true,
+		Endpoints: []entity.ChannelEndpoint{{Format: "openai_chat", BaseURL: "https://example.com"}},
+		ModelIDs:  []string{model.ID}, Version: channel.Version,
+	}
+	disabled := channelInput
+	disabled.Enabled = false
+	if _, err := channels.Update(ctx, actor, channel.ID, disabled); !conflict(err) {
+		t.Fatalf("disabling a routed channel must conflict: %v", err)
+	}
+	detached := channelInput
+	detached.ModelIDs = nil
+	if _, err := channels.Update(ctx, actor, channel.ID, detached); !conflict(err) {
+		t.Fatalf("removing a routed model must conflict: %v", err)
+	}
+	modelInput := serviceconsole.ModelInput{
+		ProviderID: "custom", UpstreamName: model.UpstreamName, Kind: "generation",
+		Formats: model.Formats, Currency: model.Currency, Enabled: false, Version: model.Version,
+	}
+	if _, err := models.Update(ctx, actor, model.ID, modelInput); !conflict(err) {
+		t.Fatalf("disabling a routed model must conflict: %v", err)
+	}
+	if _, err := channels.Delete(ctx, actor, channel.ID); !conflict(err) {
+		t.Fatalf("deleting a routed channel must conflict: %v", err)
+	}
+	if _, err := models.Delete(ctx, actor, model.ID); !conflict(err) {
+		t.Fatalf("deleting a model still enabled on a channel must conflict: %v", err)
+	}
+	if _, err := routes.Delete(ctx, actor, project.ID, route.ID); err != nil {
+		t.Fatalf("delete route: %v", err)
+	}
+	detached.Version = channel.Version
+	updated, err := channels.Update(ctx, actor, channel.ID, detached)
+	if err != nil {
+		t.Fatalf("remove the model after the route is gone: %v", err)
+	}
+	if updated.Headers["X-Lab"] != "one" {
+		t.Fatalf("an omitted header map must preserve stored headers: %+v", updated.Headers)
+	}
+	if _, err := models.Delete(ctx, actor, model.ID); err != nil {
+		t.Fatalf("delete the unreferenced model: %v", err)
+	}
+	if _, err := channels.Delete(ctx, actor, channel.ID); err != nil {
+		t.Fatalf("delete the unreferenced channel: %v", err)
+	}
+}
+
+func conflict(err error) bool {
+	var failure *serviceconsole.Failure
+	return errors.As(err, &failure) && failure.Kind == serviceconsole.KindConflict
 }

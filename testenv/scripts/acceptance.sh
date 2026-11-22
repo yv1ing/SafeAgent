@@ -5,6 +5,9 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 lab="$root/testenv"
 runtime="$lab/runtime"
 log="$runtime/acceptance/acceptance.log"
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 cd "$root"
 
 if [ ! -f "$runtime/env" ]; then

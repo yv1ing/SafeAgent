@@ -6,19 +6,25 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// ChannelEndpoint enables one provider format. The order is the fallback order when the client
+// format is unavailable; an empty base URL or path means the provider catalog value.
+type ChannelEndpoint struct {
+	Format  string `json:"format" required:"true"`
+	BaseURL string `json:"base_url,omitempty"`
+	Path    string `json:"path,omitempty"`
+}
+
 type Channel struct {
 	bun.BaseModel           `bun:"table:channels,alias:ch"`
 	ID                      string               `bun:",pk" json:"id" required:"true"`
 	Name                    string               `json:"name" required:"true"`
 	ProviderID              string               `json:"provider_id" required:"true"`
-	Custom                  bool                 `json:"custom"`
 	Endpoints               []ChannelEndpoint    `bun:"type:jsonb" json:"endpoints"`
+	ModelIDs                []string             `bun:"column:model_ids,type:jsonb" json:"model_ids"`
 	CapabilityOverrides     []CapabilityOverride `bun:"type:jsonb" json:"capability_overrides"`
 	Headers                 map[string]string    `bun:"type:jsonb" json:"headers"`
 	ForwardHeaders          []string             `bun:"type:jsonb" json:"forward_headers"`
 	DefaultMaxOutputTokens  int                  `json:"default_max_output_tokens"`
-	Models                  []ChannelModel       `bun:"type:jsonb" json:"models"`
-	Currency                string               `json:"currency"`
 	TimeoutSeconds          int                  `json:"timeout_seconds"`
 	FirstByteTimeoutSeconds int                  `json:"first_byte_timeout_seconds"`
 	AllowPrivateNetwork     bool                 `json:"allow_private_network"`
@@ -27,31 +33,32 @@ type Channel struct {
 	CreatedAt               time.Time            `json:"created_at"`
 }
 
-// ChannelEndpoint overrides one format of the provider catalog. An absent entry means the catalog
-// default; a base URL or path replaces that part of the request, and a disabled entry hides the
-// format.
-type ChannelEndpoint struct {
-	Format   string `json:"format"`
-	BaseURL  string `json:"base_url,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
-}
-
-// CapabilityOverride records a field the upstream rejected. It is written by the gateway and is
-// read-only for operators.
+// CapabilityOverride records a field the upstream rejected for one channel model format. It is
+// written by the gateway and is read-only for operators.
 type CapabilityOverride struct {
+	ModelID   string    `json:"model_id"`
 	Format    string    `json:"format"`
 	Field     string    `json:"field"`
 	Reason    string    `json:"reason,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type ChannelModel struct {
-	Name            string `json:"name"`
-	InputPrice      int64  `json:"input_price"`
-	OutputPrice     int64  `json:"output_price"`
-	CacheReadPrice  int64  `json:"cache_read_price"`
-	CacheWritePrice int64  `json:"cache_write_price"`
+func (channel Channel) HasFormat(format string) bool {
+	for _, endpoint := range channel.Endpoints {
+		if endpoint.Format == format {
+			return true
+		}
+	}
+	return false
+}
+
+func (channel Channel) HasModel(modelID string) bool {
+	for _, candidate := range channel.ModelIDs {
+		if candidate == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 type ChannelKey struct {

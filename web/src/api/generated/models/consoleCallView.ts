@@ -29,6 +29,7 @@ export interface ConsoleCallView {
   latest_analysis_id: string;
   losses: ConsoleLossView[];
   max_severity: string;
+  model_id: string;
   output_tokens: number;
   parent_call_id: string;
   public_model: string;

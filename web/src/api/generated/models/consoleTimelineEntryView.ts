@@ -17,6 +17,7 @@ export interface ConsoleTimelineEntryView {
   kind: string;
   label: string;
   message: string;
+  model_id: string;
   response?: ConsoleTimelineResponse;
   sequence: number;
   status: string;

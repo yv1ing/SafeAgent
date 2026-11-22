@@ -21,8 +21,9 @@ type Repository interface {
 	RouteByName(ctx context.Context, projectID, name string) (*entity.Route, error)
 	Routes(ctx context.Context, projectID string) ([]entity.Route, error)
 	Channels(ctx context.Context) ([]entity.Channel, error)
+	ModelsByIDs(ctx context.Context, ids []string) ([]entity.Model, error)
 	EnabledChannelKeys(ctx context.Context) ([]entity.ChannelKey, error)
-	AddCapabilityOverride(ctx context.Context, channelID, format, field, reason string) error
+	AddCapabilityOverride(ctx context.Context, channelID, modelID, format, field, reason string) error
 	DeleteResponse(ctx context.Context, agentKeyID, responseID string) error
 	MarkCallCancelled(ctx context.Context, callID string)
 	ReserveTokens(ctx context.Context, projectID string, estimate, limit int64) (bool, time.Time, error)

@@ -1,4 +1,4 @@
-// Package routing selects a channel target for a model. It combines ordered route targets,
+// Package routing selects a resolved route target. It combines ordered targets,
 // per-key cooling, circuit breakers and sticky sessions; it does not call upstreams itself.
 package routing
 
@@ -24,6 +24,7 @@ const (
 
 type Target struct {
 	ChannelID       string
+	ModelID         string
 	UpstreamModel   string
 	Format          string
 	Priority        int
@@ -32,7 +33,7 @@ type Target struct {
 }
 
 func (target Target) Backend() Backend {
-	return Backend{ChannelID: target.ChannelID, UpstreamModel: target.UpstreamModel, Format: target.Format}
+	return Backend{ChannelID: target.ChannelID, ModelID: target.ModelID, Format: target.Format}
 }
 
 type Candidate struct {
@@ -183,6 +184,6 @@ func (selector *Selector) CoolKey(channelID, keyID string, duration time.Duratio
 	selector.keys.Cool(channelID, keyID, duration)
 }
 
-func (selector *Selector) Health(channelID, upstreamModel string) Health {
-	return selector.breakers.Health(Backend{ChannelID: channelID, UpstreamModel: upstreamModel})
+func (selector *Selector) Health(channelID, modelID, format string) Health {
+	return selector.breakers.Health(Backend{ChannelID: channelID, ModelID: modelID, Format: format})
 }

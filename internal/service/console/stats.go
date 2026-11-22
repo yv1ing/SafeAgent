@@ -120,21 +120,36 @@ func (service *StatsService) health(ctx context.Context, projectID string) ([]Ch
 	if err != nil {
 		return nil, err
 	}
-	names := make(map[string]string, len(channels))
-	for _, entry := range channels {
-		names[entry.ID] = entry.Name
+	models, err := service.store.Models(ctx)
+	if err != nil {
+		return nil, err
 	}
-	seen := map[[2]string]bool{}
+	channelByID := make(map[string]entity.Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.ID] = channel
+	}
+	modelByID := modelMap(models)
+	seen := map[[3]string]bool{}
 	health := []ChannelHealth{}
 	for _, route := range routes {
 		for _, target := range route.Targets {
-			key := [2]string{target.ChannelID, target.UpstreamModel}
-			name, known := names[target.ChannelID]
-			if seen[key] || !known {
+			channel, channelFound := channelByID[target.ChannelID]
+			model, modelFound := modelByID[target.ModelID]
+			if !channelFound || !modelFound {
 				continue
 			}
-			seen[key] = true
-			health = append(health, ChannelHealth{ChannelID: target.ChannelID, ChannelName: name, UpstreamModel: target.UpstreamModel, Health: service.selector.Health(target.ChannelID, target.UpstreamModel)})
+			for _, format := range effectiveFormats(channel, model) {
+				key := [3]string{target.ChannelID, target.ModelID, format}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				health = append(health, ChannelHealth{
+					ChannelID: channel.ID, ChannelName: channel.Name, ModelID: model.ID,
+					ModelName: model.UpstreamName, Format: format,
+					Health: service.selector.Health(channel.ID, model.ID, format),
+				})
+			}
 		}
 	}
 	return health, nil

@@ -21,14 +21,13 @@ import (
 // upstreamCall is one open attempt: the decoded stream or body of a single key on a single
 // candidate.
 type upstreamCall struct {
-	endpoint  endpoint
-	candidate routing.Candidate
-	key       routing.Key
-	reader    *codec.Reader
-	decoder   codec.StreamDecoder
-	response  *model.Response
-	losses    []model.Loss
-	body      io.Closer
+	endpoint endpoint
+	key      routing.Key
+	reader   *codec.Reader
+	decoder  codec.StreamDecoder
+	response *model.Response
+	losses   []model.Loss
+	body     io.Closer
 }
 
 func (call *upstreamCall) close() {
@@ -37,7 +36,7 @@ func (call *upstreamCall) close() {
 	}
 }
 
-func (state *call) openUpstream(ctx context.Context, prepared *prepared, candidate routing.Candidate, key routing.Key) (*upstreamCall, *model.Error, string) {
+func (state *call) openUpstream(ctx context.Context, prepared *prepared, key routing.Key) (*upstreamCall, *model.Error, string) {
 	endpoint := prepared.endpoint
 	endpointURL := endpoint.endpoint.URL(endpoint.endpoint.BaseURL, prepared.upstreamModel, prepared.stream)
 	endpointURL = endpoint.endpoint.ApplyQuery(endpointURL, key.Secret)
@@ -72,7 +71,7 @@ func (state *call) openUpstream(ctx context.Context, prepared *prepared, candida
 		failure, field := state.pipeline.upstreamFailure(response, endpoint.channel, key)
 		return nil, failure, field
 	}
-	call := &upstreamCall{endpoint: endpoint, candidate: candidate, key: key}
+	call := &upstreamCall{endpoint: endpoint, key: key}
 	if prepared.stream || strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		stream := newIdleReader(response.Body, state.pipeline.settings.StreamIdle)
 		reader, err := codec.NewReader(stream, state.pipeline.settings.MaxStreamBytes)

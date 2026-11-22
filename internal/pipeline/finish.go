@@ -43,13 +43,13 @@ func (pipeline *Pipeline) refuse(state *call, kind model.Format, writer Writer, 
 
 // settle records the final accounting, stores the online run and asynchronous outbox entry in the
 // seal transaction, and moves the call to its terminal state.
-func (state *call) settle(stateName string, failure *model.Error, usage *model.Usage, channel *entity.Channel) bool {
+func (state *call) settle(stateName string, failure *model.Error, usage *model.Usage, modelEntry *entity.Model) bool {
 	record := state.recorder.Call()
 	record.Attempts = state.attempts
 	record.DurationMilliseconds = int(time.Since(state.started).Milliseconds())
-	if channel != nil {
-		record.Currency = channel.Currency
-		record.CostMicros = cost(channel, record.UpstreamModel, usage)
+	if modelEntry != nil {
+		record.Currency = modelEntry.Currency
+		record.CostMicros = cost(modelEntry, usage)
 	}
 	if usage != nil {
 		record.InputTokens, record.OutputTokens = usage.Input, usage.Output

@@ -14,6 +14,7 @@ export interface ConsoleAttemptView {
   end_ms: number;
   first_token_ms: number;
   key_id: string;
+  model_id: string;
   result: string;
   start_ms: number;
   upstream_model: string;

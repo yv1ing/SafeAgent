@@ -15,8 +15,9 @@ for _ in $(seq 1 60); do
 done
 docker compose -f "$lab/docker-compose.yml" exec -T database pg_isready -U safeagent -d safeagent >/dev/null
 
-if ! docker compose -f "$lab/docker-compose.yml" exec -T database \
-  psql -U safeagent -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'safeagent_integration'" | grep -q 1; then
+exists=$(docker compose -f "$lab/docker-compose.yml" exec -T database \
+  psql -U safeagent -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'safeagent_integration'")
+if [ "$exists" != "1" ]; then
   docker compose -f "$lab/docker-compose.yml" exec -T database createdb -U safeagent safeagent_integration
 fi
 

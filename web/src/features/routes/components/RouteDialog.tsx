@@ -21,7 +21,7 @@ export function RouteDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
-  const channels = useListChannelOptions(projectId);
+  const channels = useListChannelOptions(projectId, { query: { refetchOnMount: 'always' } });
   const [name, setName] = useState(route?.name ?? '');
   const [targets, setTargets] = useState(route?.targets ?? []);
   return (

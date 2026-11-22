@@ -7,8 +7,9 @@
  */
 
 export interface ConsoleChannelEndpointView {
+  /** Overrides the provider base URL for this format */
   base_url?: string;
-  disabled?: boolean;
   format: string;
+  /** Overrides the provider path for this format */
   path?: string;
 }

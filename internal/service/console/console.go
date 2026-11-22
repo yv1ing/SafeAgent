@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -14,6 +15,10 @@ import (
 )
 
 const MaximumNameLength = 120
+
+// configurationMu serializes channel, model and route graph edits. The gateway runs one process
+// (the database lease enforces that), so a process mutex is the whole coordination surface.
+var configurationMu sync.Mutex
 
 type Actor struct {
 	UserID        string

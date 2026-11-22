@@ -66,6 +66,7 @@ const MembersPage = lazyRouteComponent(
   () => import('../features/members/MembersPage'),
   'MembersPage',
 );
+const ModelsPage = lazyRouteComponent(() => import('../features/models/ModelsPage'), 'ModelsPage');
 const ChannelsPage = lazyRouteComponent(
   () => import('../features/channels/ChannelsPage'),
   'ChannelsPage',
@@ -244,6 +245,11 @@ const routeTree = rootRoute.addChildren([
       ]),
     ]),
     adminRoute.addChildren([
+      createRoute({
+        getParentRoute: () => adminRoute,
+        path: 'models',
+        component: ModelsPage,
+      }),
       createRoute({
         getParentRoute: () => adminRoute,
         path: 'channels',

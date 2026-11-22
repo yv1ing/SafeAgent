@@ -16,10 +16,11 @@ type Route struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// Target selects one channel and one catalog model. The runtime chooses the concrete format from
+// the channel endpoints and the model formats, so no format is pinned here.
 type Target struct {
 	ChannelID       string `json:"channel_id"`
-	UpstreamModel   string `json:"upstream_model"`
-	Format          string `json:"format,omitempty"`
+	ModelID         string `json:"model_id"`
 	Priority        int    `json:"priority"`
 	Weight          int    `json:"weight"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`

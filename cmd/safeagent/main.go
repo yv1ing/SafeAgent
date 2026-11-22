@@ -81,10 +81,13 @@ func verifyAudit(ctx context.Context, databaseURL string, args []string) error {
 	callID := flags.String("call", "", "verify one call id")
 	projectID := flags.String("project", "", "verify one project")
 	sinceText := flags.String("since", "", "only calls created after a duration (24h) or date (2026-01-02)")
-	limit := flags.Int("limit", 1000, "maximum calls to verify (at most 5000)")
+	limit := flags.Int("limit", 0, "maximum calls to verify; 0 verifies every call")
 	jsonOutput := flags.Bool("json", false, "print a JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *limit < 0 {
+		return fmt.Errorf("-limit must be zero or positive")
 	}
 	scope := repository.AuditScope{ProjectID: *projectID, CallID: *callID, Limit: *limit}
 	if *sinceText != "" {

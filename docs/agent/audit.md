@@ -7,12 +7,12 @@
 | Kind | Emitted when | Payload |
 | --- | --- | --- |
 | `request` | A call is admitted | Added items, request parameters, tools, redaction hits, session source |
-| `attempt` | An upstream attempt starts | Channel, key, format and upstream model |
+| `attempt` | An upstream attempt starts | Channel, catalog model, key, format and upstream model |
 | `attempt_failed` | An attempt fails | Error code, class, channel and key |
 | `attempt_first_token` | The first content arrives | Milliseconds since admission |
 | `tool_call` | The model emits a complete tool call | ID, kind, name, arguments, blocked flag |
 | `tool_result` | A request adds a tool result | Call ID, tool name, error flag |
-| `decision` | A policy or decision-model decision is stored | Phase, action, rule, code, reason |
+| `decision` | A policy or decision-model decision is stored | Stage, action, rule, code, reason |
 | `blocked` | The call is refused | The blocking decision |
 | `cancellation` | The client cancels the call | Code, reason, committed and truncated flags |
 | `response` | A response is stored or withheld | Response, ledger, committed, partial, truncated and blocked flags |
@@ -31,7 +31,7 @@ auditKey = HMAC-SHA256(instanceSecret, "SafeAgent/audit-chain/key/v1")
 material = canonicalJSON({
   alg: "HMAC-SHA256", v: 1,
   prev_hash, call_id, sequence, project_id, kind,
-  schema_version: 5,
+  schema_version: 6,
   created_at_micros,
   payload: canonicalJSON(sanitizedPayload)
 })

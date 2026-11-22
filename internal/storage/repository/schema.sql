@@ -62,18 +62,35 @@ CREATE TABLE IF NOT EXISTS agent_keys (
 );
 CREATE INDEX IF NOT EXISTS agent_keys_project ON agent_keys (project_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS models (
+    id text PRIMARY KEY,
+    provider_id text NOT NULL,
+    upstream_name text NOT NULL,
+    display_name text NOT NULL DEFAULT '',
+    kind text NOT NULL,
+    formats jsonb NOT NULL DEFAULT '[]',
+    input_price bigint NOT NULL DEFAULT 0,
+    output_price bigint NOT NULL DEFAULT 0,
+    cache_read_price bigint NOT NULL DEFAULT 0,
+    cache_write_price bigint NOT NULL DEFAULT 0,
+    currency text NOT NULL DEFAULT 'USD',
+    enabled boolean NOT NULL DEFAULT true,
+    version bigint NOT NULL DEFAULT 1,
+    created_at timestamptz NOT NULL,
+    UNIQUE (provider_id, upstream_name),
+    CONSTRAINT models_kind CHECK (kind IN ('generation','embedding','moderation'))
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id text PRIMARY KEY,
     name text NOT NULL,
     provider_id text NOT NULL,
-    custom boolean NOT NULL DEFAULT false,
     endpoints jsonb NOT NULL DEFAULT '[]',
+    model_ids jsonb NOT NULL DEFAULT '[]',
     capability_overrides jsonb NOT NULL DEFAULT '[]',
     headers jsonb NOT NULL DEFAULT '{}',
-    models jsonb NOT NULL DEFAULT '[]',
     forward_headers jsonb NOT NULL DEFAULT '[]',
     default_max_output_tokens integer NOT NULL DEFAULT 0,
-    currency text NOT NULL DEFAULT 'USD',
     timeout_seconds integer NOT NULL DEFAULT 0,
     first_byte_timeout_seconds integer NOT NULL DEFAULT 0,
     allow_private_network boolean NOT NULL DEFAULT false,
@@ -139,6 +156,7 @@ CREATE TABLE IF NOT EXISTS calls (
     client_transport text NOT NULL DEFAULT '',
     endpoint_format text NOT NULL DEFAULT '',
     public_model text NOT NULL DEFAULT '',
+    model_id text NOT NULL DEFAULT '',
     upstream_model text NOT NULL DEFAULT '',
     channel_id text NOT NULL DEFAULT '',
     state text NOT NULL,
@@ -199,7 +217,7 @@ CREATE TABLE IF NOT EXISTS events (
     sequence bigint NOT NULL,
     project_id text NOT NULL,
     kind text NOT NULL,
-    schema_version integer NOT NULL DEFAULT 5,
+    schema_version integer NOT NULL DEFAULT 6,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL,
     prev_hash text NOT NULL DEFAULT '',

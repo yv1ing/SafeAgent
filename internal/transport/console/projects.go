@@ -18,7 +18,7 @@ type ProjectView struct {
 	RequestsPerMinute      int    `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
 	Concurrency            int    `json:"concurrency" required:"true" description:"0 means unlimited"`
 	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
-	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
+	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
 	ActivePolicyVersion    int64  `json:"active_policy_version" required:"true"`
 	Version                int64  `json:"version" required:"true"`
 	CreatedAt              string `json:"created_at" required:"true"`
@@ -37,7 +37,7 @@ type ProjectCreate struct {
 	RequestsPerMinute      *int   `json:"requests_per_minute,omitempty"`
 	Concurrency            *int   `json:"concurrency,omitempty"`
 	DailyTokenQuota        *int64 `json:"daily_token_quota,omitempty"`
-	DefaultMaxOutputTokens *int   `json:"default_max_output_tokens,omitempty" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
+	DefaultMaxOutputTokens *int   `json:"default_max_output_tokens,omitempty" description:"Applied when an upstream requires an output limit and the client omits one"`
 }
 
 type ProjectUpdate struct {
@@ -46,7 +46,7 @@ type ProjectUpdate struct {
 	RequestsPerMinute      int    `json:"requests_per_minute" required:"true"`
 	Concurrency            int    `json:"concurrency" required:"true"`
 	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true"`
-	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied to an Anthropic Messages upstream when the client omits a limit"`
+	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
 	Version                int64  `json:"version" required:"true"`
 }
 

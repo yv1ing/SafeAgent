@@ -12,6 +12,8 @@ export interface ConsoleHealthView {
   channel_name: string;
   consecutive_failures: number;
   cooldown_seconds: number;
+  format: string;
+  model_id: string;
+  model_name: string;
   state: ConsoleHealthViewState;
-  upstream_model: string;
 }

@@ -29,7 +29,10 @@ import type {
   ConsoleCreateChannelKeyInput,
   ConsoleDiscoveryView,
   ConsoleHealthView,
+  ConsoleImportModelsView,
   ConsoleUpdateChannelInput,
+  DiscoverChannelModelsBody,
+  ImportChannelModelsBody,
 } from '../models';
 
 import { request } from '../../client.ts';
@@ -264,6 +267,82 @@ export const useCreateChannel = <TError = ConsoleAPIError, TContext = unknown>(
 > => {
   return useMutation(getCreateChannelMutationOptions(options), queryClient);
 };
+export const getDeleteChannelUrl = (channelId: string) => {
+  return `/console/api/channels/${channelId}`;
+};
+
+export const deleteChannel = async (
+  channelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<void> => {
+  return request<void>(getDeleteChannelUrl(channelId), {
+    ...options,
+    method: 'DELETE',
+  });
+};
+
+export const getDeleteChannelMutationKey = () => ['deleteChannel'] as const;
+
+export const getDeleteChannelMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteChannel>>,
+    TError,
+    DeleteChannelMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteChannel>>,
+  TError,
+  DeleteChannelMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteChannelMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteChannel>>,
+    DeleteChannelMutationVariables
+  > = (props) => {
+    const { channelId } = props ?? {};
+
+    return deleteChannel(channelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteChannelMutationResult = NonNullable<Awaited<ReturnType<typeof deleteChannel>>>;
+
+export type DeleteChannelMutationError = ConsoleAPIError;
+export type DeleteChannelMutationVariables = { channelId: string };
+
+export const useDeleteChannel = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteChannel>>,
+      TError,
+      DeleteChannelMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteChannel>>,
+  TError,
+  DeleteChannelMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteChannelMutationOptions(options), queryClient);
+};
 export const getGetChannelUrl = (channelId: string) => {
   return `/console/api/channels/${channelId}`;
 };
@@ -466,11 +545,14 @@ export const getDiscoverChannelModelsUrl = (channelId: string) => {
 
 export const discoverChannelModels = async (
   channelId: string,
+  discoverChannelModelsBody: DiscoverChannelModelsBody,
   options?: Parameters<typeof request>[1],
 ): Promise<ConsoleDiscoveryView> => {
   return request<ConsoleDiscoveryView>(getDiscoverChannelModelsUrl(channelId), {
     ...options,
     method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(discoverChannelModelsBody),
   });
 };
 
@@ -504,9 +586,9 @@ export const getDiscoverChannelModelsMutationOptions = <
     Awaited<ReturnType<typeof discoverChannelModels>>,
     DiscoverChannelModelsMutationVariables
   > = (props) => {
-    const { channelId } = props ?? {};
+    const { channelId, data } = props ?? {};
 
-    return discoverChannelModels(channelId, requestOptions);
+    return discoverChannelModels(channelId, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -515,9 +597,12 @@ export const getDiscoverChannelModelsMutationOptions = <
 export type DiscoverChannelModelsMutationResult = NonNullable<
   Awaited<ReturnType<typeof discoverChannelModels>>
 >;
-
+export type DiscoverChannelModelsMutationBody = DiscoverChannelModelsBody;
 export type DiscoverChannelModelsMutationError = ConsoleAPIError;
-export type DiscoverChannelModelsMutationVariables = { channelId: string };
+export type DiscoverChannelModelsMutationVariables = {
+  channelId: string;
+  data: DiscoverChannelModelsBody;
+};
 
 export const useDiscoverChannelModels = <TError = ConsoleAPIError, TContext = unknown>(
   options?: {
@@ -655,6 +740,90 @@ export function useGetChannelHealth<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getImportChannelModelsUrl = (channelId: string) => {
+  return `/console/api/channels/${channelId}/import-models`;
+};
+
+export const importChannelModels = async (
+  channelId: string,
+  importChannelModelsBody: ImportChannelModelsBody,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleImportModelsView> => {
+  return request<ConsoleImportModelsView>(getImportChannelModelsUrl(channelId), {
+    ...options,
+    method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(importChannelModelsBody),
+  });
+};
+
+export const getImportChannelModelsMutationKey = () => ['importChannelModels'] as const;
+
+export const getImportChannelModelsMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof importChannelModels>>,
+    TError,
+    ImportChannelModelsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof importChannelModels>>,
+  TError,
+  ImportChannelModelsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getImportChannelModelsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof importChannelModels>>,
+    ImportChannelModelsMutationVariables
+  > = (props) => {
+    const { channelId, data } = props ?? {};
+
+    return importChannelModels(channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ImportChannelModelsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof importChannelModels>>
+>;
+export type ImportChannelModelsMutationBody = ImportChannelModelsBody;
+export type ImportChannelModelsMutationError = ConsoleAPIError;
+export type ImportChannelModelsMutationVariables = {
+  channelId: string;
+  data: ImportChannelModelsBody;
+};
+
+export const useImportChannelModels = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof importChannelModels>>,
+      TError,
+      ImportChannelModelsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof importChannelModels>>,
+  TError,
+  ImportChannelModelsMutationVariables,
+  TContext
+> => {
+  return useMutation(getImportChannelModelsMutationOptions(options), queryClient);
+};
 export const getListChannelKeysUrl = (channelId: string) => {
   return `/console/api/channels/${channelId}/keys`;
 };

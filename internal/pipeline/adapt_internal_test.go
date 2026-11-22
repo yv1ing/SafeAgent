@@ -8,6 +8,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/messages"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
+	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 )
 
 func rawEndpoint(format model.Format, capability model.Capability, compat model.Compat) endpoint {
@@ -115,5 +116,20 @@ func TestRawSafeRequiresFormatPrerequisites(t *testing.T) {
 	}
 	if !rawSafe(&model.Request{}, model.Chat) || !rawSafe(&model.Request{}, model.Gemini) {
 		t.Fatal("Chat and Gemini raw requests need no extra prerequisite")
+	}
+}
+
+func TestMultiChoiceRequiresEveryTargetToMatchTheClientFormat(t *testing.T) {
+	state := &call{kind: model.Chat}
+	same := []routing.Target{{Format: string(model.Chat)}, {Format: string(model.Chat)}}
+	if !state.hasSameFormat(same) {
+		t.Fatal("a route whose targets all use the client format must allow the raw path")
+	}
+	mixed := []routing.Target{{Format: string(model.Chat)}, {Format: string(model.Responses)}}
+	if state.hasSameFormat(mixed) {
+		t.Fatal("a route with any cross-format target must not be treated as same-format")
+	}
+	if state.hasSameFormat(nil) {
+		t.Fatal("an empty route has no same-format target")
 	}
 }

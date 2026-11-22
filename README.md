@@ -126,7 +126,7 @@ The example configuration enables secure cookies. The two deployment modes need 
 The first start creates the schema and prints the initial administrator account and password once on standard output. Then:
 
 1. Open <http://127.0.0.1:8080/console/> and sign in with that password.
-2. Create a project, channel, route and agent key.
+2. Add catalog models, channels, a route and an agent key.
 3. Connect an agent as described in the [getting-started guide](docs/human/getting-started.md).
 
 ## Deployment and boundaries

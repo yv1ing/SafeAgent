@@ -6,40 +6,29 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
-type ChannelModelView struct {
-	Name            string `json:"name" required:"true"`
-	InputPrice      int64  `json:"input_price"`
-	OutputPrice     int64  `json:"output_price"`
-	CacheReadPrice  int64  `json:"cache_read_price"`
-	CacheWritePrice int64  `json:"cache_write_price"`
-}
-
 type ChannelEndpointView struct {
-	Format   string `json:"format" required:"true"`
-	BaseURL  string `json:"base_url,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
+	Format  string `json:"format" required:"true"`
+	BaseURL string `json:"base_url,omitempty" description:"Overrides the provider base URL for this format"`
+	Path    string `json:"path,omitempty" description:"Overrides the provider path for this format"`
 }
 
 type CapabilityOverrideView struct {
-	Format string `json:"format" required:"true"`
-	Field  string `json:"field" required:"true"`
-	Reason string `json:"reason,omitempty"`
+	ModelID string `json:"model_id" required:"true"`
+	Format  string `json:"format" required:"true"`
+	Field   string `json:"field" required:"true"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type ChannelView struct {
 	ID                      string                   `json:"id" required:"true"`
 	Name                    string                   `json:"name" required:"true"`
 	ProviderID              string                   `json:"provider_id" required:"true"`
-	Custom                  bool                     `json:"custom"`
-	Formats                 []string                 `json:"formats"`
-	Endpoints               []ChannelEndpointView    `json:"endpoints"`
+	Endpoints               []ChannelEndpointView    `json:"endpoints" required:"true"`
+	ModelIDs                []string                 `json:"model_ids" required:"true"`
 	CapabilityOverrides     []CapabilityOverrideView `json:"capability_overrides"`
 	Headers                 map[string]string        `json:"headers"`
 	ForwardHeaders          []string                 `json:"forward_headers"`
 	DefaultMaxOutputTokens  int                      `json:"default_max_output_tokens"`
-	Models                  []ChannelModelView       `json:"models"`
-	Currency                string                   `json:"currency"`
 	TimeoutSeconds          int                      `json:"timeout_seconds"`
 	FirstByteTimeoutSeconds int                      `json:"first_byte_timeout_seconds"`
 	AllowPrivateNetwork     bool                     `json:"allow_private_network"`
@@ -50,12 +39,11 @@ type ChannelView struct {
 type ChannelInput struct {
 	Name                    string                `json:"name" required:"true"`
 	ProviderID              string                `json:"provider_id" required:"true"`
-	Endpoints               []ChannelEndpointView `json:"endpoints"`
+	Endpoints               []ChannelEndpointView `json:"endpoints" required:"true" description:"Ordered provider formats; presence enables the format"`
+	ModelIDs                []string              `json:"model_ids" required:"true"`
 	Headers                 map[string]string     `json:"headers"`
 	ForwardHeaders          []string              `json:"forward_headers"`
 	DefaultMaxOutputTokens  int                   `json:"default_max_output_tokens" description:"Applied to an upstream that requires an output limit when the client omits one"`
-	Models                  []ChannelModelView    `json:"models"`
-	Currency                string                `json:"currency"`
 	TimeoutSeconds          int                   `json:"timeout_seconds"`
 	FirstByteTimeoutSeconds int                   `json:"first_byte_timeout_seconds"`
 	AllowPrivateNetwork     bool                  `json:"allow_private_network"`
@@ -75,15 +63,39 @@ type ChannelKeyView struct {
 	Enabled bool   `json:"enabled"`
 }
 
+type ChannelModelOption struct {
+	ID          string   `json:"id" required:"true"`
+	Name        string   `json:"name" required:"true"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Kind        string   `json:"kind" required:"true" enum:"generation,embedding,moderation"`
+	Formats     []string `json:"formats"`
+}
+
 type ChannelOption struct {
-	ID      string   `json:"id" required:"true"`
-	Name    string   `json:"name" required:"true"`
-	Formats []string `json:"formats"`
-	Models  []string `json:"models"`
+	ID      string               `json:"id" required:"true"`
+	Name    string               `json:"name" required:"true"`
+	Formats []string             `json:"formats"`
+	Models  []ChannelModelOption `json:"models"`
+}
+
+type DiscoveryInput struct {
+	Format string `json:"format" required:"true"`
 }
 
 type DiscoveryView struct {
 	Models []string `json:"models"`
+}
+
+type ImportModelsInput struct {
+	Format string   `json:"format" required:"true"`
+	Models []string `json:"models" required:"true"`
+}
+
+type ImportModelsView struct {
+	Channel ChannelView `json:"channel" required:"true"`
+	Added   []string    `json:"added"`
+	Created []string    `json:"created"`
+	Skipped []string    `json:"skipped"`
 }
 
 type ProviderView struct {
@@ -97,7 +109,9 @@ type ProviderView struct {
 type HealthView struct {
 	ChannelID           string `json:"channel_id" required:"true"`
 	ChannelName         string `json:"channel_name" required:"true"`
-	UpstreamModel       string `json:"upstream_model" required:"true"`
+	ModelID             string `json:"model_id" required:"true"`
+	ModelName           string `json:"model_name" required:"true"`
+	Format              string `json:"format" required:"true"`
 	State               string `json:"state" required:"true" enum:"closed,open,half_open"`
 	ConsecutiveFailures int    `json:"consecutive_failures" required:"true"`
 	CooldownSeconds     int64  `json:"cooldown_seconds" required:"true"`
@@ -123,21 +137,17 @@ type channelKeyPath struct {
 }
 
 func healthView(value *service.ChannelHealth) HealthView {
-	return HealthView{ChannelID: value.ChannelID, ChannelName: value.ChannelName, UpstreamModel: value.UpstreamModel, State: string(value.State), ConsecutiveFailures: value.Failures, CooldownSeconds: value.Cooldown}
-}
-
-func channelModelViews(models []entity.ChannelModel) []ChannelModelView {
-	result := make([]ChannelModelView, 0, len(models))
-	for _, entry := range models {
-		result = append(result, ChannelModelView{Name: entry.Name, InputPrice: entry.InputPrice, OutputPrice: entry.OutputPrice, CacheReadPrice: entry.CacheReadPrice, CacheWritePrice: entry.CacheWritePrice})
+	return HealthView{
+		ChannelID: value.ChannelID, ChannelName: value.ChannelName, ModelID: value.ModelID,
+		ModelName: value.ModelName, Format: value.Format, State: string(value.State),
+		ConsecutiveFailures: value.Failures, CooldownSeconds: value.Cooldown,
 	}
-	return result
 }
 
 func channelEndpointViews(endpoints []entity.ChannelEndpoint) []ChannelEndpointView {
 	result := make([]ChannelEndpointView, 0, len(endpoints))
-	for _, entry := range endpoints {
-		result = append(result, ChannelEndpointView{Format: entry.Format, BaseURL: entry.BaseURL, Path: entry.Path, Disabled: entry.Disabled})
+	for _, endpoint := range endpoints {
+		result = append(result, ChannelEndpointView{Format: endpoint.Format, BaseURL: endpoint.BaseURL, Path: endpoint.Path})
 	}
 	return result
 }
@@ -145,37 +155,34 @@ func channelEndpointViews(endpoints []entity.ChannelEndpoint) []ChannelEndpointV
 func channelOverrideViews(overrides []entity.CapabilityOverride) []CapabilityOverrideView {
 	result := make([]CapabilityOverrideView, 0, len(overrides))
 	for _, entry := range overrides {
-		result = append(result, CapabilityOverrideView{Format: entry.Format, Field: entry.Field, Reason: entry.Reason})
+		result = append(result, CapabilityOverrideView{ModelID: entry.ModelID, Format: entry.Format, Field: entry.Field, Reason: entry.Reason})
 	}
 	return result
 }
 
-func channelView(value *entity.Channel, formats []string) ChannelView {
+func channelView(value *entity.Channel) ChannelView {
 	return ChannelView{
-		ID: value.ID, Name: value.Name, ProviderID: value.ProviderID, Custom: value.Custom,
-		Formats: formats, Endpoints: channelEndpointViews(value.Endpoints), CapabilityOverrides: channelOverrideViews(value.CapabilityOverrides),
-		Headers: service.MaskHeaders(value.Headers), ForwardHeaders: value.ForwardHeaders,
-		DefaultMaxOutputTokens: value.DefaultMaxOutputTokens, Models: channelModelViews(value.Models),
-		Currency: value.Currency, TimeoutSeconds: value.TimeoutSeconds, FirstByteTimeoutSeconds: value.FirstByteTimeoutSeconds,
-		AllowPrivateNetwork: value.AllowPrivateNetwork, Enabled: value.Enabled, Version: value.Version,
+		ID: value.ID, Name: value.Name, ProviderID: value.ProviderID,
+		Endpoints: channelEndpointViews(value.Endpoints), ModelIDs: nonNil(value.ModelIDs),
+		CapabilityOverrides: channelOverrideViews(value.CapabilityOverrides),
+		Headers:             service.MaskHeaders(value.Headers), ForwardHeaders: value.ForwardHeaders,
+		DefaultMaxOutputTokens: value.DefaultMaxOutputTokens, TimeoutSeconds: value.TimeoutSeconds,
+		FirstByteTimeoutSeconds: value.FirstByteTimeoutSeconds, AllowPrivateNetwork: value.AllowPrivateNetwork,
+		Enabled: value.Enabled, Version: value.Version,
 	}
 }
 
 func (input ChannelInput) service() service.ChannelInput {
-	models := make([]entity.ChannelModel, 0, len(input.Models))
-	for _, entry := range input.Models {
-		models = append(models, entity.ChannelModel{Name: entry.Name, InputPrice: entry.InputPrice, OutputPrice: entry.OutputPrice, CacheReadPrice: entry.CacheReadPrice, CacheWritePrice: entry.CacheWritePrice})
-	}
 	endpoints := make([]entity.ChannelEndpoint, 0, len(input.Endpoints))
-	for _, entry := range input.Endpoints {
-		endpoints = append(endpoints, entity.ChannelEndpoint{Format: entry.Format, BaseURL: entry.BaseURL, Path: entry.Path, Disabled: entry.Disabled})
+	for _, endpoint := range input.Endpoints {
+		endpoints = append(endpoints, entity.ChannelEndpoint{Format: endpoint.Format, BaseURL: endpoint.BaseURL, Path: endpoint.Path})
 	}
 	return service.ChannelInput{
-		Name: input.Name, ProviderID: input.ProviderID, Endpoints: endpoints,
+		Name: input.Name, ProviderID: input.ProviderID, Endpoints: endpoints, ModelIDs: input.ModelIDs,
 		Headers: input.Headers, ForwardHeaders: input.ForwardHeaders,
-		DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Models: models, Currency: input.Currency,
-		TimeoutSeconds: input.TimeoutSeconds, FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds,
-		AllowPrivateNetwork: input.AllowPrivateNetwork, Enabled: input.Enabled, Version: input.Version,
+		DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, TimeoutSeconds: input.TimeoutSeconds,
+		FirstByteTimeoutSeconds: input.FirstByteTimeoutSeconds, AllowPrivateNetwork: input.AllowPrivateNetwork,
+		Enabled: input.Enabled, Version: input.Version,
 	}
 }
 
@@ -183,8 +190,16 @@ func channelKeyView(key *entity.ChannelKey) ChannelKeyView {
 	return ChannelKeyView{ID: key.ID, Label: key.Label, Suffix: key.Suffix, Enabled: key.Enabled}
 }
 
+func channelModelOptionView(value service.ChannelModelOption) ChannelModelOption {
+	return ChannelModelOption{ID: value.ID, Name: value.Name, DisplayName: value.DisplayName, Kind: value.Kind, Formats: nonNil(value.Formats)}
+}
+
 func channelOptionView(value *service.ChannelOption) ChannelOption {
-	return ChannelOption{ID: value.ID, Name: value.Name, Formats: value.Formats, Models: nonNil(value.Models)}
+	models := make([]ChannelModelOption, 0, len(value.Models))
+	for _, model := range value.Models {
+		models = append(models, channelModelOptionView(model))
+	}
+	return ChannelOption{ID: value.ID, Name: value.Name, Formats: nonNil(value.Formats), Models: models}
 }
 
 func providerView(value *service.ProviderOption) ProviderView {
@@ -205,7 +220,7 @@ func (console *Console) registerChannels() {
 			return nil, err
 		}
 		return viewAll(channels, func(channel *entity.Channel) ChannelView {
-			return channelView(channel, console.Channel.FormatsOf(*channel))
+			return channelView(channel)
 		}), nil
 	})
 	console.add("POST", "/channels", "createChannel", ChannelInput{}, ChannelView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
@@ -217,14 +232,14 @@ func (console *Console) registerChannels() {
 		if err != nil {
 			return nil, err
 		}
-		return channelView(created, console.Channel.FormatsOf(*created)), nil
+		return channelView(created), nil
 	})
 	console.add("GET", "/channels/{channel_id}", "getChannel", channelPath{}, ChannelView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
 		found, err := console.Channel.Get(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"))
 		if err != nil {
 			return nil, err
 		}
-		return channelView(found, console.Channel.FormatsOf(*found)), nil
+		return channelView(found), nil
 	})
 	console.add("PUT", "/channels/{channel_id}", "updateChannel", updateChannelInput{}, ChannelView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
 		var input ChannelInput
@@ -235,14 +250,39 @@ func (console *Console) registerChannels() {
 		if err != nil {
 			return nil, err
 		}
-		return channelView(updated, console.Channel.FormatsOf(*updated)), nil
+		return channelView(updated), nil
 	})
-	console.add("POST", "/channels/{channel_id}/discover-models", "discoverChannelModels", channelPath{}, DiscoveryView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		models, err := console.Channel.DiscoverModels(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"))
+	console.add("DELETE", "/channels/{channel_id}", "deleteChannel", channelPath{}, nil, func(ctx *gin.Context, identity *Identity) (any, error) {
+		_, err := console.Channel.Delete(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"))
+		return nil, err
+	})
+	console.add("POST", "/channels/{channel_id}/discover-models", "discoverChannelModels", struct {
+		channelPath
+		DiscoveryInput
+	}{}, DiscoveryView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
+		var input DiscoveryInput
+		if err := decode(ctx, &input); err != nil {
+			return nil, err
+		}
+		models, err := console.Channel.DiscoverModels(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"), input.Format)
 		if err != nil {
 			return nil, err
 		}
 		return DiscoveryView{Models: nonNil(models)}, nil
+	})
+	console.add("POST", "/channels/{channel_id}/import-models", "importChannelModels", struct {
+		channelPath
+		ImportModelsInput
+	}{}, ImportModelsView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
+		var input ImportModelsInput
+		if err := decode(ctx, &input); err != nil {
+			return nil, err
+		}
+		result, err := console.Channel.ImportModels(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"), service.ImportModelsInput{Format: input.Format, Names: input.Models})
+		if err != nil {
+			return nil, err
+		}
+		return ImportModelsView{Channel: channelView(result.Channel), Added: nonNil(result.Added), Created: nonNil(result.Created), Skipped: nonNil(result.Skipped)}, nil
 	})
 	console.add("GET", "/channels/{channel_id}/health", "getChannelHealth", channelPath{}, []HealthView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
 		health, err := console.Channel.Health(ctx.Request.Context(), identity.actor(), ctx.Param("channel_id"))

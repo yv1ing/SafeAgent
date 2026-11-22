@@ -55,15 +55,15 @@ The native Gemini deep task needs a real Gemini upstream; without one it is reco
 
 The policy suite saves request-phase, tool-result and tool-call rules, then sends traffic through every client format.
 
-| Blocked phase           | Live result                       |
-| ----------------------- | --------------------------------- |
-| Request                 | 403                               |
-| Tool result             | 403                               |
-| Tool call before commit | 403                               |
-| Tool call after commit  | 200, ending with a protocol error |
-| Response                | covered by unit tests             |
+| Blocked phase           | Live result                                                 |
+| ----------------------- | ----------------------------------------------------------- |
+| Request                 | 403                                                         |
+| Tool result             | 403                                                         |
+| Tool call before commit | 403                                                         |
+| Tool call after commit  | 200 with the block reason; unit tests cover the error frame |
+| Response                | covered by unit tests                                       |
 
-The live suite does not force a model to emit a blockable response. It restores the empty policy at the end.
+The live suite does not force the model to place text before the tool call, so it accepts a pre-commit or post-commit block. It does not force a blockable response either. It restores the empty policy at the end.
 
 The diagnosis suite sends an injection phrase, an e-mail address and an exfiltration URL, waits for asynchronous analysis, and checks the redaction hit, both findings, complete coverage and an `unsafe` verdict. It also checks the console timeline and audit-integrity status, confirming that online decisions, events and diagnosis come from the same record.
 
@@ -71,11 +71,11 @@ The diagnosis suite sends an injection phrase, an e-mail address and an exfiltra
 
 The security suite uses separate projects and checks invalid keys, cross-project isolation, rate and token quotas, member and administrator permissions, raw-event access and the operation log.
 
-The fault suite uses a local deterministic upstream and checks failover before content, behavior after content, truncated streams, tool holds, header forwarding, route output limits, rejection cases and multi-choice rules.
+The fault suite uses a local deterministic upstream and checks failover before content, behavior after content, truncated streams, tool holds, header forwarding, route output limits, rejection cases, and both multi-choice pass-through and rejection.
 
 ## Console and load
 
-The browser suite visits every page at desktop and mobile widths and runs desktop flows for projects, channels, routes, keys, policies, redaction rules, users and members. It checks page errors, failed API calls, empty bodies and horizontal overflow.
+The browser suite visits every page at desktop and mobile widths and runs desktop flows for projects, models, channels, routes, keys, policies, redaction rules, users and members. Desktop checks page errors, failed API calls, headings and empty bodies; mobile also checks horizontal overflow.
 
 The load suite compares the same scenario directly against the provider and through the gateway, on every native route plus a cross-format sample. It checks scenario agreement, baseline validity, gateway error classes and the error-rate delta.
 

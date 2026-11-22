@@ -1,5 +1,6 @@
 import {
   Activity,
+  Boxes,
   Cable,
   FileClock,
   FolderKanban,
@@ -151,10 +152,10 @@ export const projectNav: ProjectNavGroup[] = [
 
 export const projectSections = projectNav.flatMap((group) => group.items);
 
-type GlobalPath = '/monitor' | '/projects' | '/channels' | '/users' | '/operations';
+type GlobalPath = '/monitor' | '/projects' | '/models' | '/channels' | '/users' | '/operations';
 
 export interface GlobalNavItem {
-  key: 'monitor' | 'projects' | 'channels' | 'users' | 'operations';
+  key: 'monitor' | 'projects' | 'models' | 'channels' | 'users' | 'operations';
   to: GlobalPath;
   icon: LucideIcon;
   label: (t: Messages) => string;
@@ -177,6 +178,13 @@ export const workspaceNav: GlobalNavItem[] = [
 ];
 
 export const administrationNav: GlobalNavItem[] = [
+  {
+    key: 'models',
+    to: '/models',
+    icon: Boxes,
+    label: (t) => t.nav.models,
+    admin: true,
+  },
   {
     key: 'channels',
     to: '/channels',
@@ -214,6 +222,7 @@ export function projectSectionFromPath(pathname: string) {
 export function globalPageLabelKey(pathname: string) {
   const path = normalizePath(pathname);
   if (path.startsWith('/monitor')) return 'monitor' as const;
+  if (path.startsWith('/models')) return 'models' as const;
   if (path.startsWith('/channels')) return 'channels' as const;
   if (path.startsWith('/users')) return 'users' as const;
   if (path.startsWith('/operations')) return 'operations' as const;

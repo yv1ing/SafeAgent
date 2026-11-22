@@ -17,6 +17,7 @@ type CallView struct {
 	AgentKeyID             string     `json:"agent_key_id" required:"true"`
 	ClientFormat           string     `json:"client_format" required:"true"`
 	PublicModel            string     `json:"public_model" required:"true"`
+	ModelID                string     `json:"model_id" required:"true"`
 	UpstreamModel          string     `json:"upstream_model" required:"true"`
 	ChannelID              string     `json:"channel_id" required:"true"`
 	State                  string     `json:"state" required:"true" enum:"running,completed,failed,blocked,cancelled,interrupted,rejected"`
@@ -265,6 +266,7 @@ type TimelineEntryView struct {
 	ToolName      string            `json:"tool_name" required:"true"`
 	IsError       bool              `json:"is_error" required:"true"`
 	ChannelID     string            `json:"channel_id" required:"true"`
+	ModelID       string            `json:"model_id" required:"true"`
 	UpstreamModel string            `json:"upstream_model" required:"true"`
 	KeyID         string            `json:"key_id" required:"true"`
 	Response      *TimelineResponse `json:"response,omitempty"`
@@ -292,6 +294,7 @@ type AuditIntegrityView struct {
 type AttemptView struct {
 	ChannelID        string `json:"channel_id" required:"true"`
 	ChannelName      string `json:"channel_name" required:"true"`
+	ModelID          string `json:"model_id" required:"true"`
 	UpstreamModel    string `json:"upstream_model" required:"true"`
 	KeyID            string `json:"key_id" required:"true"`
 	StartOffset      int64  `json:"start_ms" required:"true"`
@@ -365,7 +368,7 @@ func callView(value *entity.Call) CallView {
 	}
 	return CallView{
 		ID: value.ID, AgentKeyID: value.AgentKeyID, ClientFormat: value.ClientFormat, PublicModel: value.PublicModel,
-		UpstreamModel: value.UpstreamModel, ChannelID: value.ChannelID, State: value.State, ErrorCode: value.ErrorCode,
+		ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, ChannelID: value.ChannelID, State: value.State, ErrorCode: value.ErrorCode,
 		Stream: value.Stream, FirstTokenMilliseconds: value.FirstTokenMilliseconds, DurationMilliseconds: value.DurationMilliseconds,
 		InputTokens: value.InputTokens, OutputTokens: value.OutputTokens, CacheReadTokens: value.CacheReadTokens,
 		CacheWriteTokens: value.CacheWriteTokens, ReasoningTokens: value.ReasoningTokens, UsageKnown: value.UsageKnown,
@@ -381,7 +384,7 @@ func eventView(value *entity.Event) EventView {
 }
 
 func attemptView(value *service.CallAttempt) AttemptView {
-	return AttemptView{ChannelID: value.ChannelID, ChannelName: value.ChannelName, UpstreamModel: value.UpstreamModel, KeyID: value.KeyID, StartOffset: value.StartOffset, EndOffset: value.EndOffset, FirstTokenOffset: value.FirstTokenOffset, Result: value.Result, Code: value.Code, Class: value.Class}
+	return AttemptView{ChannelID: value.ChannelID, ChannelName: value.ChannelName, ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, KeyID: value.KeyID, StartOffset: value.StartOffset, EndOffset: value.EndOffset, FirstTokenOffset: value.FirstTokenOffset, Result: value.Result, Code: value.Code, Class: value.Class}
 }
 
 func itemView(value observation.Item, administrator bool) ItemView {
@@ -521,6 +524,7 @@ func timelineView(entry auditevent.Entry) TimelineEntryView {
 	}
 	if entry.Decoded.Attempt != nil {
 		view.ChannelID = entry.Decoded.Attempt.ChannelID
+		view.ModelID = entry.Decoded.Attempt.ModelID
 		view.UpstreamModel = entry.Decoded.Attempt.UpstreamModel
 		view.KeyID = entry.Decoded.Attempt.KeyID
 	}

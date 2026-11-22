@@ -83,8 +83,8 @@ func (state *call) try(channel *entity.Channel, admission routing.Admission) out
 		state.attempts++
 		state.recorder.Call().Attempts = state.attempts
 		state.recorder.Event(auditevent.KindAttempt, auditevent.Attempt{
-			ChannelID: channel.ID, ChannelName: channel.Name, UpstreamModel: candidate.Target.UpstreamModel,
-			Format: candidate.Target.Format, KeyID: key.ID,
+			ChannelID: channel.ID, ChannelName: channel.Name, ModelID: candidate.Target.ModelID,
+			UpstreamModel: candidate.Target.UpstreamModel, Format: candidate.Target.Format, KeyID: key.ID,
 		})
 		result, failure := state.attempt(channel, candidate, key)
 		switch result {
@@ -136,7 +136,7 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	if failure != nil {
 		return attemptFailed, failure
 	}
-	upstream, failure, field := state.openUpstream(ctx, prepared, candidate, key)
+	upstream, failure, field := state.openUpstream(ctx, prepared, key)
 	if field != "" && upstream == nil {
 		if retried, retriedPrepared, retryFailure := state.retryWithoutField(ctx, candidate, key, field); retried != nil {
 			upstream, prepared, failure = retried, retriedPrepared, nil
@@ -153,7 +153,8 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	}
 	defer upstream.close()
 	record := state.recorder.Call()
-	record.ChannelID, record.UpstreamModel, record.Currency = channel.ID, candidate.Target.UpstreamModel, channel.Currency
+	record.ChannelID, record.ModelID, record.UpstreamModel = channel.ID, candidate.Target.ModelID, candidate.Target.UpstreamModel
+	record.Currency = upstream.endpoint.model.Currency
 	record.EndpointFormat = string(upstream.endpoint.format)
 	if state.stream {
 		state.applyLossHeaders(prepared.losses)
@@ -171,16 +172,16 @@ func attemptContext(parent context.Context, channel *entity.Channel) (context.Co
 
 // retryWithoutField drops one request field the upstream rejected and retries the same key once.
 func (state *call) retryWithoutField(ctx context.Context, candidate routing.Candidate, key routing.Key, field string) (*upstreamCall, *prepared, *model.Error) {
-	endpoint, found := state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))]
+	endpoint, found := state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.ModelID, model.Format(candidate.Target.Format))]
 	if !found {
 		return nil, nil, nil
 	}
 	applyCapabilityOverride(&endpoint.endpoint, field)
-	state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))] = endpoint
+	state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.ModelID, model.Format(candidate.Target.Format))] = endpoint
 	removed := model.Loss{Path: field, Code: model.LossCapabilityRemoved, Class: model.LossDegraded, Detail: "the upstream rejected this field; it is now omitted for this channel", To: endpoint.format}
 	state.failureLedger.Losses = append(state.failureLedger.Losses, removed)
 	persist, cancel := persistenceContext()
-	if err := state.pipeline.repository.AddCapabilityOverride(persist, endpoint.channel.ID, string(endpoint.format), field, "rejected by the upstream"); err != nil {
+	if err := state.pipeline.repository.AddCapabilityOverride(persist, endpoint.channel.ID, endpoint.model.ID, string(endpoint.format), field, "rejected by the upstream"); err != nil {
 		state.pipeline.logger.Warn("capability override could not be stored", "channel", endpoint.channel.ID, "field", field, "error", err)
 	}
 	cancel()
@@ -189,7 +190,7 @@ func (state *call) retryWithoutField(ctx context.Context, candidate routing.Cand
 		return nil, nil, failure
 	}
 	prepared.losses = append(prepared.losses, removed)
-	upstream, failure, _ := state.openUpstream(ctx, prepared, candidate, key)
+	upstream, failure, _ := state.openUpstream(ctx, prepared, key)
 	return upstream, prepared, failure
 }
 

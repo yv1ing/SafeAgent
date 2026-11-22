@@ -68,19 +68,20 @@ Opening a project changes the sidebar to that project's pages. Use Settings to c
 | Role | Can manage |
 | --- | --- |
 | Project member | routes, non-blocking redaction rules, agent keys; policy documents are read-only |
-| Administrator | channels, users, the global log, projects, members, policy editing and restore, blocking redaction rules, the decision model, retention and limit fields |
+| Administrator | models, channels, users, the global log, projects, members, policy editing and restore, blocking redaction rules, the decision model, retention and limit fields |
 
 Trust levels and non-default roles are administrator-only. The Activity page lists changes made to the project.
 
-Only administrators can create channels, and each channel represents one upstream provider:
+Only administrators maintain the model catalog and channels. A model belongs to a provider and records its upstream name, kind, supported formats and prices per million tokens. The same model can be enabled on several channels, and a channel can enable several formats:
 
-- Choose the provider. Anthropic, OpenAI, Google, DeepSeek, Z.AI and Qwen come with their formats, endpoints, authentication and capability profiles; a custom provider speaks standard Chat Completions and needs a base URL.
-- The console pre-fills the main endpoint. Override a base URL only when the provider or a proxy requires it, and disable a format only when that provider does not support it.
-- Model names must match what the provider uses. Prices are per million tokens in the currency set on the channel. "Discover models" lists the names the provider reports.
+- Choose the provider and one or more API formats. The order is the fallback order. Anthropic, OpenAI, Google, DeepSeek, Z.AI and Qwen offer their supported formats, endpoints, authentication and capability profiles; a custom provider speaks standard Chat Completions and needs a base URL.
+- Each format defaults to the provider endpoint. Override a base URL or path only when the provider or a proxy requires it.
+- Select the catalog models this channel exposes. A model can be selected only when it shares an enabled format with the channel.
+- "Discover" runs per format and lists the names the provider reports. Importing a name creates a missing catalog model or adds the format to an existing generation model.
 - Add the upstream key. Only its last characters are shown afterwards. The key is encrypted with the instance key. A channel without a key is accepted by the API but cannot serve traffic, so add one before enabling the route.
 - Turn on "allow private network" only for a provider on a private address, such as a self-hosted inference server.
 
-Create a model route. A route maps a public model name to one or more upstream models. The target with the lowest priority number is tried first; targets with equal priority are chosen in weighted random order.
+Create a model route. A route maps a public model name to one or more channel models. Each target resolves the client format when the channel and model support it, otherwise the first enabled format. The target with the lowest priority number is tried first; targets with equal priority are chosen in weighted random order. All targets of a route must use models of the same kind.
 
 | Outcome | Falls through to the next target |
 | --- | --- |

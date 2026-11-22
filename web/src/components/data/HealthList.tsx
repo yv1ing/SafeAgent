@@ -15,12 +15,13 @@ export function HealthList({ health, empty }: { health: ConsoleHealthView[]; emp
     <ul className="divide-y">
       {health.map((entry) => (
         <li
-          key={`${entry.channel_id}/${entry.upstream_model}`}
+          key={`${entry.channel_id}/${entry.model_id}/${entry.format}`}
           className="flex items-center justify-between gap-3 px-4 py-2.5"
         >
           <div className="min-w-0">
             <p className="truncate text-sm">
-              {entry.channel_name} / <span className="font-mono">{entry.upstream_model}</span>
+              {entry.channel_name} / <span className="font-mono">{entry.model_name}</span>
+              <span className="text-faint"> · {entry.format}</span>
             </p>
             <p className="text-xs text-muted">
               {interpolate(

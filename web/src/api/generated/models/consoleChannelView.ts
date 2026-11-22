@@ -7,23 +7,19 @@
  */
 import type { ConsoleCapabilityOverrideView } from './consoleCapabilityOverrideView.ts';
 import type { ConsoleChannelEndpointView } from './consoleChannelEndpointView.ts';
-import type { ConsoleChannelModelView } from './consoleChannelModelView.ts';
 import type { ConsoleChannelViewHeaders } from './consoleChannelViewHeaders.ts';
 
 export interface ConsoleChannelView {
   allow_private_network?: boolean;
   capability_overrides?: ConsoleCapabilityOverrideView[];
-  currency?: string;
-  custom?: boolean;
   default_max_output_tokens?: number;
   enabled?: boolean;
-  endpoints?: ConsoleChannelEndpointView[];
+  endpoints: ConsoleChannelEndpointView[];
   first_byte_timeout_seconds?: number;
-  formats?: string[];
   forward_headers?: string[];
   headers?: ConsoleChannelViewHeaders;
   id: string;
-  models?: ConsoleChannelModelView[];
+  model_ids: string[];
   name: string;
   provider_id: string;
   timeout_seconds?: number;

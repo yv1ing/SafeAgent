@@ -1,17 +1,21 @@
 import {
   createChannel,
   createChannelKey,
-  discoverChannelModels,
+  deleteChannel,
   deleteChannelKey,
+  discoverChannelModels,
   getGetChannelQueryKey,
   getListChannelKeysQueryKey,
   getListChannelsQueryKey,
+  importChannelModels,
   updateChannel,
 } from '../../api/generated/channels/channels';
+import { getListModelsQueryKey } from '../../api/generated/models/models';
 import type {
   ConsoleChannelInput,
   ConsoleCreateChannelKeyInput,
   ConsoleDiscoveryView,
+  ConsoleImportModelsView,
   ConsoleUpdateChannelInput,
 } from '../../api/generated/models';
 import { useLocale } from '../../i18n';
@@ -35,11 +39,32 @@ export function useUpdateChannel(channelId: string) {
   });
 }
 
-export function useDiscoverChannelModels(channelId: string) {
+export function useDeleteChannel() {
   const { t } = useLocale();
-  return useConsoleMutation<void, ConsoleDiscoveryView>({
-    mutationFn: () => discoverChannelModels(channelId),
+  return useConsoleMutation({
+    mutationFn: (channelId: string) => deleteChannel(channelId),
+    invalidates: [getListChannelsQueryKey()],
+    success: t.common.deleted,
+  });
+}
+
+export function useDiscoverChannelModels(channelId: string) {
+  return useConsoleMutation<string, ConsoleDiscoveryView>({
+    mutationFn: (format: string) => discoverChannelModels(channelId, { format }),
     invalidates: [],
+  });
+}
+
+export function useImportChannelModels(channelId: string) {
+  const { t } = useLocale();
+  return useConsoleMutation<{ format: string; models: string[] }, ConsoleImportModelsView>({
+    mutationFn: ({ format, models }: { format: string; models: string[] }) =>
+      importChannelModels(channelId, { format, models }),
+    invalidates: [
+      getGetChannelQueryKey(channelId),
+      getListChannelsQueryKey(),
+      getListModelsQueryKey(),
+    ],
     success: t.channels.discovered,
   });
 }

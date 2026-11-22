@@ -4,6 +4,9 @@ set -euo pipefail
 lab=$(cd "$(dirname "$0")/.." && pwd)
 root=$(cd "$lab/.." && pwd)
 runtime="$lab/runtime"
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 
 if [ "${SKIP_WEB:-0}" != "1" ]; then
   ( cd "$root" && npm --prefix web run build )

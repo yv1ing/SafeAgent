@@ -9,5 +9,6 @@
 export interface ConsoleCapabilityOverrideView {
   field: string;
   format: string;
+  model_id: string;
   reason?: string;
 }

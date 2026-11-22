@@ -40,7 +40,7 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 	}
 	ledger := state.ledger(journal)
 	state.recordResponse(response, ledger, responseMeta{Committed: true, Identify: true, Stored: state.responseStore()})
-	if !state.settle("completed", nil, response.Usage, upstream.endpoint.channel) {
+	if !state.settle("completed", nil, response.Usage, upstream.endpoint.model) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		session.Close()
 		return attemptEnded, failure
@@ -67,7 +67,7 @@ func (state *call) finishStream(session *stream.Session, upstream *upstreamCall,
 		Partial:   state.streamCommitted,
 		Truncated: state.streamTruncated,
 	})
-	if !state.settle(stateName, failure, response.Usage, upstream.endpoint.channel) {
+	if !state.settle(stateName, failure, response.Usage, upstream.endpoint.model) {
 		state.pipeline.logger.Error("failed stream could not be sealed", "call", state.recorder.Call().ID)
 	}
 	session.WriteStaged()
@@ -107,7 +107,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 		ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
 		state.recordResponse(response, ledger, responseMeta{Blocked: true})
 		state.applyLossHeaders(ledger.Losses)
-		if !state.settle("blocked", refusal, response.Usage, upstream.endpoint.channel) {
+		if !state.settle("blocked", refusal, response.Usage, upstream.endpoint.model) {
 			refusal = internal("audit_unavailable", "The response could not be recorded.")
 		}
 		state.reply(refusal)
@@ -129,7 +129,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
 	state.recordResponse(response, ledger, responseMeta{Identify: true, Stored: state.responseStore()})
 	state.applyLossHeaders(ledger.Losses)
-	if !state.settle("completed", nil, response.Usage, upstream.endpoint.channel) {
+	if !state.settle("completed", nil, response.Usage, upstream.endpoint.model) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		state.reply(failure)
 		return attemptEnded, failure

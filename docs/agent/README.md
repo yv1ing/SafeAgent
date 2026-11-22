@@ -39,7 +39,7 @@ The request path is synchronous through admission. Provider text streams back; a
 4. [`storage.md`](storage.md) — tables, cascades, idempotency, retention and secrets.
 5. [`audit.md`](audit.md) — event contract, hash chain, timeline and `verify-audit`.
 6. [`protocol.md`](protocol.md) — canonical model, stream session, codecs, clean EOF and conversion losses.
-7. [`providers.md`](providers.md) — the provider catalog, endpoint matrix, channel overrides and discovery.
+7. [`providers.md`](providers.md) — the provider catalog, endpoint matrix, channel format and model bindings, and discovery.
 8. [`development.md`](development.md) — commands, configuration, tests and extension points.
 9. [`testenv.md`](testenv.md) — the Docker acceptance lab, functional suites and the performance smoke.
 10. [`papers.md`](papers.md) — which external concepts are implemented and where.

@@ -3,7 +3,6 @@ package console
 import (
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
@@ -62,43 +61,46 @@ func validEndpointPath(value string) bool {
 	return len(value) <= MaximumEndpointLength && strings.HasPrefix(value, "/") && !strings.ContainsAny(value, " \r\n\t")
 }
 
-// validEndpoint accepts an absolute http(s) base URL without credentials.
+// validEndpoint accepts an absolute http(s) base URL without credentials, query or fragment.
 func validEndpoint(value string) bool {
 	if value == "" || len(value) > MaximumEndpointLength || strings.ContainsAny(value, " \r\n\t") {
 		return false
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.User != nil {
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
 	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != ""
 }
 
-func validateModels(models []entity.ChannelModel) ([]entity.ChannelModel, error) {
-	if len(models) > MaximumModels {
-		return nil, Invalid("invalid_model")
+func validateEndpoints(spec provider.ProviderSpec, endpoints []entity.ChannelEndpoint) ([]entity.ChannelEndpoint, error) {
+	if len(endpoints) == 0 || len(endpoints) > MaximumFormats {
+		return nil, Invalid("invalid_format")
 	}
-	seen := make(map[string]bool, len(models))
-	clean := make([]entity.ChannelModel, 0, len(models))
-	for _, modelEntry := range models {
-		name, err := RequireText(modelEntry.Name, MaximumModelNameLength, "invalid_model")
-		if err != nil || seen[name] {
-			return nil, Invalid("invalid_model")
+	seen := make(map[string]bool, len(endpoints))
+	clean := make([]entity.ChannelEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		format := strings.TrimSpace(endpoint.Format)
+		if _, known := providerEndpoint(spec, format); !known || seen[format] {
+			return nil, Invalid("invalid_format")
 		}
-		seen[name] = true
-		if modelEntry.InputPrice < 0 || modelEntry.OutputPrice < 0 || modelEntry.CacheReadPrice < 0 || modelEntry.CacheWritePrice < 0 ||
-			modelEntry.InputPrice > MaximumPriceMicros || modelEntry.OutputPrice > MaximumPriceMicros ||
-			modelEntry.CacheReadPrice > MaximumPriceMicros || modelEntry.CacheWritePrice > MaximumPriceMicros {
-			return nil, Invalid("invalid_price")
+		seen[format] = true
+		if endpoint.BaseURL != "" && !validEndpoint(endpoint.BaseURL) {
+			return nil, Invalid("invalid_endpoint")
 		}
-		modelEntry.Name = name
-		clean = append(clean, modelEntry)
+		if endpoint.Path != "" && !validEndpointPath(endpoint.Path) {
+			return nil, Invalid("invalid_endpoint")
+		}
+		if spec.Custom && endpoint.BaseURL == "" {
+			return nil, Invalid("invalid_endpoint")
+		}
+		clean = append(clean, entity.ChannelEndpoint{Format: format, BaseURL: endpoint.BaseURL, Path: endpoint.Path})
 	}
 	return clean, nil
 }
 
-// normalize validates input, applies defaults and returns the cleaned copy. The provider catalog
-// decides which formats exist and which base URL each one defaults to.
+// normalize validates input and applies defaults. A channel enables an ordered list of provider
+// formats; model ids are checked against the catalog by the service, which needs storage.
 func (input ChannelInput) normalize(providers *provider.Registry) (ChannelInput, error) {
 	name, err := RequireName(input.Name, "invalid_name")
 	if err != nil {
@@ -109,43 +111,21 @@ func (input ChannelInput) normalize(providers *provider.Registry) (ChannelInput,
 	if !found {
 		return input, Invalid("invalid_provider")
 	}
-	input.Custom = spec.Custom
-	endpoints := make([]entity.ChannelEndpoint, 0, len(input.Endpoints))
-	seen := map[string]bool{}
-	for _, entry := range input.Endpoints {
-		if seen[entry.Format] {
-			return input, Invalid("invalid_format")
-		}
-		if _, known := providerEndpoint(spec, entry.Format); !known {
-			return input, Invalid("invalid_format")
-		}
-		if entry.BaseURL != "" && !validEndpoint(entry.BaseURL) {
-			return input, Invalid("invalid_endpoint")
-		}
-		if entry.Path != "" && !validEndpointPath(entry.Path) {
-			return input, Invalid("invalid_endpoint")
-		}
-		seen[entry.Format] = true
-		endpoints = append(endpoints, entity.ChannelEndpoint{Format: entry.Format, BaseURL: entry.BaseURL, Path: entry.Path, Disabled: entry.Disabled})
+	input.Endpoints, err = validateEndpoints(spec, input.Endpoints)
+	if err != nil {
+		return input, err
 	}
-	if spec.Custom {
-		usable := false
-		for _, entry := range endpoints {
-			if entry.BaseURL != "" && !entry.Disabled {
-				usable = true
-			}
+	modelIDs := make([]string, 0, len(input.ModelIDs))
+	seen := make(map[string]bool, len(input.ModelIDs))
+	for _, modelID := range input.ModelIDs {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" || seen[modelID] {
+			return input, Invalid("invalid_model")
 		}
-		if !usable {
-			return input, Invalid("invalid_endpoint")
-		}
+		seen[modelID] = true
+		modelIDs = append(modelIDs, modelID)
 	}
-	input.Endpoints = endpoints
-	if input.Currency == "" {
-		input.Currency = DefaultCurrency
-	}
-	if !slices.Contains(Currencies, input.Currency) {
-		return input, Invalid("invalid_currency")
-	}
+	input.ModelIDs = modelIDs
 	if input.TimeoutSeconds < 0 || input.TimeoutSeconds > MaximumTimeoutSeconds ||
 		input.FirstByteTimeoutSeconds < 0 || input.FirstByteTimeoutSeconds > MaximumFirstByteSeconds {
 		return input, Invalid("invalid_timeout")
@@ -165,8 +145,7 @@ func (input ChannelInput) normalize(providers *provider.Registry) (ChannelInput,
 	if input.DefaultMaxOutputTokens < 0 || input.DefaultMaxOutputTokens > MaximumOutputTokens {
 		return input, Invalid("invalid_limit")
 	}
-	input.Models, err = validateModels(input.Models)
-	return input, err
+	return input, nil
 }
 
 func validateForwardHeaders(names []string) ([]string, error) {

@@ -3,6 +3,7 @@ set -euo pipefail
 
 lab=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$lab/runtime"
+umask 077
 base="http://127.0.0.1:8080"
 api="$base/console/api"
 
@@ -10,8 +11,9 @@ if [ ! -f "$runtime/env" ]; then
   echo "the lab is not set up; run make lab-setup first" >&2
   exit 1
 fi
-# shellcheck disable=SC1091
-set -a; . "$runtime/env"; set +a
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 
 admin_jar="$runtime/cookies-security-admin.txt"
 user_jar="$runtime/cookies-security-user.txt"
@@ -85,11 +87,7 @@ body() {
 
 formats=($SAFEAGENT_AVAILABLE_FORMATS)
 declare -A route
-for format in "${formats[@]}"; do
-  upper=${format^^}
-  var="SAFEAGENT_${upper}_ROUTE"
-  route[$format]=${!var}
-done
+load_routes
 if [ -n "${route[chat]:-}" ]; then
   probe_model=${route[chat]}
 else
@@ -119,10 +117,10 @@ http=$(send chat "$probe_model" "$rate_key" "$runtime/security-rate-2.json" "$(b
 check "the second request is rate limited" "$http" "429"
 
 channel_id=$(jq -r '.channels.chat.id // (.channels | to_entries[0].value.id)' "$runtime/state.json")
-channel_model=$(jq -r '.channels.chat.model // (.channels | to_entries[0].value.model)' "$runtime/state.json")
+channel_model_id=$(jq -r '.channels.chat.model_id // (.channels | to_entries[0].value.model_id)' "$runtime/state.json")
 project_c=$(admin_post /projects '{"name":"Quota Lab","retention_days":1,"requests_per_minute":0,"concurrency":0,"daily_token_quota":1}' | jq -r .id)
 admin_post "/projects/$project_c/routes" \
-  "$(jq -nc --arg channel "$channel_id" --arg model "$channel_model" --arg name "$probe_model" '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,priority:0,weight:1}]}')" >/dev/null
+  "$(jq -nc --arg channel "$channel_id" --arg model_id "$channel_model_id" --arg name "$probe_model" '{name:$name,targets:[{channel_id:$channel,model_id:$model_id,priority:0,weight:1}]}')" >/dev/null
 key_c=$(admin_post "/projects/$project_c/keys" '{"label":"quota","requests_per_minute":0,"concurrency":0,"trust_level":1,"role":"agent","enabled":true}' | jq -r .secret)
 http=$(send chat "$probe_model" "$key_c" "$runtime/security-quota.json" "$(body chat "$probe_model")")
 if [ "$http" = "429" ] && jq -e '.error.code == "daily_quota_exceeded"' "$runtime/security-quota.json" >/dev/null; then
@@ -132,7 +130,7 @@ else
   failed=$((failed + 1)); status=1
 fi
 
-username="member$(date +%s)"
+username="member$(date +%s)-$$"
 created=$(admin_post /users "{\"username\":\"$username\",\"administrator\":false}")
 user_id=$(jq -r .id <<<"$created")
 initial=$(jq -r .initial_password <<<"$created")

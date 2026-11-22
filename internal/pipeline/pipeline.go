@@ -283,14 +283,40 @@ type channels struct {
 	keys map[string][]routing.Key
 }
 
-func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName string) ([]routing.Target, map[string]endpoint, channels, error) {
+func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName string, clientFormat model.Format) ([]routing.Target, map[string]endpoint, channels, string, error) {
 	route, err := pipeline.repository.RouteByName(ctx, projectID, modelName)
 	if err != nil {
-		return nil, nil, channels{}, err
+		return nil, nil, channels{}, "", err
+	}
+	modelIDs := make([]string, 0, len(route.Targets))
+	seenModel := map[string]bool{}
+	for _, target := range route.Targets {
+		if !seenModel[target.ModelID] {
+			seenModel[target.ModelID] = true
+			modelIDs = append(modelIDs, target.ModelID)
+		}
+	}
+	storedModels, err := pipeline.repository.ModelsByIDs(ctx, modelIDs)
+	if err != nil {
+		return nil, nil, channels{}, "", err
+	}
+	modelByID := make(map[string]*entity.Model, len(storedModels))
+	for index := range storedModels {
+		modelByID[storedModels[index].ID] = &storedModels[index]
+	}
+	routeKind := ""
+	for _, target := range route.Targets {
+		if found := modelByID[target.ModelID]; found != nil {
+			if routeKind == "" {
+				routeKind = string(found.Kind)
+			} else if routeKind != string(found.Kind) {
+				return nil, nil, channels{}, "", errors.New("route targets use different model kinds")
+			}
+		}
 	}
 	stored, err := pipeline.repository.Channels(ctx)
 	if err != nil {
-		return nil, nil, channels{}, err
+		return nil, nil, channels{}, "", err
 	}
 	resolved := channels{byID: map[string]*entity.Channel{}, keys: map[string][]routing.Key{}}
 	for index := range stored {
@@ -302,33 +328,33 @@ func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName stri
 	var targets []routing.Target
 	for _, target := range route.Targets {
 		channel := resolved.byID[target.ChannelID]
-		if channel == nil {
+		modelEntry := modelByID[target.ModelID]
+		if channel == nil || modelEntry == nil || !modelEntry.Enabled || !channel.HasModel(modelEntry.ID) || channel.ProviderID != modelEntry.ProviderID {
 			continue
 		}
 		spec, found := pipeline.providers.Get(channel.ProviderID)
 		if !found {
 			continue
 		}
-		for _, format := range spec.Formats() {
-			if target.Format != "" && target.Format != string(format) {
-				continue
-			}
-			if !channelExposes(channel, format) {
-				continue
-			}
-			formatEndpoint, ok := endpointFor(spec, channel, format)
-			if !ok {
-				continue
-			}
-			upstreamModel := formatEndpoint.ApplyAlias(target.UpstreamModel)
-			key := endpointKey(channel.ID, upstreamModel, format)
-			endpoints[key] = endpoint{channel: channel, spec: spec, endpoint: formatEndpoint, format: format, upstreamModel: upstreamModel}
-			targets = append(targets, routing.Target{ChannelID: channel.ID, UpstreamModel: upstreamModel, Format: string(format), Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens})
+		channelEndpoint, format, ok := selectFormat(*channel, *modelEntry, spec, clientFormat)
+		if !ok {
+			continue
 		}
+		formatEndpoint, ok := endpointFor(spec, channel, *modelEntry, channelEndpoint, format)
+		if !ok {
+			continue
+		}
+		upstreamModel := formatEndpoint.ApplyAlias(modelEntry.UpstreamName)
+		key := endpointKey(channel.ID, modelEntry.ID, format)
+		endpoints[key] = endpoint{channel: channel, model: modelEntry, endpoint: formatEndpoint, format: format, upstreamModel: upstreamModel}
+		targets = append(targets, routing.Target{
+			ChannelID: channel.ID, ModelID: modelEntry.ID, UpstreamModel: upstreamModel, Format: string(format),
+			Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens,
+		})
 	}
 	secrets, err := pipeline.repository.EnabledChannelKeys(ctx)
 	if err != nil {
-		return nil, nil, channels{}, err
+		return nil, nil, channels{}, "", err
 	}
 	for _, secret := range secrets {
 		if resolved.byID[secret.ChannelID] == nil {
@@ -341,55 +367,79 @@ func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName stri
 		}
 		resolved.keys[secret.ChannelID] = append(resolved.keys[secret.ChannelID], routing.Key{ID: secret.ID, Secret: string(plain)})
 	}
-	return targets, endpoints, resolved, nil
+	return targets, endpoints, resolved, routeKind, nil
 }
 
-// channelExposes reports whether the operator disabled a format. Endpoint entries are overrides,
-// not a whitelist; an absent entry keeps the provider default.
-func channelExposes(channel *entity.Channel, format model.Format) bool {
-	for _, entry := range channel.Endpoints {
-		if entry.Format == string(format) && entry.Disabled {
-			return false
+// selectFormat picks exactly one format for a target: the client format when the model and channel
+// both support it, otherwise the first usable channel endpoint in operator order.
+func selectFormat(channel entity.Channel, modelEntry entity.Model, spec provider.ProviderSpec, clientFormat model.Format) (entity.ChannelEndpoint, model.Format, bool) {
+	var chosen entity.ChannelEndpoint
+	var chosenFormat model.Format
+	for _, channelEndpoint := range channel.Endpoints {
+		if !modelEntry.Supports(channelEndpoint.Format) {
+			continue
+		}
+		format := model.Format(channelEndpoint.Format)
+		endpoint, found := spec.Endpoint(format)
+		if !found || !formatServesKind(endpoint, modelEntry.Kind) {
+			continue
+		}
+		if chosen.Format == "" {
+			chosen, chosenFormat = channelEndpoint, format
+		}
+		if string(format) == string(clientFormat) {
+			return channelEndpoint, format, true
 		}
 	}
-	return true
+	if chosen.Format == "" {
+		return entity.ChannelEndpoint{}, "", false
+	}
+	return chosen, chosenFormat, true
 }
 
-func endpointKey(channelID, upstreamModel string, format model.Format) string {
-	return channelID + "\x00" + upstreamModel + "\x00" + string(format)
+func formatServesKind(endpoint provider.EndpointSpec, kind entity.ModelKind) bool {
+	if kind == entity.ModelGeneration {
+		return true
+	}
+	wanted := provider.AuxiliaryEmbeddings
+	if kind == entity.ModelModeration {
+		wanted = provider.AuxiliaryModerations
+	}
+	for _, auxiliary := range endpoint.Auxiliary {
+		if auxiliary.Kind == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func endpointKey(channelID, modelID string, format model.Format) string {
+	return channelID + "\x00" + modelID + "\x00" + string(format)
 }
 
 // endpoint is one enabled format of one channel with its catalog defaults and operator overrides.
 type endpoint struct {
 	channel       *entity.Channel
-	spec          provider.ProviderSpec
+	model         *entity.Model
 	endpoint      provider.EndpointSpec
 	format        model.Format
 	upstreamModel string
 }
 
-// endpointFor merges the provider catalog with the channel's overrides for one format.
-func endpointFor(spec provider.ProviderSpec, channel *entity.Channel, format model.Format) (provider.EndpointSpec, bool) {
+// endpointFor merges the provider catalog with the channel endpoint and capability overrides.
+func endpointFor(spec provider.ProviderSpec, channel *entity.Channel, modelEntry entity.Model, channelEndpoint entity.ChannelEndpoint, format model.Format) (provider.EndpointSpec, bool) {
 	endpoint, found := spec.Endpoint(format)
 	if !found {
 		return provider.EndpointSpec{}, false
 	}
-	for _, override := range channel.Endpoints {
-		if override.Format != string(format) {
-			continue
-		}
-		if override.Disabled {
-			return provider.EndpointSpec{}, false
-		}
-		if override.BaseURL != "" {
-			endpoint.BaseURL = override.BaseURL
-		}
-		if override.Path != "" {
-			endpoint.Path = override.Path
-		}
+	if channelEndpoint.BaseURL != "" {
+		endpoint.BaseURL = channelEndpoint.BaseURL
+	}
+	if channelEndpoint.Path != "" {
+		endpoint.Path = channelEndpoint.Path
 	}
 	for _, override := range channel.CapabilityOverrides {
-		if override.Format == string(format) {
+		if override.ModelID == modelEntry.ID && override.Format == string(format) {
 			applyCapabilityOverride(&endpoint, override.Field)
 		}
 	}

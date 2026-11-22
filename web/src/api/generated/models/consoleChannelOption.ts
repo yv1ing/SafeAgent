@@ -5,10 +5,11 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
+import type { ConsoleChannelModelOption } from './consoleChannelModelOption.ts';
 
 export interface ConsoleChannelOption {
   formats?: string[];
   id: string;
-  models?: string[];
+  models?: ConsoleChannelModelOption[];
   name: string;
 }

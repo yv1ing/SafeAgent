@@ -7,7 +7,7 @@
 | Group | Tables |
 | --- | --- |
 | identity | `users`, `sessions`, `projects`, `project_members`, `agent_keys` |
-| routing | `channels`, `channel_keys`, `model_routes` |
+| routing | `models`, `channels`, `channel_keys`, `model_routes` |
 | redaction | `redaction_rules`, `redaction_snapshots` |
 | policy | `policy_versions` |
 | audit | `calls`, `events`, `call_tools`, `conversations`, `decisions` |
@@ -18,11 +18,13 @@
 
 ## Channels and routes
 
-A channel stores `provider_id`, a `custom` flag, per-format endpoint overrides (`endpoints`), machine-written `capability_overrides`, headers, forwarded-header names, a model/price list, a default output limit, timeouts, a private-network flag and the enabled flag. The wire format, base URL, auth style and capability profile come from the provider catalog in code. An endpoint entry overrides the catalog; an absent entry keeps its default; `disabled` hides the format.
+`models` is the global administrator catalog. A row stores `provider_id`, the immutable `kind` (`generation`, `embedding` or `moderation`), the upstream name, an optional display name, the supported wire formats, four prices, currency, the enabled flag and an optimistic version. `(provider_id, upstream_name)` is unique.
 
-A route target is `{channel_id, upstream_model, format?, priority, weight, max_output_tokens}`. An empty `format` lets the gateway expand every format the channel exposes and prefer the client's own; a non-empty value pins one.
+A channel stores `provider_id`, an ordered `endpoints` array of `{format, base_url?, path?}`, an explicit `model_ids` array, machine-written `capability_overrides`, headers, forwarded-header names, a default output limit, timeouts, a private-network flag and the enabled flag. The presence of an endpoint enables that format; an empty base URL or path keeps the provider catalog value. Auth style, capability and auxiliary endpoints still come from code.
 
-A call records `kind`, `client_format`, `client_transport` (`sse` or `json`), `endpoint_format`, `session_id`, `parent_call_id`, `message_offset` and, for Responses, `response_store`, `response_deleted_at` and `cancelled_at`. For a generation call, `kind` is the client wire format (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`); for an auxiliary call, it is the operation (`count_tokens`, `models`, `embeddings`, `moderations`, `responses_retrieve`, `responses_input_items`, `responses_cancel`, `responses_delete`). `client_format` holds the wire format in both cases.
+A route target is `{channel_id, model_id, priority, weight, max_output_tokens}`. The runtime intersects the channel endpoint order with the model formats, prefers the client format when it is available, and selects exactly one format per target. A channel and a model must share the provider because the target resolves a specific provider endpoint.
+
+A call records `kind`, `client_format`, `client_transport` (`sse` or `json`), `endpoint_format`, `model_id`, `public_model`, `upstream_model`, `channel_id`, `session_id`, `parent_call_id`, `message_offset` and, for Responses, `response_store`, `response_deleted_at` and `cancelled_at`. The call stores the channel and catalog model ids, the public model name and the resolved upstream model name; it does not copy a channel or catalog display name, so renaming or deleting a catalog entry does not rewrite history. For a generation call, `kind` is the client wire format (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`); for an auxiliary call, it is the operation (`count_tokens`, `models`, `embeddings`, `moderations`, `responses_retrieve`, `responses_input_items`, `responses_cancel`, `responses_delete`). `client_format` holds the wire format in both cases.
 
 ## Audit columns
 
@@ -59,7 +61,7 @@ Pruning runs in batches of 1,000 rows. Calls older than the project's `retention
 
 ## Secrets
 
-Audit payloads use event schema version 5: the request and response are stored as item/part structures, together with the effective instructions and tools, the agent-key principal snapshot, the loss/repair ledger and the session source. Raw values are stored as sent. Read access is role-based: members see the redacted view and the metadata-only timeline, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; channel key suffixes are returned by the API, and the decision model key is reported only as `api_key_set`. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers and forwarded-header names are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
+Audit payloads use event schema version 6: the request and response are stored as item/part structures, together with the effective instructions and tools, the agent-key principal snapshot, the loss/repair ledger and the session source; each attempt records the channel, catalog model, key, format and upstream model. Raw values are stored as sent. Read access is role-based: members see the redacted view and the metadata-only timeline, administrators can request raw events, and that request is written to the operation log. Channel keys and the decision model key are sealed with AES-256-GCM under the instance key; channel key suffixes are returned by the API, and the decision model key is reported only as `api_key_set`. An unreadable channel key is skipped and logged; it is never sent to a provider. Extra channel headers and forwarded-header names are not sealed, so a secret placed in a header is stored in plaintext and should be treated accordingly.
 
 ## Related
 

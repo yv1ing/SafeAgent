@@ -20,11 +20,11 @@ Only the database port is published. Lab channels set `allow_private_network=tru
 
 ```sh
 cp testenv/env.example testenv/.env   # set a real upstream per format
-make lab-setup                         # build, start, create the project and routes
+make lab-setup                         # build, start, create the project, models and routes
 make lab-acceptance                    # every suite in order, then stop the lab
 ```
 
-At least one real provider format is required. A format with a URL but no key or model stops setup; a format with no URL is skipped, and the matrix and agent suite size themselves to the routes that exist.
+At least one real provider format is required. A format with a URL but no key or model stops setup; a format with no URL is skipped, and the matrix and agent suite size themselves to the routes that exist. Set `SAFEAGENT_UPSTREAM_<FORMAT>_ENDPOINT` for every configured format when you run the performance suite or the full acceptance run.
 
 `make lab-acceptance` runs `verify`, integration, protocol, auxiliary, agents, policy, analysis, security, faults, browser, the quick performance smoke and audit verification. On the first failure it stops and leaves the lab running. A successful run stops the lab and removes `runtime`. Set `KEEP_LAB=1` to retain it.
 

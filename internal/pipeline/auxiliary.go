@@ -84,7 +84,7 @@ func (pipeline *Pipeline) CountTokens(ctx context.Context, input Request) (int64
 		return 0, false, blocked("sensitive_content_blocked", "The request matches a blocking redaction rule.", http.StatusForbidden)
 	}
 	request.Stream = false
-	targets, endpoints, available, err := pipeline.resolve(ctx, identity.Project.ID, request.Model)
+	targets, endpoints, available, routeKind, err := pipeline.resolve(ctx, identity.Project.ID, request.Model, input.Kind)
 	if err != nil {
 		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_not_found")
 		if errors.Is(err, repository.ErrNotFound) {
@@ -96,8 +96,12 @@ func (pipeline *Pipeline) CountTokens(ctx context.Context, input Request) (int64
 		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_not_found")
 		return 0, false, failure("invalid_request", model.ClassInvalid, "model_not_found", "The model is not configured for this project.", http.StatusNotFound)
 	}
+	if routeKind != string(entity.ModelGeneration) {
+		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_kind_mismatch")
+		return 0, false, failure("invalid_request", model.ClassInvalid, "model_kind_mismatch", "The model is not a generation model.", http.StatusUnprocessableEntity)
+	}
 	for _, candidate := range pipeline.selector.Plan(targets, available.keys, "", string(input.Kind)) {
-		endpoint, found := endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))]
+		endpoint, found := endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.ModelID, model.Format(candidate.Target.Format))]
 		if !found || endpoint.endpoint.CountTokensPath == "" || !endpoint.endpoint.Capability.NativeCount || len(candidate.Keys) == 0 {
 			continue
 		}
@@ -412,7 +416,7 @@ func (pipeline *Pipeline) Passthrough(ctx context.Context, input Request, kind p
 		}
 		return nil, blocked("sensitive_content_blocked", "The request matches a blocking redaction rule.", http.StatusForbidden)
 	}
-	targets, endpoints, available, err := pipeline.resolve(ctx, identity.Project.ID, modelName)
+	targets, endpoints, available, routeKind, err := pipeline.resolve(ctx, identity.Project.ID, modelName, input.Kind)
 	if err != nil {
 		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_not_found")
 		if errors.Is(err, repository.ErrNotFound) {
@@ -420,8 +424,16 @@ func (pipeline *Pipeline) Passthrough(ctx context.Context, input Request, kind p
 		}
 		return nil, internal("store_failure", "The model routes could not be loaded.")
 	}
+	if len(targets) == 0 {
+		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_not_found")
+		return nil, failure("invalid_request", model.ClassInvalid, "model_not_found", "The model is not configured for this project.", http.StatusNotFound)
+	}
+	if routeKind != string(modelKindForAuxiliary(kind)) {
+		_ = pipeline.endAuxiliary(ctx, recorder, "failed", "model_kind_mismatch")
+		return nil, failure("invalid_request", model.ClassInvalid, "model_kind_mismatch", "The model has a different kind than this endpoint requires.", http.StatusUnprocessableEntity)
+	}
 	for _, candidate := range pipeline.selector.Plan(targets, available.keys, "", string(input.Kind)) {
-		endpoint, found := endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))]
+		endpoint, found := endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.ModelID, model.Format(candidate.Target.Format))]
 		if !found {
 			continue
 		}
@@ -441,6 +453,13 @@ func (pipeline *Pipeline) Passthrough(ctx context.Context, input Request, kind p
 	}
 	_ = pipeline.endAuxiliary(ctx, recorder, "failed", "auxiliary_unsupported")
 	return nil, failure("unsupported", model.ClassInvalid, "auxiliary_unsupported", "No channel supports this auxiliary endpoint for the model.", http.StatusUnprocessableEntity)
+}
+
+func modelKindForAuxiliary(kind provider.AuxiliaryKind) entity.ModelKind {
+	if kind == provider.AuxiliaryModerations {
+		return entity.ModelModeration
+	}
+	return entity.ModelEmbedding
 }
 
 func auxiliaryOf(endpoint endpoint, kind provider.AuxiliaryKind) (provider.AuxiliarySpec, string, bool) {

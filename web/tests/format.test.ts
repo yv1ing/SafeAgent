@@ -6,6 +6,8 @@ import {
   formatLimit,
   formatPercent,
   formatTokens,
+  priceFromMicros,
+  priceToMicros,
   severityTone,
   shortId,
   stateTone,
@@ -17,13 +19,21 @@ test('tokens are compacted', () => {
   assert.equal(formatTokens(2_500_000), '2.5M');
 });
 
-test('costs use the channel currency', () => {
+test('costs use the recorded currency', () => {
   assert.equal(formatCost(15_000), '$0.0150');
   assert.equal(formatCost(15_000, ''), '$0.0150');
   assert.equal(formatCost(15_000, 'CNY'), '¥0.0150');
   assert.equal(formatCost(15_000, 'GBP'), '£0.0150');
   assert.equal(formatCost(15_000, 'CHF'), '0.0150 CHF');
   assert.equal(formatCost(null), '—');
+});
+
+test('prices convert between currency units and micros', () => {
+  assert.equal(priceToMicros(3), 3_000_000);
+  assert.equal(priceToMicros(0.015), 15_000);
+  assert.equal(priceToMicros(Number.NaN), 0);
+  assert.equal(priceFromMicros(15_000_000), 15);
+  assert.equal(priceFromMicros(undefined), 0);
 });
 
 test('limits treat zero as unlimited', () => {

@@ -827,15 +827,6 @@ func (session *Session) WriteStaged() {
 	}
 }
 
-// WriteBuffered commits and releases frames buffered before the first content, used when a
-// non-stream client receives a streamed upstream.
-func (session *Session) WriteBuffered() {
-	defer session.Close()
-	if !session.committed {
-		session.commit()
-	}
-}
-
 func (session *Session) Close() {
 	session.keepaliveOnce.Do(func() { close(session.stopKeepalive) })
 }

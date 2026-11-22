@@ -48,6 +48,7 @@ func TestEmbeddingsPassThroughAndAreAudited(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply {
 		return testkit.Reply{Status: 200, Body: `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}]}`}
 	})
+	rig.store.Models[0].Kind = entity.ModelEmbedding
 	payload, failure := rig.pipeline.Passthrough(context.Background(), pipeline.Request{
 		Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}},
 		Body: []byte(`{"model":"gpt-5","input":"hello me@example.com"}`),
@@ -68,7 +69,7 @@ func TestEmbeddingsPassThroughAndAreAudited(t *testing.T) {
 }
 
 func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
-	rig := newRig(t, nil)
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Body: `{"data":[]}`} })
 	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
 		ID: "test", Label: "Test",
 		Endpoints: map[model.Format]provider.EndpointSpec{
@@ -76,10 +77,43 @@ func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
 				Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer,
 				Auxiliary: []provider.AuxiliarySpec{{Kind: provider.AuxiliaryEmbeddings, Path: "/embeddings"}},
 			},
-			model.Messages: {Format: model.Messages, BaseURL: rig.upstream.URL, Path: "/messages", Auth: provider.AuthAPIKey},
+			model.Messages: {
+				Format: model.Messages, BaseURL: rig.upstream.URL, Path: "/messages", Auth: provider.AuthAPIKey,
+				Auxiliary: []provider.AuxiliarySpec{{Kind: provider.AuxiliaryEmbeddings, Path: "/messages/embeddings"}},
+			},
 		},
 	})
-	rig.store.Route.Targets[0].Format = string(model.Messages)
+	rig.store.Channel[0].Endpoints = []entity.ChannelEndpoint{{Format: string(model.Chat)}, {Format: string(model.Messages)}}
+	rig.store.Models[0].Kind = entity.ModelEmbedding
+	rig.store.Models[0].Formats = []string{string(model.Messages)}
+	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
+		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
+	})
+	payload, failure := rig.pipeline.Passthrough(context.Background(), pipeline.Request{
+		Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}},
+		Body: []byte(`{"model":"gpt-5","input":"hello"}`),
+	}, provider.AuxiliaryEmbeddings)
+	if failure != nil {
+		t.Fatalf("failure=%+v", failure)
+	}
+	if len(payload) == 0 {
+		t.Fatal("the auxiliary response is empty")
+	}
+	requests := rig.upstream.Requests()
+	if len(requests) != 1 || !strings.HasSuffix(requests[0].Path, "/messages/embeddings") {
+		t.Fatalf("the routed Messages format must serve the call: %+v", requests)
+	}
+}
+
+func TestEmbeddingModelRequiresAnAuxiliaryFormat(t *testing.T) {
+	rig := newRig(t, nil)
+	rig.store.Models[0].Kind = entity.ModelEmbedding
+	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+		ID: "test", Label: "Test",
+		Endpoints: map[model.Format]provider.EndpointSpec{
+			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
+		},
+	})
 	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
 		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
 	})
@@ -87,21 +121,7 @@ func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
 		Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}},
 		Body: []byte(`{"model":"gpt-5","input":"hello"}`),
 	}, provider.AuxiliaryEmbeddings)
-	if failure == nil || failure.Code != "auxiliary_unsupported" {
-		t.Fatalf("failure=%+v", failure)
-	}
-	if len(rig.upstream.Requests()) != 0 {
-		t.Fatal("an auxiliary endpoint of another format must not be called")
-	}
-}
-
-func TestAuxiliaryCapabilityIsRefusedWhenNoChannelSupportsIt(t *testing.T) {
-	rig := newRigFor(t, string(model.Messages), nil)
-	_, failure := rig.pipeline.Passthrough(context.Background(), pipeline.Request{
-		Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}},
-		Body: []byte(`{"model":"gpt-5","input":"hello"}`),
-	}, provider.AuxiliaryEmbeddings)
-	if failure == nil || failure.Code != "auxiliary_unsupported" {
+	if failure == nil || failure.Code != "model_not_found" {
 		t.Fatalf("failure=%+v", failure)
 	}
 }

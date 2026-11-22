@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
+	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
+	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
@@ -37,6 +40,9 @@ func Run(ctx context.Context, configuration config.Config, database *repository.
 		return err
 	} else if interrupted > 0 {
 		slog.Warn("calls left running by a previous process were marked interrupted", "calls", interrupted)
+	}
+	if err := serviceconsole.ValidateConfiguration(ctx, database, provider.NewRegistry(builtin.All()...)); err != nil {
+		return fmt.Errorf("configuration is inconsistent: %w", err)
 	}
 
 	server, diagnosisService := NewServer(configuration, database, frontend)

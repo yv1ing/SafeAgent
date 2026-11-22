@@ -98,7 +98,7 @@ func signedChain(t *testing.T, secret []byte) []auditevent.ChainEvent {
 func TestDecodeAndTimeline(t *testing.T) {
 	records := []auditevent.Record{
 		{Sequence: 1, Kind: auditevent.KindRequest, Payload: json.RawMessage(`{"items":[]}`), CreatedAt: time.Unix(1, 0)},
-		{Sequence: 2, Kind: auditevent.KindAttempt, Payload: json.RawMessage(`{"channel_id":"ch","channel_name":"primary","upstream_model":"m","key_id":"k"}`), CreatedAt: time.Unix(2, 0)},
+		{Sequence: 2, Kind: auditevent.KindAttempt, Payload: json.RawMessage(`{"channel_id":"ch","channel_name":"primary","model_id":"model_1","upstream_model":"m","key_id":"k"}`), CreatedAt: time.Unix(2, 0)},
 		{Sequence: 3, Kind: auditevent.KindToolCall, Payload: json.RawMessage(`{"id":"call_1","name":"shell","blocked":true}`), CreatedAt: time.Unix(3, 0)},
 		{Sequence: 4, Kind: auditevent.KindResponse, Payload: json.RawMessage(`{"response":{"status":"blocked","finish":{"kind":"stop"}},"blocked":true}`), CreatedAt: time.Unix(4, 0)},
 		{Sequence: 5, Kind: auditevent.KindTerminal, Payload: json.RawMessage(`{"state":"blocked","code":"tool_call_blocked"}`), CreatedAt: time.Unix(5, 0)},
@@ -110,7 +110,7 @@ func TestDecodeAndTimeline(t *testing.T) {
 	if len(entries) != 5 || entries[2].Status != "blocked" || entries[3].Status != "blocked" || entries[4].Status != "blocked" {
 		t.Fatalf("entries=%+v", entries)
 	}
-	if entries[1].Message != "primary" || entries[1].Code != "m" {
+	if entries[1].Message != "primary" || entries[1].Code != "m" || entries[1].Decoded.Attempt.ModelID != "model_1" {
 		t.Fatalf("attempt entry=%+v", entries[1])
 	}
 }

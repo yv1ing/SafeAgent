@@ -100,7 +100,61 @@ await shot('02-monitor');
 const projectName = `UI Acceptance ${stamp}`;
 let projectId = '';
 let userId = '';
+let modelId = '';
+let modelName = '';
 let channelId = '';
+
+await step('model create, edit and delete', async () => {
+  modelName = `ui-model-${stamp}`;
+  await page.goto(`${consoleBase}/models`, { waitUntil: 'domcontentloaded' });
+  await waitForPage();
+  await page.getByRole('button', { name: 'New model' }).click();
+  const form = await dialog();
+  await pick(form, 'Provider', 'OpenAI');
+  await form.getByLabel('Upstream name').fill(modelName);
+  await form.getByLabel('Display name').fill(`${modelName} display`);
+  await form.getByLabel('Input', { exact: true }).fill('3');
+  await form.getByLabel('openai_responses', { exact: true }).check();
+  await form.getByRole('button', { name: 'Create', exact: true }).click();
+  await form.waitFor({ state: 'hidden', timeout: 10_000 });
+  let models = await api('/models');
+  const created = models.find((entry) => entry.upstream_name === modelName);
+  requireValue(created, 'the model was not created');
+  modelId = created.id;
+  requireValue(
+    created.formats?.includes('openai_chat') && created.formats?.includes('openai_responses'),
+    'the model formats were not saved',
+  );
+  requireValue(created.input_price === 3_000_000, 'the model price was not converted to micros');
+  const row = page.locator('tr').filter({ hasText: modelName });
+  await row.getByRole('button', { name: 'Edit' }).click();
+  const edit = await dialog();
+  await edit.getByLabel('Display name').fill(`${modelName} edited`);
+  await edit.getByRole('button', { name: 'Save', exact: true }).click();
+  await edit.waitFor({ state: 'hidden', timeout: 10_000 });
+  models = await api('/models');
+  requireValue(
+    models.find((entry) => entry.upstream_name === modelName)?.display_name ===
+      `${modelName} edited`,
+    'the model display name was not saved',
+  );
+
+  const orphan = `ui-orphan-${stamp}`;
+  await page.getByRole('button', { name: 'New model' }).click();
+  const orphanForm = await dialog();
+  await orphanForm.getByLabel('Upstream name').fill(orphan);
+  await orphanForm.getByRole('button', { name: 'Create', exact: true }).click();
+  await orphanForm.waitFor({ state: 'hidden', timeout: 10_000 });
+  const orphanRow = page.locator('tr').filter({ hasText: orphan });
+  await orphanRow.waitFor({ timeout: 10_000 });
+  await orphanRow.getByRole('button', { name: 'Delete' }).click();
+  await confirm('Delete');
+  models = await api('/models');
+  requireValue(
+    !models.some((entry) => entry.upstream_name === orphan),
+    'the model was not deleted',
+  );
+});
 
 await step('project create', async () => {
   await page.goto(`${consoleBase}/projects`, { waitUntil: 'domcontentloaded' });
@@ -144,11 +198,20 @@ if (projectId) {
       const form = await dialog();
       await form.getByLabel('Name').fill(routeName);
       await form.getByRole('button', { name: 'Add target' }).click();
+      await form.getByLabel('Output limit').fill('777');
       await form.getByRole('button', { name: 'Create', exact: true }).click();
       await form.waitFor({ state: 'hidden', timeout: 10_000 });
       let routes = await api(`/projects/${projectId}/routes`);
       const created = routes.find((entry) => entry.name === routeName);
       requireValue(created, 'the route was not created');
+      const target = created.targets?.[0];
+      requireValue(target?.channel_id && target?.model_id, 'the route target has no channel model');
+      requireValue(target?.max_output_tokens === 777, 'the route output limit was not saved');
+      const option = channelOptions.find((entry) => entry.id === target.channel_id);
+      requireValue(
+        option?.models?.some((entry) => entry.id === target.model_id),
+        'the route target does not match a channel model',
+      );
       const row = page.locator('tr').filter({ hasText: routeName });
       await row.waitFor({ timeout: 10_000 });
       await row.getByRole('button', { name: 'Edit' }).click();
@@ -342,10 +405,21 @@ await step('channel settings', async () => {
   await page.getByRole('button', { name: 'New channel' }).click();
   const form = await dialog();
   await form.getByLabel('Name').fill(name);
+  await pick(form, 'Provider', 'OpenAI');
+  await pick(form, 'API format', 'openai_responses');
   await form.getByRole('button', { name: 'Create', exact: true }).click();
   await page.waitForURL(/\/channels\/[^/]+$/, { timeout: 15_000 });
   await waitForPage();
   channelId = page.url().split('/').pop();
+  const created = await api(`/channels/${channelId}`);
+  requireValue(
+    created.endpoints[0]?.format === 'openai_responses',
+    'the channel format was not saved',
+  );
+  if (modelId) {
+    await page.getByRole('checkbox', { name: modelName, exact: true }).check();
+  }
+  await page.getByRole('button', { name: 'Add format' }).click();
   await page.getByLabel('Default output limit').fill('321');
   await page.getByLabel('Forward client headers').fill('x-ui-test');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -356,6 +430,10 @@ await step('channel settings', async () => {
     (loaded.forward_headers ?? []).includes('x-ui-test'),
     'the forwarded headers were not saved',
   );
+  requireValue(loaded.endpoints.length === 2, 'the second channel format was not saved');
+  if (modelId) {
+    requireValue(loaded.model_ids.includes(modelId), 'the channel model binding was not saved');
+  }
   await page.getByRole('button', { name: 'Add key' }).click();
   const keyForm = await dialog();
   await keyForm.getByLabel('Label').fill('ui');
@@ -427,6 +505,7 @@ const pages = [
   ['12-routes', `/projects/${project}/routes`],
   ['13-members', `/projects/${project}/members`],
   ['14-settings', `/projects/${project}/settings`],
+  ['15-models', '/models'],
   ['15-channels', '/channels'],
   ['15b-channel', `/channels/${channel.id}`],
   ['16-users', '/users'],
@@ -566,12 +645,8 @@ if ((await menu.count()) > 0) {
 await step('cleanup', async () => {
   if (projectId) await api(`/projects/${projectId}`, 'DELETE');
   if (userId) await api(`/users/${userId}`, 'PUT', { disabled: true, administrator: false });
-  if (channelId) {
-    await api(`/channels/${channelId}`, 'PUT', {
-      ...(await api(`/channels/${channelId}`)),
-      enabled: false,
-    }).catch(() => {});
-  }
+  if (channelId) await api(`/channels/${channelId}`, 'DELETE').catch(() => {});
+  if (modelId) await api(`/models/${modelId}`, 'DELETE').catch(() => {});
 });
 
 const report = {

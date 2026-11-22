@@ -262,11 +262,9 @@ function requestFor(client, route, kind, stream) {
             ? responsesBody(route, stream, prompt, {
                 text: { format: { type: 'json_object' } },
               })
-            : client === 'messages'
-              ? messagesBody(route, stream, prompt)
-              : geminiBody(route, stream, prompt, {
-                  generationConfig: { maxOutputTokens: 300, responseMimeType: 'application/json' },
-                }),
+            : geminiBody(route, stream, prompt, {
+                generationConfig: { maxOutputTokens: 300, responseMimeType: 'application/json' },
+              }),
       expect: (value) => {
         try {
           return JSON.parse(value.text).answer === 42;
@@ -459,6 +457,7 @@ function requestFor(client, route, kind, stream) {
           body: chatBody(route, stream, 'hello', { n: 2 }),
           reject: { status: 422, code: 'unsupported_multi_choice' },
           rejectOptional: true,
+          expect: () => true,
         };
       }
       return {
@@ -474,6 +473,7 @@ function requestFor(client, route, kind, stream) {
           }),
           reject: { status: 422, message: 'Multiple candidates' },
           rejectOptional: true,
+          expect: () => true,
         };
       }
       return {

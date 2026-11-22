@@ -1,108 +1,163 @@
-import { Link, useParams } from '@tanstack/react-router';
-import { ChevronLeft } from 'lucide-react';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { ChevronLeft, Sparkles, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useGetChannel, useGetChannelHealth } from '../../api/generated/channels/channels';
-import type { ConsoleChannelView, ConsoleUpdateChannelInput } from '../../api/generated/models';
+import { useListModels } from '../../api/generated/models/models';
+import type { ConsoleChannelInput, ConsoleChannelView } from '../../api/generated/models';
+import { ConfirmDialog } from '../../components/form/ConfirmDialog';
 import { HealthList } from '../../components/data/HealthList';
 import { Page } from '../../components/layout/Page';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { QueryState } from '../../components/feedback/QueryState';
 import { TableSkeleton } from '../../components/data/DataTable';
-import { Sparkles } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
 import { useLocale } from '../../i18n';
 import { ChannelFields } from './components/ChannelFields';
+import { DiscoveryDialog } from './components/DiscoveryDialog';
 import { HeaderEditor, type HeaderRow } from './components/HeaderEditor';
 import { KeyPool } from './components/KeyPool';
-import { ModelPrices } from './components/ModelPrices';
-import { useDiscoverChannelModels, useUpdateChannel } from './hooks';
+import { ModelPicker } from './components/ModelPicker';
+import { useDeleteChannel, useUpdateChannel } from './hooks';
 
-function channelInput(channel: ConsoleChannelView): ConsoleUpdateChannelInput {
+function channelInput(channel: ConsoleChannelView): ConsoleChannelInput {
   return {
     name: channel.name,
-    provider_id: channel.provider_id ?? '',
-    endpoints: channel.endpoints ?? [],
-    currency: channel.currency,
+    provider_id: channel.provider_id,
+    endpoints: channel.endpoints,
+    model_ids: channel.model_ids,
     forward_headers: channel.forward_headers,
     default_max_output_tokens: channel.default_max_output_tokens,
     timeout_seconds: channel.timeout_seconds,
     first_byte_timeout_seconds: channel.first_byte_timeout_seconds,
     allow_private_network: channel.allow_private_network,
     enabled: channel.enabled,
-    models: channel.models ?? [],
     version: channel.version,
   };
 }
 
 function ChannelEditor({ channel }: { channel: ConsoleChannelView }) {
   const { t } = useLocale();
+  const navigate = useNavigate();
   const update = useUpdateChannel(channel.id);
-  const discover = useDiscoverChannelModels(channel.id);
-  const [draft, setDraft] = useState(() => channelInput(channel));
-  const mergeModels = (view: { models?: string[] }) => {
-    const known = new Set((draft.models ?? []).map((entry) => entry.name));
-    const added = (view.models ?? [])
-      .filter((name) => !known.has(name))
-      .map((name) => ({
-        name,
-        input_price: 0,
-        output_price: 0,
-        cache_read_price: 0,
-        cache_write_price: 0,
-      }));
-    setDraft({ ...draft, models: [...(draft.models ?? []), ...added] });
-  };
+  const remove = useDeleteChannel();
+  const models = useListModels();
+  const [draft, setDraft] = useState<ConsoleChannelInput>(() => channelInput(channel));
   const [headers, setHeaders] = useState<HeaderRow[]>(() => Object.entries(channel.headers ?? {}));
+  const [discovering, setDiscovering] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const setDraftAndPrune = (next: ConsoleChannelInput) => {
+    const formats = new Set(next.endpoints.map((endpoint) => endpoint.format));
+    const catalog = models.data ?? [];
+    const valid = catalog.length
+      ? next.model_ids.filter((modelId) => {
+          const model = catalog.find((entry) => entry.id === modelId);
+          return !model || model.formats.some((format) => formats.has(format));
+        })
+      : next.model_ids;
+    setDraft({ ...next, model_ids: valid });
+  };
   const save = () =>
     update.mutate({
       ...draft,
       headers: Object.fromEntries(headers.filter(([name]) => name.trim() !== '')),
     });
   return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        save();
-      }}
-    >
-      <Card>
-        <CardHeader title={t.channels.settings} />
-        <div className="p-4">
-          <ChannelFields draft={draft} onChange={setDraft} />
+    <>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <Card>
+          <CardHeader title={t.channels.settings} />
+          <div className="p-4">
+            <ChannelFields draft={draft} onChange={setDraftAndPrune} />
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title={t.channels.models} description={t.channels.modelsHint} />
+          <QueryState query={models} loading={<TableSkeleton rows={3} />}>
+            {(catalog) => (
+              <ModelPicker
+                draft={draft}
+                models={catalog}
+                onChange={(model_ids) => setDraft({ ...draft, model_ids })}
+              />
+            )}
+          </QueryState>
+        </Card>
+        <Card>
+          <CardHeader title={t.channels.discoverModels} description={t.channels.discoverHint} />
+          <div className="flex flex-wrap gap-2 px-4 py-3">
+            {channel.endpoints
+              .filter((endpoint) =>
+                draft.endpoints.some((entry) => entry.format === endpoint.format),
+              )
+              .map((endpoint) => (
+                <Button
+                  key={endpoint.format}
+                  size="sm"
+                  onClick={() => setDiscovering(endpoint.format)}
+                >
+                  <Sparkles aria-hidden />
+                  {endpoint.format}
+                </Button>
+              ))}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title={t.channels.headers} />
+          <HeaderEditor rows={headers} onChange={setHeaders} />
+        </Card>
+        <div className="flex justify-between gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-danger"
+            onClick={() => setDeleting(true)}
+          >
+            <Trash2 aria-hidden />
+            {t.common.delete}
+          </Button>
+          <Button type="submit" variant="primary" loading={update.isPending}>
+            {t.common.save}
+          </Button>
         </div>
-      </Card>
-      <Card>
-        <CardHeader
-          title={t.channels.models}
-          description={t.channels.modelsHint}
-          actions={
-            <Button
-              size="sm"
-              loading={discover.isPending}
-              onClick={() => discover.mutate(undefined, { onSuccess: mergeModels })}
-            >
-              <Sparkles aria-hidden />
-              {t.channels.discoverModels}
-            </Button>
-          }
+      </form>
+      {discovering && (
+        <DiscoveryDialog
+          channelId={channel.id}
+          format={discovering}
+          onClose={() => setDiscovering(null)}
+          onImported={(added) => {
+            setDraft((current) => ({
+              ...current,
+              model_ids: Array.from(new Set([...current.model_ids, ...added])),
+            }));
+            setDiscovering(null);
+          }}
         />
-        <ModelPrices
-          models={draft.models ?? []}
-          onChange={(models) => setDraft({ ...draft, models })}
-        />
-      </Card>
-      <Card>
-        <CardHeader title={t.channels.headers} />
-        <HeaderEditor rows={headers} onChange={setHeaders} />
-      </Card>
-      <div className="flex justify-end">
-        <Button type="submit" variant="primary" loading={update.isPending}>
-          {t.common.save}
-        </Button>
-      </div>
-    </form>
+      )}
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title={t.channels.deleteTitle.replace('{name}', channel.name)}
+        description={t.channels.deleteHint}
+        confirmLabel={t.common.delete}
+        pending={remove.isPending}
+        onConfirm={() =>
+          remove.mutate(channel.id, {
+            onSuccess: () => {
+              setDeleting(false);
+              void navigate({ to: '/channels' });
+            },
+          })
+        }
+      />
+    </>
   );
 }
 
@@ -125,7 +180,7 @@ export function ChannelPage() {
           <div className="flex flex-col gap-5">
             <PageHeader
               title={loaded.name}
-              description={[loaded.provider_id, (loaded.formats ?? []).join(', ')]
+              description={[loaded.provider_id, loaded.endpoints.map((e) => e.format).join(' · ')]
                 .filter(Boolean)
                 .join(' · ')}
             />

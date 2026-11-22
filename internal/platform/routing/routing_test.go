@@ -75,17 +75,17 @@ func TestStickyTargetKeepsTheRestInPriorityOrder(t *testing.T) {
 
 func TestStickyDistinguishesUpstreamModels(t *testing.T) {
 	f := newFixture()
-	targets := []routing.Target{{ChannelID: "a", UpstreamModel: "one", Priority: 1}, {ChannelID: "a", UpstreamModel: "two", Priority: 1}}
+	targets := []routing.Target{{ChannelID: "a", ModelID: "one", Format: "f", Priority: 1}, {ChannelID: "a", ModelID: "two", Format: "f", Priority: 1}}
 	f.selector.RecordSuccess("session", admit(t, f.selector, routing.Candidate{Target: targets[1]}))
 	plan := f.selector.Plan(targets, keysFor("a"), "session", "")
-	if len(plan) != 2 || plan[0].Target.UpstreamModel != "two" {
+	if len(plan) != 2 || plan[0].Target.ModelID != "two" {
 		t.Fatalf("sticky target was not preferred: %+v", plan)
 	}
 }
 
 func TestPlanReservesNothing(t *testing.T) {
 	f := newFixture()
-	target := routing.Target{ChannelID: "a", UpstreamModel: "m"}
+	target := routing.Target{ChannelID: "a", ModelID: "m", Format: "f"}
 	trip(f.breakers, target.Backend())
 	f.now = f.now.Add(31 * time.Second)
 	for range 3 {
@@ -97,7 +97,7 @@ func TestPlanReservesNothing(t *testing.T) {
 
 func TestBreakerProbeLifecycle(t *testing.T) {
 	f := newFixture()
-	backend := routing.Backend{ChannelID: "c", UpstreamModel: "m"}
+	backend := routing.Backend{ChannelID: "c", ModelID: "m", Format: "f"}
 	trip(f.breakers, backend)
 	if _, admitted := f.breakers.Take(backend); admitted {
 		t.Fatal("breaker should be open")
@@ -123,7 +123,7 @@ func TestBreakerProbeLifecycle(t *testing.T) {
 
 func TestStaleTicketsCannotSettleTheProbe(t *testing.T) {
 	f := newFixture()
-	backend := routing.Backend{ChannelID: "c", UpstreamModel: "m"}
+	backend := routing.Backend{ChannelID: "c", ModelID: "m", Format: "f"}
 	early, _ := f.breakers.Take(backend)
 	trip(f.breakers, backend)
 	f.now = f.now.Add(31 * time.Second)
@@ -142,7 +142,7 @@ func TestStaleTicketsCannotSettleTheProbe(t *testing.T) {
 
 func TestLostProbeExpires(t *testing.T) {
 	f := newFixture()
-	backend := routing.Backend{ChannelID: "c", UpstreamModel: "m"}
+	backend := routing.Backend{ChannelID: "c", ModelID: "m", Format: "f"}
 	trip(f.breakers, backend)
 	f.now = f.now.Add(31 * time.Second)
 	lost, admitted := f.breakers.Take(backend)
@@ -161,11 +161,11 @@ func TestLostProbeExpires(t *testing.T) {
 
 func TestHealthUsesTheBreakerKey(t *testing.T) {
 	f := newFixture()
-	target := routing.Target{ChannelID: "c", UpstreamModel: "m", Priority: 7, Weight: 3}
+	target := routing.Target{ChannelID: "c", ModelID: "m", Format: "f", Priority: 7, Weight: 3}
 	for range 5 {
 		f.selector.RecordFailure(admit(t, f.selector, routing.Candidate{Target: target}))
 	}
-	if health := f.selector.Health("c", "m"); health.State != routing.StateOpen {
+	if health := f.selector.Health("c", "m", "f"); health.State != routing.StateOpen {
 		t.Fatalf("health must not depend on priority or weight: %+v", health)
 	}
 }

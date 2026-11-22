@@ -17,9 +17,9 @@ func main() {
 	http.HandleFunc("/chat/fail", chatFail)
 	http.HandleFunc("/chat/partial", chatPartial)
 	http.HandleFunc("/chat/tool", chatTool)
+	http.HandleFunc("/chat/multi", chatMulti)
 	http.HandleFunc("/chat/echo", chatEcho)
 	http.HandleFunc("/messages/echo", messagesEcho)
-	http.HandleFunc("/messages/tool", messagesTool)
 	if err := http.ListenAndServe(*address, nil); err != nil {
 		panic(err)
 	}
@@ -66,6 +66,14 @@ func chatTool(writer http.ResponseWriter, request *http.Request) {
 	})
 }
 
+func chatMulti(writer http.ResponseWriter, request *http.Request) {
+	stream(writer, []string{
+		`{"id":"chatcmpl-fault","model":"fault","choices":[{"index":0,"delta":{"content":"MULTI_0"}},{"index":1,"delta":{"content":"MULTI_1"}}]}`,
+		`{"id":"chatcmpl-fault","model":"fault","choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`,
+		`[DONE]`,
+	})
+}
+
 func chatEcho(writer http.ResponseWriter, request *http.Request) {
 	body, _ := io.ReadAll(request.Body)
 	text := fmt.Sprintf("body=%s organization=%s beta=%s static=%s cookie=%s", string(body),
@@ -84,14 +92,10 @@ func messagesEcho(writer http.ResponseWriter, request *http.Request) {
 	var payload map[string]any
 	_ = json.Unmarshal(body, &payload)
 	text := fmt.Sprintf("max_tokens=%v", payload["max_tokens"])
-	message(writer, text, false)
+	message(writer, text)
 }
 
-func messagesTool(writer http.ResponseWriter, request *http.Request) {
-	message(writer, "", true)
-}
-
-func message(writer http.ResponseWriter, text string, tool bool) {
+func message(writer http.ResponseWriter, text string) {
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.WriteHeader(http.StatusOK)
 	flusher, _ := writer.(http.Flusher)
@@ -102,21 +106,11 @@ func message(writer http.ResponseWriter, text string, tool bool) {
 		}
 	}
 	write("message_start", `{"type":"message_start","message":{"id":"msg_fault","type":"message","role":"assistant","model":"fault","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}`)
-	if tool {
-		write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_fault","name":"get_weather","input":{}}}`)
-		write("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Paris\"}"}}`)
-		write("content_block_stop", `{"type":"content_block_stop","index":0}`)
-	} else {
-		encoded, _ := json.Marshal(text)
-		write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
-		write("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":`+string(encoded)+`}}`)
-		write("content_block_stop", `{"type":"content_block_stop","index":0}`)
-	}
-	finish := "end_turn"
-	if tool {
-		finish = "tool_use"
-	}
-	write("message_delta", `{"type":"message_delta","delta":{"stop_reason":"`+finish+`"},"usage":{"output_tokens":1}}`)
+	encoded, _ := json.Marshal(text)
+	write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+	write("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":`+string(encoded)+`}}`)
+	write("content_block_stop", `{"type":"content_block_stop","index":0}`)
+	write("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`)
 	write("message_stop", `{"type":"message_stop"}`)
 }
 

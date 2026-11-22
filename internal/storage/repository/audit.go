@@ -93,15 +93,11 @@ func (store *Store) VerifyAudit(ctx context.Context, scope AuditScope) ([]AuditR
 	if len(store.Secret) != 32 {
 		return []AuditReport{{Report: auditevent.ChainReport{Status: auditevent.StatusUnavailable, Error: "audit key unavailable"}}}, nil
 	}
-	limit := scope.Limit
-	if limit <= 0 {
-		limit = 1000
-	}
-	if limit > 5000 {
-		limit = 5000
-	}
 	calls := []entity.Call{}
-	query := store.DB.NewSelect().Model(&calls).Order("created_at DESC", "id DESC").Limit(limit)
+	query := store.DB.NewSelect().Model(&calls).Order("created_at DESC", "id DESC")
+	if scope.Limit > 0 {
+		query = query.Limit(scope.Limit)
+	}
 	if scope.ProjectID != "" {
 		query = query.Where("project_id = ?", scope.ProjectID)
 	}

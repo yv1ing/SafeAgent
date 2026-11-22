@@ -18,6 +18,7 @@ type Call struct {
 	ClientTransport        string     `json:"client_transport"`
 	EndpointFormat         string     `json:"endpoint_format"`
 	PublicModel            string     `json:"public_model"`
+	ModelID                string     `bun:"column:model_id" json:"model_id"`
 	UpstreamModel          string     `json:"upstream_model"`
 	ChannelID              string     `json:"channel_id"`
 	State                  string     `json:"state"`

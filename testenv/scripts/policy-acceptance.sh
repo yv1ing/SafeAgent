@@ -3,6 +3,7 @@ set -euo pipefail
 
 lab=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$lab/runtime"
+umask 077
 base="http://127.0.0.1:8080"
 api="$base/console/api"
 
@@ -10,10 +11,9 @@ if [ ! -f "$runtime/env" ]; then
   echo "the lab is not set up; run make lab-setup first" >&2
   exit 1
 fi
-set -a
-# shellcheck disable=SC1091
-. "$runtime/env"
-set +a
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 
 mkdir -p "$runtime/policy"
 jar="$runtime/cookies-policy.txt"
@@ -23,11 +23,7 @@ curl -fsS -c "$jar" -X POST "$api/session" "${marker[@]}" \
 
 formats=($SAFEAGENT_AVAILABLE_FORMATS)
 declare -A route
-for format in "${formats[@]}"; do
-  upper=${format^^}
-  var="SAFEAGENT_${upper}_ROUTE"
-  route[$format]=${!var}
-done
+load_routes
 
 rollback() {
   curl -sS -b "$jar" "${marker[@]}" -X POST "$api/projects/$SAFEAGENT_PROJECT/policies/1/rollback" >/dev/null || true

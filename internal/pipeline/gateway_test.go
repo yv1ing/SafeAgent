@@ -35,6 +35,7 @@ type rig struct {
 	selector *routing.Selector
 	breakers *routing.Breakers
 	limiter  *limit.Limiter
+	format   string
 }
 
 func newRig(t *testing.T, script func(testkit.Received) testkit.Reply) *rig {
@@ -86,7 +87,7 @@ func newRigWithTransport(t *testing.T, upstreamFormat string, transport provider
 		sequence++
 		return "call" + string(rune('a'+sequence))
 	}})
-	return &rig{store: store, upstream: upstream, pipeline: service, selector: selector, breakers: breakers, limiter: limiter}
+	return &rig{store: store, upstream: upstream, pipeline: service, selector: selector, breakers: breakers, limiter: limiter, format: upstreamFormat}
 }
 
 // recorder adapts httptest.ResponseRecorder to the pipeline's writer.
@@ -102,6 +103,16 @@ func (rig *rig) send(request pipeline.Request) *recorder {
 	writer := &recorder{httptest.NewRecorder()}
 	rig.pipeline.Serve(context.Background(), request, writer)
 	return writer
+}
+
+// addTarget adds a second catalog model and route target on the same channel.
+func (rig *rig) addTarget(modelID, upstreamName string) {
+	rig.store.Models = append(rig.store.Models, entity.Model{
+		ID: modelID, ProviderID: "test", UpstreamName: upstreamName, Kind: entity.ModelGeneration,
+		Formats: []string{rig.format}, Currency: "USD", Enabled: true, Version: 1,
+	})
+	rig.store.Channel[0].ModelIDs = append(rig.store.Channel[0].ModelIDs, modelID)
+	rig.store.Route.Targets = append(rig.store.Route.Targets, entity.Target{ChannelID: "channel_1", ModelID: modelID, Priority: 2, Weight: 1})
 }
 
 func eventKinds(events []entity.Event) []string {
@@ -269,7 +280,7 @@ func TestRejectedRequestsDoNotFailOver(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply {
 		return testkit.Reply{Status: 422, Body: `{"error":{"message":"unprocessable","request_id":"req_internal"}}`}
 	})
-	rig.store.Route.Targets = append(rig.store.Route.Targets, entity.Target{ChannelID: "channel_1", UpstreamModel: "second", Priority: 2, Weight: 1})
+	rig.addTarget("model_2", "second")
 	response := rig.chat(mailRequest)
 	if response.Code != 422 || !strings.Contains(response.Body.String(), "unprocessable") {
 		t.Fatalf("the upstream's reason must reach the client: %d %s", response.Code, response.Body)
@@ -280,7 +291,7 @@ func TestRejectedRequestsDoNotFailOver(t *testing.T) {
 	if got := len(rig.upstream.Requests()); got != 1 {
 		t.Fatalf("a rejected request must not be retried elsewhere, got %d upstream calls", got)
 	}
-	if health := rig.selector.Health("channel_1", "gpt-5-upstream"); health.Failures != 0 {
+	if health := rig.selector.Health("channel_1", "model_1", rig.format); health.Failures != 0 {
 		t.Fatalf("a rejection says nothing about upstream health: %+v", health)
 	}
 }
@@ -297,12 +308,12 @@ func TestTransientFailuresFailOverAndOpenTheBreaker(t *testing.T) {
 		}
 		return testkit.Reply{Frames: testkit.ChatText("from the second target")}
 	})
-	rig.store.Route.Targets = append(rig.store.Route.Targets, entity.Target{ChannelID: "channel_1", UpstreamModel: "backup", Priority: 2, Weight: 1})
+	rig.addTarget("model_2", "backup")
 	response := rig.chat(mailRequest)
 	if response.Code != 200 || !strings.Contains(response.Body.String(), "from the second target") {
 		t.Fatalf("expected failover: %d %s", response.Code, response.Body)
 	}
-	if health := rig.selector.Health("channel_1", "gpt-5-upstream"); health.Failures != 1 {
+	if health := rig.selector.Health("channel_1", "model_1", rig.format); health.Failures != 1 {
 		t.Fatalf("the failing target must be charged: %+v", health)
 	}
 }
@@ -328,7 +339,7 @@ func TestBlockingPolicyHoldsServerToolCalls(t *testing.T) {
 
 func TestHalfOpenProbeIsReleasedOnEveryExit(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Status: 400, Body: "no"} })
-	backend := routing.Backend{ChannelID: "channel_1", UpstreamModel: "gpt-5-upstream"}
+	backend := routing.Backend{ChannelID: "channel_1", ModelID: "model_1", Format: rig.format}
 	now := time.Now()
 	clock := &now
 	breakers := routing.NewBreakers(func() time.Time { return *clock })
@@ -965,6 +976,62 @@ func TestSameFormatRequestKeepsTheClientWireShape(t *testing.T) {
 	}
 }
 
+func TestClientFormatWinsOverChannelEndpointOrder(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+		ID: "test", Label: "Test",
+		Endpoints: map[model.Format]provider.EndpointSpec{
+			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
+			model.Messages: {
+				Format: model.Messages, BaseURL: rig.upstream.URL, Path: "/messages", Auth: provider.AuthAPIKey,
+				Compat: model.Compat{RequireMaxTokens: true},
+			},
+		},
+	})
+	rig.store.Channel[0].Endpoints = []entity.ChannelEndpoint{{Format: string(model.Messages)}, {Format: string(model.Chat)}}
+	rig.store.Models[0].Formats = []string{string(model.Messages), string(model.Chat)}
+	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
+		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
+	})
+	writer := rig.send(pipeline.Request{
+		Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}},
+		Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	if path := rig.upstream.Requests()[0].Path; path != "/chat/completions" {
+		t.Fatalf("the client format must win over channel order, got %s", path)
+	}
+}
+
+func TestUnavailableClientFormatFallsBackToTheFirstChannelEndpoint(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+		ID: "test", Label: "Test",
+		Endpoints: map[model.Format]provider.EndpointSpec{
+			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
+			model.Messages: {
+				Format: model.Messages, BaseURL: rig.upstream.URL, Path: "/messages", Auth: provider.AuthAPIKey,
+				Compat: model.Compat{RequireMaxTokens: true},
+			},
+		},
+	})
+	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
+		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
+	})
+	writer := rig.send(pipeline.Request{
+		Kind: model.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}, "Anthropic-Version": {"2023-06-01"}},
+		Body: []byte(`{"model":"gpt-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body.String())
+	}
+	if path := rig.upstream.Requests()[0].Path; path != "/chat/completions" {
+		t.Fatalf("the first channel endpoint must serve an unavailable client format, got %s", path)
+	}
+}
+
 func TestCustomToolKindIsRestoredForTheClient(t *testing.T) {
 	frames := []testkit.Frame{
 		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
@@ -1266,7 +1333,7 @@ func TestRawRequestPassThroughIsDisabledWhenCompatibilityRewritesTheBody(t *test
 	rig := newRigFor(t, string(model.Responses), func(testkit.Received) testkit.Reply {
 		return testkit.Reply{Body: `{"id":"resp_1","object":"response","created_at":1,"model":"m","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1}}`}
 	})
-	rig.store.Channel[0].CapabilityOverrides = []entity.CapabilityOverride{{Format: string(model.Responses), Field: "thinking"}}
+	rig.store.Channel[0].CapabilityOverrides = []entity.CapabilityOverride{{ModelID: "model_1", Format: string(model.Responses), Field: "thinking"}}
 	response := rig.send(pipeline.Request{Kind: model.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hi","reasoning":{"effort":"high"},"store":false}`)})
 	if response.Code != 200 {
 		t.Fatalf("%d %s", response.Code, response.Body)
@@ -1281,5 +1348,22 @@ func TestRawRequestPassThroughIsDisabledWhenCompatibilityRewritesTheBody(t *test
 	}
 	if !found {
 		t.Fatalf("the compatibility rewrite must be recorded: %+v", rig.store.Calls[0].Losses)
+	}
+}
+
+func TestSameFormatMultiChoiceStreamPassesThrough(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: []testkit.Frame{
+			{Data: `{"id":"chatcmpl-upstream","model":"m","choices":[{"index":0,"delta":{"content":"A"}},{"index":1,"delta":{"content":"B"}}]}`},
+			{Data: `{"id":"chatcmpl-upstream","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}]}`},
+			{Data: `[DONE]`},
+		}}
+	})
+	response := rig.chat(`{"model":"gpt-5","stream":true,"n":2,"messages":[{"role":"user","content":"hi"}]}`)
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	if !strings.Contains(response.Body.String(), `"id":"chatcmpl-upstream"`) || !strings.Contains(response.Body.String(), "B") {
+		t.Fatalf("the multi-choice stream must pass through: %s", response.Body.String())
 	}
 }

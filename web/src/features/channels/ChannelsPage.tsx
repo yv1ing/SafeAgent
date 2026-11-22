@@ -19,8 +19,8 @@ import { useCreateChannel } from './hooks';
 const blankChannel: ConsoleChannelInput = {
   name: '',
   provider_id: 'anthropic',
-  endpoints: [],
-  currency: 'USD',
+  endpoints: [{ format: 'anthropic_messages', base_url: '', path: '' }],
+  model_ids: [],
   enabled: true,
 };
 
@@ -80,14 +80,14 @@ export function ChannelsPage() {
                   key: 'formats',
                   header: t.channels.formats,
                   className: 'font-mono text-xs text-muted',
-                  cell: (row) => (row.formats ?? []).join(', '),
+                  cell: (row) => row.endpoints.map((endpoint) => endpoint.format).join(' · '),
                 },
                 {
                   key: 'models',
                   header: t.channels.models,
                   className: 'text-muted',
                   cell: (row) => {
-                    const count = row.models?.length ?? 0;
+                    const count = row.model_ids?.length ?? 0;
                     return interpolate(
                       count === 1 ? t.channels.modelCountOne : t.channels.modelCount,
                       {

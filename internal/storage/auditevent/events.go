@@ -9,7 +9,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/redact"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 const (
 	KindRequest       = "request"
@@ -53,6 +53,7 @@ type Request struct {
 type Attempt struct {
 	ChannelID     string `json:"channel_id"`
 	ChannelName   string `json:"channel_name"`
+	ModelID       string `json:"model_id"`
 	UpstreamModel string `json:"upstream_model"`
 	Format        string `json:"format"`
 	KeyID         string `json:"key_id"`

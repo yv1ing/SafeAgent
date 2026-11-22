@@ -285,13 +285,16 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 		}
 	}
 
-	targets, endpoints, available, err := pipeline.resolve(state.ctx, identity.Project.ID, request.Model)
+	targets, endpoints, available, routeKind, err := pipeline.resolve(state.ctx, identity.Project.ID, request.Model, state.kind)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		pipeline.logger.Error("routes could not be read", "error", err)
 		return internal("store_failure", "The model routes could not be loaded.")
 	}
 	if err != nil || len(targets) == 0 {
 		return failure("invalid_request", model.ClassInvalid, "model_not_found", "The model is not configured for this project.", http.StatusNotFound)
+	}
+	if routeKind != string(entity.ModelGeneration) {
+		return failure("invalid_request", model.ClassInvalid, "model_kind_mismatch", "The model is not a generation model.", http.StatusUnprocessableEntity)
 	}
 	if request.ChoiceCount > 1 && (!state.stream || len(state.hits) > 0 || state.historyExpanded || !state.hasSameFormat(targets)) {
 		return model.UnsupportedFeature("unsupported_multi_choice", "Multiple candidates are available only through a same-format channel without redaction or history expansion.")
@@ -315,13 +318,15 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 	return nil
 }
 
+// hasSameFormat reports whether every candidate can pass the client body through unchanged. A
+// multi-choice request is safe only when no target would be re-encoded or converted.
 func (state *call) hasSameFormat(targets []routing.Target) bool {
 	for _, target := range targets {
-		if target.Format == string(state.kind) {
-			return true
+		if target.Format != string(state.kind) {
+			return false
 		}
 	}
-	return false
+	return len(targets) > 0
 }
 
 // observeOptions builds the adapter configuration shared by every online evaluation. The redactor

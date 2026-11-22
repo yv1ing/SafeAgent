@@ -5,30 +5,8 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
-	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
-
-// EnqueueJob inserts a job unless one with the same dedupe key already exists. The dedupe key is
-// what makes the seal-time outbox and a later repair pass idempotent.
-func (store *Store) EnqueueJob(ctx context.Context, job *entity.AnalysisJob) error {
-	if job.ID == "" {
-		job.ID = "job_" + secure.Random(12)
-	}
-	if job.MaxAttempts <= 0 {
-		job.MaxAttempts = 5
-	}
-	now := time.Now().UTC()
-	if job.CreatedAt.IsZero() {
-		job.CreatedAt = now
-	}
-	job.UpdatedAt = now
-	if job.State == "" {
-		job.State = "pending"
-	}
-	_, err := store.DB.NewInsert().Model(job).On("CONFLICT (dedupe_key) DO NOTHING").Exec(ctx)
-	return err
-}
 
 // CreateBatchWithJobs writes a batch and all of its jobs in one transaction, so a replay cannot
 // leave a running batch with fewer jobs than its total.

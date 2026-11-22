@@ -6,33 +6,17 @@ runtime="$lab/runtime"
 base="http://127.0.0.1:8080"
 api="$base/console/api"
 
+umask 077
+# shellcheck source=lib.sh
+. "$lab/scripts/lib.sh"
+lab_env "$lab"
 cd "$lab"
-if [ -f .env ]; then
-  # shellcheck disable=SC1091
-  set -a; . ./.env; set +a
-fi
-
-upstream() {
-  local format=$1 suffix=$2
-  local upper=${format^^}
-  local specific="SAFEAGENT_UPSTREAM_${upper}_${suffix}"
-  local value=${!specific:-}
-  if [ -z "$value" ]; then
-    case "$suffix" in
-      KEY|MODEL|PROVIDER)
-        local shared="SAFEAGENT_UPSTREAM_${suffix}"
-        value=${!shared:-}
-        ;;
-    esac
-  fi
-  printf '%s' "$value"
-}
 
 formats=(chat responses messages gemini)
 declare -A channel_format=([chat]=openai_chat [responses]=openai_responses [messages]=anthropic_messages [gemini]=google_gemini)
 declare -A default_provider=([chat]=openai [responses]=openai [messages]=anthropic [gemini]=google)
 available=()
-declare -A channel_model channel_provider channel_url channel_key
+declare -A channel_model channel_model_id channel_provider channel_url channel_key
 
 for format in "${formats[@]}"; do
   url=$(upstream "$format" URL)
@@ -68,10 +52,6 @@ mkdir -p "$runtime/workspace"/{claude,codex,gemini,pi} "$runtime/screenshots" "$
 for agent in claude codex gemini pi; do
   printf 'bluebird\n' > "$runtime/workspace/$agent/hello.txt"
 done
-printf 'deep-' > "$runtime/workspace/claude/prefix.txt"
-printf 'deep-' > "$runtime/workspace/codex/prefix.txt"
-printf 'deep-' > "$runtime/workspace/gemini/prefix.txt"
-printf 'deep-' > "$runtime/workspace/pi/prefix.txt"
 
 models_json=$runtime/pi-models.json
 jq -n --arg base "http://host.docker.internal:8080/v1" '{
@@ -117,8 +97,10 @@ EOF
 : > "$runtime/gateway.log"
 "$lab/scripts/restart-gateway.sh"
 
-initial=$(sed -n 's/^Initial administrator: admin \/ //p' "$runtime/gateway.log" | head -1)
-if [ -z "$initial" ]; then
+initial_line=$(sed -n 's/^Initial administrator: //p' "$runtime/gateway.log" | head -1)
+initial_user=${initial_line%% /*}
+initial=${initial_line#* / }
+if [ -z "$initial_line" ] || [ "$initial_user" = "$initial" ]; then
   echo "the database already has an administrator; rerun with FRESH=1 to rebuild the lab" >&2
   exit 1
 fi
@@ -126,12 +108,20 @@ fi
 jar="$runtime/cookies.txt"
 marker=(-H 'X-SafeAgent-Request: 1' -H "Origin: $base" -H 'Content-Type: application/json')
 curl -sS --fail-with-body -c "$jar" -X POST "$api/session" "${marker[@]}" \
-  -d "{\"username\":\"admin\",\"password\":\"$initial\"}" >/dev/null
+  -d "{\"username\":\"$initial_user\",\"password\":\"$initial\"}" >/dev/null
 curl -sS --fail-with-body -b "$jar" -X PUT "$api/session/password" "${marker[@]}" \
   -d "{\"current\":\"$initial\",\"next\":\"$admin_password\"}" >/dev/null
 
 post() {
   curl -sS --fail-with-body -b "$jar" -X POST "$api$1" "${marker[@]}" -d "$2"
+}
+
+get() {
+  curl -sS --fail-with-body -b "$jar" "$api$1"
+}
+
+put() {
+  curl -sS --fail-with-body -b "$jar" -X PUT "$api$1" "${marker[@]}" -d "$2"
 }
 
 project=$(post /projects '{"name":"Protocol Lab","retention_days":30,"requests_per_minute":0,"concurrency":0,"daily_token_quota":0}' | jq -r .id)
@@ -153,21 +143,40 @@ channel_body() {
     --arg provider "${channel_provider[$format]}" \
     --arg format "${channel_format[$format]}" \
     --arg endpoint "${channel_url[$format]}" \
-    --arg model "${channel_model[$format]}" \
+    --arg model_id "${channel_model_id[$format]}" \
     --argjson headers "$headers" \
     --argjson limit "${limit:-0}" \
-    '{name:$name,provider_id:$provider,endpoints:[{format:$format,base_url:$endpoint}],headers:$headers,default_max_output_tokens:$limit,models:[{name:$model}],currency:"USD",enabled:true,allow_private_network:true}'
+    '{name:$name,provider_id:$provider,endpoints:[{format:$format,base_url:$endpoint}],model_ids:[$model_id],headers:$headers,default_max_output_tokens:$limit,enabled:true,allow_private_network:true}'
 }
 
 declare -A channel_id route_name
 for format in "${available[@]}"; do
+  model_json=$(get /models | jq -c --arg provider "${channel_provider[$format]}" --arg model "${channel_model[$format]}" \
+    '.[] | select(.provider_id == $provider and .upstream_name == $model)' | head -1)
+  if [ -z "$model_json" ]; then
+    channel_model_id[$format]=$(post /models "$(jq -nc \
+      --arg provider "${channel_provider[$format]}" \
+      --arg model "${channel_model[$format]}" \
+      --arg format "${channel_format[$format]}" \
+      '{provider_id:$provider,upstream_name:$model,kind:"generation",formats:[$format],currency:"USD",enabled:true}')" | jq -r .id)
+  else
+    if [ "$(jq -r .kind <<<"$model_json")" != "generation" ]; then
+      echo "the upstream model ${channel_model[$format]} already exists with a non-generation kind" >&2
+      exit 1
+    fi
+    channel_model_id[$format]=$(jq -r .id <<<"$model_json")
+    if ! jq -e --arg format "${channel_format[$format]}" '.formats | index($format)' <<<"$model_json" >/dev/null; then
+      put "/models/${channel_model_id[$format]}" "$(jq -c --arg format "${channel_format[$format]}" \
+        '{provider_id,upstream_name,display_name,kind,formats:(.formats + [$format]),input_price,output_price,cache_read_price,cache_write_price,currency,enabled,version}' <<<"$model_json")" >/dev/null
+    fi
+  fi
   channel_id[$format]=$(post /channels "$(channel_body "$format")" | jq -r .id)
   post "/channels/${channel_id[$format]}/keys" \
     "$(jq -nc --arg secret "${channel_key[$format]}" '{label:"lab",secret:$secret}')" >/dev/null
   route_name[$format]="lab-$format"
   post "/projects/$project/routes" \
-    "$(jq -nc --arg name "${route_name[$format]}" --arg channel "${channel_id[$format]}" --arg model "${channel_model[$format]}" --arg route_format "${channel_format[$format]}" \
-      '{name:$name,targets:[{channel_id:$channel,upstream_model:$model,format:$route_format,priority:0,weight:1}]}')" >/dev/null
+    "$(jq -nc --arg name "${route_name[$format]}" --arg channel "${channel_id[$format]}" --arg model_id "${channel_model_id[$format]}" \
+      '{name:$name,targets:[{channel_id:$channel,model_id:$model_id,priority:0,weight:1}]}')" >/dev/null
 done
 
 key() {
@@ -181,12 +190,11 @@ codex_key=$(key codex)
 gemini_key=$(key gemini)
 pi_key=$(key pi)
 matrix_key=$(key matrix)
-security_key=$(key security)
 
 channels_json=$(jq -nc '{}')
 for format in "${available[@]}"; do
-  channels_json=$(jq -c --arg format "$format" --arg id "${channel_id[$format]}" --arg model "${channel_model[$format]}" \
-    '. + {($format): {id:$id, model:$model}}' <<<"$channels_json")
+  channels_json=$(jq -c --arg format "$format" --arg id "${channel_id[$format]}" --arg model "${channel_model[$format]}" --arg model_id "${channel_model_id[$format]}" \
+    '. + {($format): {id:$id, model:$model, model_id:$model_id}}' <<<"$channels_json")
 done
 routes_json=$(jq -nc '{}')
 for format in "${available[@]}"; do
@@ -197,9 +205,9 @@ jq -n \
   --arg base "$base" --arg project "$project" \
   --argjson channels "$channels_json" --argjson routes "$routes_json" \
   --arg claude_key "$claude_key" --arg codex_key "$codex_key" --arg gemini_key "$gemini_key" \
-  --arg pi_key "$pi_key" --arg matrix_key "$matrix_key" --arg security_key "$security_key" \
+  --arg pi_key "$pi_key" --arg matrix_key "$matrix_key" \
   --arg admin_password "$admin_password" \
-  '{base:$base,project:$project,channels:$channels,routes:$routes,keys:{claude:$claude_key,codex:$codex_key,gemini:$gemini_key,pi:$pi_key,matrix:$matrix_key,security:$security_key},admin_password:$admin_password}' \
+  '{base:$base,project:$project,channels:$channels,routes:$routes,keys:{claude:$claude_key,codex:$codex_key,gemini:$gemini_key,pi:$pi_key,matrix:$matrix_key},admin_password:$admin_password}' \
   > "$runtime/state.json"
 
 available_list=${available[*]}
@@ -212,14 +220,12 @@ SAFEAGENT_CODEX_KEY=$codex_key
 SAFEAGENT_GEMINI_KEY=$gemini_key
 SAFEAGENT_PI_KEY=$pi_key
 SAFEAGENT_MATRIX_KEY=$matrix_key
-SAFEAGENT_SECURITY_KEY=$security_key
 SAFEAGENT_ADMIN_PASSWORD=$admin_password
 SAFEAGENT_LAB_UID=$lab_uid
 SAFEAGENT_LAB_GID=$lab_gid
 EOF
 for format in "${available[@]}"; do
   printf 'SAFEAGENT_%s_ROUTE=%s\n' "${format^^}" "${route_name[$format]}" >> "$runtime/env"
-  printf 'SAFEAGENT_%s_CHANNEL=%s\n' "${format^^}" "${channel_id[$format]}" >> "$runtime/env"
 done
 
 if [ "$(id -u)" = "0" ]; then
@@ -227,4 +233,4 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 echo "lab ready"
-jq '{project, channels, routes, keys:{claude:(.keys.claude[0:12]+"..."),codex:(.keys.codex[0:12]+"..."),gemini:(.keys.gemini[0:12]+"..."),pi:(.keys.pi[0:12]+"..."),matrix:(.keys.matrix[0:12]+"..."),security:(.keys.security[0:12]+"...")}}' "$runtime/state.json"
+jq '{project, channels, routes, keys:{claude:(.keys.claude[0:12]+"..."),codex:(.keys.codex[0:12]+"..."),gemini:(.keys.gemini[0:12]+"..."),pi:(.keys.pi[0:12]+"..."),matrix:(.keys.matrix[0:12]+"...")}}' "$runtime/state.json"

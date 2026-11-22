@@ -101,7 +101,7 @@ func TestConsoleDoesNotImportTheWireModel(t *testing.T) {
 }
 
 func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
-	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/stream", "observation", "observe", "analysis", "redact", "platform/config", "platform/limit", "platform/routing", "platform/secure"} {
+	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/provider/builtin", "llm/stream", "observation", "observe", "analysis", "analysis/builtin", "analysis/decision", "redact", "platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure"} {
 		imports := packageImports(t, filepath.Join("..", library))
 		if library == "analysis" {
 			imports = append(imports, packageImports(t, filepath.Join("..", "analysis", "policy"))...)
@@ -143,6 +143,8 @@ func packageImports(t *testing.T, directory string) []string {
 		if err != nil {
 			return err
 		}
+		// Production imports define the boundaries. Tests may compose layers deliberately, for
+		// example a repository integration test that drives the console services.
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}

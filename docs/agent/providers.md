@@ -1,6 +1,6 @@
 # Providers
 
-The provider catalog is code, not configuration. Each built-in provider is one file under `internal/llm/provider/builtin`; adding a provider means adding that file and one entry in `builtin.All()`. A channel stores the provider id, keys, optional endpoint overrides, optional format disabling, headers and machine-written capability overrides.
+The provider catalog is code, not configuration. Each built-in provider is one file under `internal/llm/provider/builtin`; adding a provider means adding that file and one entry in `builtin.All()`. A channel stores the provider id, an ordered list of enabled formats with optional base URL and path overrides per format, the catalog model ids it exposes, keys, headers and machine-written capability overrides.
 
 ## Types
 
@@ -52,17 +52,21 @@ Compatibility highlights:
 
 ## Channel overrides
 
-A channel may set a base URL and path per format, disable a format, add headers and forwarded headers, set a default output limit and set timeouts. **Endpoint entries are overrides.** An absent entry keeps the provider default; an entry with a base URL or path replaces that part; `disabled: true` hides the format. When no entry exists, every format of the provider is enabled.
+A channel enables one or more formats the provider offers, in fallback order. Each endpoint may override the base URL and path; empty values keep the provider default, and a custom provider requires a base URL. The channel also lists the catalog model ids it exposes. A model remains global: the same model can be enabled on several channels, and a channel can enable models across its formats.
 
-Capability overrides are written by the gateway after an upstream rejects a field and are read-only in the console. Supported override fields are `top_k`, `budget_tokens`, `service_tier`, `stop`, `logprobs`, `thinking`, `tools` and `custom_tool`.
+A route target chooses one channel and one catalog model. At resolution time the effective formats are the channel endpoint order filtered by the model formats. The client format wins when it is present; otherwise the first enabled format is used. One target produces one candidate for one format, so a failed target moves to the next target rather than retrying another format in place.
+
+Capability overrides are written by the gateway after an upstream rejects a field and are read-only in the console. They are keyed by channel, model, format and field. Supported fields are `top_k`, `budget_tokens`, `service_tier`, `stop`, `logprobs`, `thinking`, `tools` and `custom_tool`.
 
 ## Discovery
 
-The console can list the models a channel exposes. It calls the provider's listing endpoint with the channel's first enabled key through the pinned dialer and parses the OpenAI, Anthropic or Gemini shape. Discovery never sends a billable generation request. The returned names are candidates for route targets; a route still maps a public model to an explicit upstream model.
+Discovery is initiated for one enabled channel format. It calls that format's listing endpoint with the channel's first enabled key and configured headers through the pinned dialer and parses the OpenAI, Anthropic or Gemini shape. Discovery never sends a billable generation request.
+
+The returned names are candidates; nothing is imported without confirmation. Importing creates a missing catalog model with the discovered format, adds the format to an existing generation model, and enables the model on the channel. A name that already belongs to an embedding or moderation model is skipped and reported.
 
 ## Field rejection
 
-When an upstream rejects a request because of an optional field, the pipeline identifies the field from the error body, folds it into the endpoint's in-memory compatibility set, records a `capability_field_removed` loss, writes the override to the channel and retries the same key once. A second rejection is returned unchanged.
+When an upstream rejects a request because of an optional field, the pipeline identifies the field from the error body, folds it into the endpoint's in-memory compatibility set for that channel model format, records a `capability_field_removed` loss, writes the override to the channel and retries the same key once. A second rejection is returned unchanged.
 
 ## Related
 

@@ -6,20 +6,19 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { ConsoleChannelEndpointView } from './consoleChannelEndpointView.ts';
-import type { ConsoleChannelModelView } from './consoleChannelModelView.ts';
 import type { ConsoleUpdateChannelInputHeaders } from './consoleUpdateChannelInputHeaders.ts';
 
 export interface ConsoleUpdateChannelInput {
   allow_private_network?: boolean;
-  currency?: string;
   /** Applied to an upstream that requires an output limit when the client omits one */
   default_max_output_tokens?: number;
   enabled?: boolean;
-  endpoints?: ConsoleChannelEndpointView[];
+  /** Ordered provider formats; presence enables the format */
+  endpoints: ConsoleChannelEndpointView[];
   first_byte_timeout_seconds?: number;
   forward_headers?: string[];
   headers?: ConsoleUpdateChannelInputHeaders;
-  models?: ConsoleChannelModelView[];
+  model_ids: string[];
   name: string;
   provider_id: string;
   timeout_seconds?: number;

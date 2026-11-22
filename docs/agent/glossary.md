@@ -5,12 +5,13 @@ One English term per concept, with the Chinese term used in `README_zh.md` and `
 | English | Chinese | Meaning |
 | --- | --- | --- |
 | gateway | 网关 | The process and HTTP surface that admits, converts, checks and records agent traffic. |
-| channel | 渠道 | One upstream provider configuration: provider id, keys, endpoint overrides and limits. |
+| model | 模型 | One administrator-owned catalog entry: provider, upstream name, kind, supported formats and prices. |
+| channel | 渠道 | One upstream provider connection: provider id, ordered enabled formats, endpoint overrides, model ids, keys and limits. |
 | upstream | 上游 | The model provider or endpoint a channel points at. |
-| route | 路由 | The project-visible mapping from a public model name to one or more channel targets. |
+| route | 路由 | The project-visible mapping from a public model name to one or more channel and catalog-model targets. |
 | public model | 公开模型 | The model name an agent sends; it is resolved by a route. |
-| upstream model | 上游模型 | The provider's model name after route mapping. |
-| attempt | 尝试 | One upstream request to one channel and key. |
+| upstream model | 上游模型 | The provider's model name after alias mapping at call time; it is stored as a call snapshot. |
+| attempt | 尝试 | One upstream request to one channel, catalog model and key. |
 | call | 调用 | One admitted client request, including its attempts, response and audit events. |
 | session | 会话 | A grouping of calls from one agent key; it is not an identity. |
 | conversation | 会话 | The console view of the calls that share a session. |
@@ -19,7 +20,7 @@ One English term per concept, with the Chinese term used in `README_zh.md` and `
 | item | 条目 | One message, reasoning block, tool call, tool result, media or native object. |
 | origin | 来源 | Where content entered: system, developer, user, assistant, tool result, tool description or environment. |
 | trust | 信任级别 | Whether content may be treated as instructions. Tool output and tool descriptions are untrusted. |
-| sink | 去向 | What a tool call can do: send, execute, read, write, access credentials, pay or unknown. |
+| sink | 去向 | What a tool call can do: send, execute, read, write, access credentials, pay, none or unknown. |
 | finding | 发现 | One deterministic observation with a code, severity, evidence and optional three-axis labels. |
 | flow | 关系 | An edge from external content to a later side-effecting tool call inside a call. |
 | decision | 决策 | One online policy or decision-model result stored with the call. |

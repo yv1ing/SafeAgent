@@ -6,9 +6,9 @@ This document describes the canonical model, the stream session, the provider ca
 
 | Package | Responsibility |
 | --- | --- |
-| `internal/llm/model` | Canonical request, response, item, event, loss and profile types. Standard library only. |
+| `internal/llm/model` | Canonical request, response, item, event, loss types, `Capability` and `Compat`. Standard library only. |
 | `internal/llm/codec` | Codec contract, shared conversion helpers and the `chat`, `responses`, `messages`, `gemini` codecs. |
-| `internal/llm/provider` | `ProviderSpec`, `EndpointSpec`, `Capability`, `Compat`, endpoint URL/auth construction and model discovery parsing. |
+| `internal/llm/provider` | `ProviderSpec`, `EndpointSpec`, endpoint URL/auth construction and model discovery parsing. |
 | `internal/llm/provider/builtin` | One file per built-in provider; `All()` registers them. |
 | `internal/llm/stream` | One streaming session per call: commit boundary, tool holds, restoration, keepalive, raw pass-through and JSON synthesis. |
 | `internal/pipeline` | Admission, redaction, four policy checkpoints, routing, attempts, audit and auxiliary endpoints. |
@@ -63,7 +63,7 @@ Every generation conversion loss is written to the call's audit record. A stream
 
 Each provider is one `ProviderSpec` with an `EndpointSpec` per format. An endpoint declares the base URL, path, count-token path, auth style, static headers, capability, compatibility quirks, discovery path/shape, transport mode, model aliases and auxiliary endpoints.
 
-A channel stores `provider_id`, per-format endpoint overrides (base URL, path, disabled), capability overrides, headers and limits. An endpoint entry overrides the catalog; an absent entry keeps the provider default; a disabled entry hides that format. See [Providers](providers.md) for the full override semantics.
+A channel stores `provider_id`, ordered endpoint entries that enable one or more formats, per-format base URL and path overrides, the catalog model ids it exposes, capability overrides, headers and limits. An empty override keeps the provider default. The runtime picks one format per target by intersecting the channel order with the model formats and preferring the client format. See [Providers](providers.md) for the full override semantics.
 
 ## Loss ledger
 

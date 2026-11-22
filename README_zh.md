@@ -126,7 +126,7 @@ build/bin/safeagent -config config.toml serve
 首次启动会创建数据库结构，并在标准输出打印一次初始管理员账号与密码。随后：
 
 1. 打开 <http://127.0.0.1:8080/console/>，使用该密码登录。
-2. 创建项目、渠道、路由和 Agent 密钥。
+2. 添加模型目录、渠道、路由和 Agent 密钥。
 3. 按[快速上手](docs/human/getting-started_zh.md)接入 Agent。
 
 ## 部署与边界

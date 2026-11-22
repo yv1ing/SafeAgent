@@ -101,10 +101,10 @@ lab-agents:
 	testenv/scripts/run-agents.sh
 
 lab-protocol:
-	@set -a; . testenv/runtime/env; set +a; node testenv/protocol/matrix.mjs
+	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; node testenv/protocol/matrix.mjs
 
 lab-auxiliary:
-	@set -a; . testenv/runtime/env; set +a; node testenv/protocol/auxiliary.mjs
+	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; node testenv/protocol/auxiliary.mjs
 
 lab-policy:
 	testenv/scripts/policy-acceptance.sh
@@ -119,7 +119,7 @@ lab-faults:
 	testenv/scripts/faults-acceptance.sh
 
 lab-browser:
-	@set -a; . testenv/runtime/env; set +a; \
+	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; \
 		docker compose -f testenv/docker-compose.yml build browser && \
 		docker compose -f testenv/docker-compose.yml run --rm browser
 

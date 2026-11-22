@@ -271,6 +271,9 @@
           "key_id": {
             "type": "string"
           },
+          "model_id": {
+            "type": "string"
+          },
           "result": {
             "type": "string"
           },
@@ -284,6 +287,7 @@
         "required": [
           "channel_id",
           "channel_name",
+          "model_id",
           "upstream_model",
           "key_id",
           "start_ms",
@@ -556,6 +560,9 @@
           "max_severity": {
             "type": "string"
           },
+          "model_id": {
+            "type": "string"
+          },
           "output_tokens": {
             "type": "integer"
           },
@@ -604,6 +611,7 @@
           "agent_key_id",
           "client_format",
           "public_model",
+          "model_id",
           "upstream_model",
           "channel_id",
           "state",
@@ -641,28 +649,152 @@
           "format": {
             "type": "string"
           },
+          "model_id": {
+            "type": "string"
+          },
           "reason": {
             "type": "string"
           }
         },
         "required": [
+          "model_id",
           "format",
           "field"
+        ],
+        "type": "object"
+      },
+      "ConsoleCatalogModelInput": {
+        "properties": {
+          "cache_read_price": {
+            "type": "integer"
+          },
+          "cache_write_price": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "input_price": {
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "moderation"
+            ],
+            "type": "string"
+          },
+          "output_price": {
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_id",
+          "upstream_name",
+          "kind",
+          "formats"
+        ],
+        "type": "object"
+      },
+      "ConsoleCatalogModelView": {
+        "properties": {
+          "cache_read_price": {
+            "type": "integer"
+          },
+          "cache_write_price": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_price": {
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "moderation"
+            ],
+            "type": "string"
+          },
+          "output_price": {
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "provider_id",
+          "upstream_name",
+          "kind",
+          "formats",
+          "currency",
+          "version",
+          "created_at"
         ],
         "type": "object"
       },
       "ConsoleChannelEndpointView": {
         "properties": {
           "base_url": {
+            "description": "Overrides the provider base URL for this format",
             "type": "string"
-          },
-          "disabled": {
-            "type": "boolean"
           },
           "format": {
             "type": "string"
           },
           "path": {
+            "description": "Overrides the provider path for this format",
             "type": "string"
           }
         },
@@ -676,9 +808,6 @@
           "allow_private_network": {
             "type": "boolean"
           },
-          "currency": {
-            "type": "string"
-          },
           "default_max_output_tokens": {
             "description": "Applied to an upstream that requires an output limit when the client omits one",
             "type": "integer"
@@ -687,6 +816,7 @@
             "type": "boolean"
           },
           "endpoints": {
+            "description": "Ordered provider formats; presence enables the format",
             "items": {
               "$ref": "#/components/schemas/ConsoleChannelEndpointView"
             },
@@ -707,9 +837,9 @@
             },
             "type": "object"
           },
-          "models": {
+          "model_ids": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleChannelModelView"
+              "type": "string"
             },
             "type": "array"
           },
@@ -728,7 +858,9 @@
         },
         "required": [
           "name",
-          "provider_id"
+          "provider_id",
+          "endpoints",
+          "model_ids"
         ],
         "type": "object"
       },
@@ -752,26 +884,36 @@
         ],
         "type": "object"
       },
-      "ConsoleChannelModelView": {
+      "ConsoleChannelModelOption": {
         "properties": {
-          "cache_read_price": {
-            "type": "integer"
+          "display_name": {
+            "type": "string"
           },
-          "cache_write_price": {
-            "type": "integer"
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "input_price": {
-            "type": "integer"
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "moderation"
+            ],
+            "type": "string"
           },
           "name": {
             "type": "string"
-          },
-          "output_price": {
-            "type": "integer"
           }
         },
         "required": [
-          "name"
+          "id",
+          "name",
+          "kind"
         ],
         "type": "object"
       },
@@ -788,7 +930,7 @@
           },
           "models": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ConsoleChannelModelOption"
             },
             "type": "array"
           },
@@ -840,12 +982,6 @@
             },
             "type": "array"
           },
-          "currency": {
-            "type": "string"
-          },
-          "custom": {
-            "type": "boolean"
-          },
           "default_max_output_tokens": {
             "type": "integer"
           },
@@ -860,12 +996,6 @@
           },
           "first_byte_timeout_seconds": {
             "type": "integer"
-          },
-          "formats": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
           },
           "forward_headers": {
             "items": {
@@ -882,9 +1012,9 @@
           "id": {
             "type": "string"
           },
-          "models": {
+          "model_ids": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleChannelModelView"
+              "type": "string"
             },
             "type": "array"
           },
@@ -904,7 +1034,9 @@
         "required": [
           "id",
           "name",
-          "provider_id"
+          "provider_id",
+          "endpoints",
+          "model_ids"
         ],
         "type": "object"
       },
@@ -1667,6 +1799,15 @@
           "cooldown_seconds": {
             "type": "integer"
           },
+          "format": {
+            "type": "string"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "model_name": {
+            "type": "string"
+          },
           "state": {
             "enum": [
               "closed",
@@ -1674,15 +1815,14 @@
               "half_open"
             ],
             "type": "string"
-          },
-          "upstream_model": {
-            "type": "string"
           }
         },
         "required": [
           "channel_id",
           "channel_name",
-          "upstream_model",
+          "model_id",
+          "model_name",
+          "format",
           "state",
           "consecutive_failures",
           "cooldown_seconds"
@@ -1713,6 +1853,35 @@
           "path",
           "start",
           "end"
+        ],
+        "type": "object"
+      },
+      "ConsoleImportModelsView": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ConsoleChannelView"
+          },
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channel"
         ],
         "type": "object"
       },
@@ -2307,7 +2476,7 @@
             "type": "integer"
           },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "description": "Applied when an upstream requires an output limit and the client omits one",
             "nullable": true,
             "type": "integer"
           },
@@ -2351,7 +2520,7 @@
             "type": "integer"
           },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "description": "Applied when an upstream requires an output limit and the client omits one",
             "type": "integer"
           },
           "failure_rate": {
@@ -2616,15 +2785,15 @@
             "type": "string"
           },
           "max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit and the channel has no default",
+            "description": "Applied when the target channel requires an output limit and the client omits one",
             "type": "integer"
+          },
+          "model_id": {
+            "type": "string"
           },
           "priority": {
             "description": "Lower values are tried first",
             "type": "integer"
-          },
-          "upstream_model": {
-            "type": "string"
           },
           "weight": {
             "description": "Relative share among targets of the same priority",
@@ -2633,7 +2802,7 @@
         },
         "required": [
           "channel_id",
-          "upstream_model",
+          "model_id",
           "priority",
           "weight"
         ],
@@ -3027,6 +3196,9 @@
           "message": {
             "type": "string"
           },
+          "model_id": {
+            "type": "string"
+          },
           "response": {
             "$ref": "#/components/schemas/ConsoleTimelineResponse"
           },
@@ -3059,6 +3231,7 @@
           "tool_name",
           "is_error",
           "channel_id",
+          "model_id",
           "upstream_model",
           "key_id"
         ],
@@ -3318,13 +3491,66 @@
         ],
         "type": "object"
       },
+      "ConsoleUpdateCatalogModelInput": {
+        "properties": {
+          "cache_read_price": {
+            "type": "integer"
+          },
+          "cache_write_price": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "input_price": {
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "moderation"
+            ],
+            "type": "string"
+          },
+          "output_price": {
+            "type": "integer"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Required on update, ignored on create",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_id",
+          "upstream_name",
+          "kind",
+          "formats"
+        ],
+        "type": "object"
+      },
       "ConsoleUpdateChannelInput": {
         "properties": {
           "allow_private_network": {
             "type": "boolean"
-          },
-          "currency": {
-            "type": "string"
           },
           "default_max_output_tokens": {
             "description": "Applied to an upstream that requires an output limit when the client omits one",
@@ -3334,6 +3560,7 @@
             "type": "boolean"
           },
           "endpoints": {
+            "description": "Ordered provider formats; presence enables the format",
             "items": {
               "$ref": "#/components/schemas/ConsoleChannelEndpointView"
             },
@@ -3354,9 +3581,9 @@
             },
             "type": "object"
           },
-          "models": {
+          "model_ids": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleChannelModelView"
+              "type": "string"
             },
             "type": "array"
           },
@@ -3375,7 +3602,9 @@
         },
         "required": [
           "name",
-          "provider_id"
+          "provider_id",
+          "endpoints",
+          "model_ids"
         ],
         "type": "object"
       },
@@ -3464,7 +3693,7 @@
             "type": "integer"
           },
           "default_max_output_tokens": {
-            "description": "Applied to an Anthropic Messages upstream when the client omits a limit",
+            "description": "Applied when an upstream requires an output limit and the client omits one",
             "type": "integer"
           },
           "name": {
@@ -3777,6 +4006,42 @@
       }
     },
     "/console/api/channels/{channel_id}": {
+      "delete": {
+        "operationId": "deleteChannel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      },
       "get": {
         "operationId": "getChannel",
         "parameters": [
@@ -3887,6 +4152,24 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "format": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "format"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -3941,6 +4224,76 @@
                     "$ref": "#/components/schemas/ConsoleHealthView"
                   },
                   "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/console/api/channels/{channel_id}/import-models": {
+      "post": {
+        "operationId": "importChannelModels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "format": {
+                    "type": "string"
+                  },
+                  "models": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "format",
+                  "models"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleImportModelsView"
                 }
               }
             },
@@ -4187,6 +4540,221 @@
         ],
         "tags": [
           "finding-codes"
+        ]
+      }
+    },
+    "/console/api/models": {
+      "get": {
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleCatalogModelView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "models"
+        ]
+      },
+      "post": {
+        "operationId": "createModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCatalogModelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleCatalogModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/console/api/models/{model_id}": {
+      "delete": {
+        "operationId": "deleteModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "models"
+        ]
+      },
+      "get": {
+        "operationId": "getModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleCatalogModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "updateModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleUpdateCatalogModelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleCatalogModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "models"
         ]
       }
     },

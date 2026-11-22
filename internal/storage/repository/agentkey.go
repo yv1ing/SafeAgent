@@ -8,6 +8,13 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
+func prefix(secret string) string {
+	if len(secret) <= 8 {
+		return secret
+	}
+	return secret[:8]
+}
+
 func (store *Store) AgentKeys(ctx context.Context, projectID string) ([]entity.AgentKey, error) {
 	keys := []entity.AgentKey{}
 	if err := store.DB.NewSelect().Model(&keys).Where("project_id = ?", projectID).Order("created_at DESC", "id DESC").Scan(ctx); err != nil {

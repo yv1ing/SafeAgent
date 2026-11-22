@@ -70,8 +70,8 @@ Streaming response text is stored and checked for concealed Unicode asynchronous
 | `internal/observe` | origin and trust, sink inference, two views, stored-event replay, history expansion |
 | `internal/pipeline` | admission, redaction, four checkpoints, tool hold, veto, streaming, failover, quotas, session linking, auxiliary endpoints, audit |
 | `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by pipeline tests, and idempotency by repository integration tests |
-| `internal/service/console` | permission rules, name bounds, password policy, administrator-only policy editing |
-| `internal/transport/console` | forwarded headers, format defaults, project summary rendering and error labels |
+| `internal/service/console` | permission rules, name bounds, password policy, administrator-only policy editing, channel formats, model kinds and route graph validation |
+| `internal/transport/console` | channel endpoint and model views, forwarded headers, format defaults, project summary rendering and error labels |
 | `internal/llm/model` | assembler invariants, journal reconstruction, signatures, losses, repairs |
 | `internal/llm/codec` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
 | `internal/llm/provider` | built-in URL, format, auth, compatibility and discovery snapshots |
@@ -137,7 +137,7 @@ Add the field to the canonical model, decode it in each codec that has it, encod
 
 ## Adding a provider
 
-Add one file under `internal/llm/provider/builtin` returning a `provider.ProviderSpec`, and one line in `builtin.All()`. Declare only capabilities the official documentation guarantees; a compatibility flag belongs in `Compat`, not in a codec branch. Add the provider to the catalog snapshot test. The console gets the provider in its dropdown from the registry, and channel creation needs nothing beyond the provider id and a key (plus a base URL for a custom provider).
+Add one file under `internal/llm/provider/builtin` returning a `provider.ProviderSpec`, and one line in `builtin.All()`. Declare only capabilities the official documentation guarantees; a compatibility flag belongs in `Compat`, not in a codec branch. Add the provider to the catalog snapshot test. The console gets the provider and its formats from the registry; a channel needs the provider id, at least one supported format, the catalog model ids it exposes and a key, plus a base URL for a custom provider. The catalog model itself is created once with its kind, formats and prices.
 
 ## Security review
 

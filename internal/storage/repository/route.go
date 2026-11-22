@@ -63,3 +63,11 @@ func (store *Store) Routes(ctx context.Context, projectID string) ([]entity.Rout
 	}
 	return routes, nil
 }
+
+func (store *Store) AllRoutes(ctx context.Context) ([]entity.Route, error) {
+	routes := []entity.Route{}
+	if err := store.DB.NewSelect().Model(&routes).Order("project_id", "name").Scan(ctx); err != nil {
+		return nil, err
+	}
+	return routes, nil
+}

@@ -76,15 +76,9 @@ Responses requests and responses always take the canonical path because the gate
 
 ## Provider catalog
 
-The provider catalog is a built-in registry. Each built-in provider declares its formats, endpoints, authentication, static headers, capabilities, compatibility, discovery and auxiliary endpoints. A channel keeps the provider id, keys, endpoint overrides, its own headers and model prices, and limits.
+The provider catalog is a built-in registry. Each built-in provider declares its formats, endpoints, authentication, static headers, capabilities, compatibility, discovery and auxiliary endpoints. A channel keeps the provider id, an ordered set of enabled formats, per-format endpoint overrides, keys, the catalog model ids it exposes, headers and limits. Model definitions and prices live in the global model catalog.
 
-Endpoint entries are overrides:
-
-| Entry            | Effect                      |
-| ---------------- | --------------------------- |
-| absent           | the catalog default applies |
-| base URL or path | replaces the catalog value  |
-| `disabled`       | hides that format           |
+Each target intersects the channel format order with the model formats and picks the client format when both sides support it, otherwise the first enabled format. The base URL and path default to the catalog and can be overridden per format; a custom provider needs a base URL. Routes choose a channel and model, not a format.
 
 Adding a format or correcting an endpoint changes the catalog, not every channel.
 
@@ -97,7 +91,7 @@ Agent clients also list models, retrieve one model, count tokens, manage Respons
 | model list and retrieval | served from the project's routes in the client's protocol shape |
 | token counting | native endpoint when available; otherwise a local estimate marked as such |
 | Responses lifecycle | retrieve, input_items, cancel and delete share authentication, rate limiting and audit |
-| embeddings and moderations | same-format forwarding when the channel declares the capability |
+| embeddings and moderations | same-format forwarding when the selected model is of that kind and the channel format declares the capability |
 | undeclared capability | a protocol-shaped unsupported error |
 
 Responses lifecycle endpoints go through the same authentication, rate limiting and audit as generation. A failed audit refuses the operation, so every action keeps its record.

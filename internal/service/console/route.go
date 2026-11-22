@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"slices"
 
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
@@ -25,46 +24,66 @@ type RouteInput struct {
 	Version int64
 }
 
-// normalize requires every target to name an enabled channel that lists the upstream model.
+// normalize requires every target to name an enabled channel and one of its enabled catalog
+// models, with at least one format both sides support. All targets must share a model kind.
 func (service *RouteService) normalize(ctx context.Context, input RouteInput) (RouteInput, error) {
 	name, err := RequireName(input.Name, "invalid_name")
 	if err != nil {
 		return input, err
 	}
 	input.Name = name
-	if len(input.Targets) == 0 || len(input.Targets) > MaximumTargets {
-		return input, Invalid("invalid_targets")
-	}
 	channels, err := service.store.Channels(ctx)
 	if err != nil {
 		return input, Translate(err)
 	}
-	models := make(map[string][]string, len(channels))
-	for _, channel := range channels {
-		if !channel.Enabled {
-			continue
-		}
-		for _, model := range channel.Models {
-			models[channel.ID] = append(models[channel.ID], model.Name)
-		}
+	models, err := service.store.Models(ctx)
+	if err != nil {
+		return input, Translate(err)
 	}
-	targets := make([]entity.Target, 0, len(input.Targets))
-	for _, target := range input.Targets {
-		if !slices.Contains(models[target.ChannelID], target.UpstreamModel) {
-			return input, Invalid("invalid_targets")
-		}
-		if target.Priority < 0 || target.Weight < 0 || target.Weight > MaximumWeight {
-			return input, Invalid("invalid_targets")
-		}
-		if slices.ContainsFunc(targets, func(seen entity.Target) bool {
-			return seen.ChannelID == target.ChannelID && seen.UpstreamModel == target.UpstreamModel
-		}) {
-			return input, Invalid("invalid_targets")
-		}
-		targets = append(targets, target)
+	if err := validateTargets(input.Targets, channels, models); err != nil {
+		return input, err
 	}
-	input.Targets = targets
 	return input, nil
+}
+
+// validateTargets is shared by mutations and startup validation so both accept the same graph.
+func validateTargets(targets []entity.Target, channels []entity.Channel, models []entity.Model) error {
+	if len(targets) == 0 || len(targets) > MaximumTargets {
+		return Invalid("invalid_targets")
+	}
+	channelByID := make(map[string]entity.Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.ID] = channel
+	}
+	modelByID := modelMap(models)
+	kind := ""
+	seen := make(map[[2]string]bool, len(targets))
+	for _, target := range targets {
+		channel, channelFound := channelByID[target.ChannelID]
+		model, modelFound := modelByID[target.ModelID]
+		if !channelFound || !modelFound || !channel.Enabled || !model.Enabled ||
+			!channel.HasModel(model.ID) || channel.ProviderID != model.ProviderID {
+			return Invalid("invalid_targets")
+		}
+		if len(effectiveFormats(channel, model)) == 0 {
+			return Invalid("invalid_targets")
+		}
+		if kind == "" {
+			kind = string(model.Kind)
+		} else if kind != string(model.Kind) {
+			return Invalid("invalid_targets")
+		}
+		if target.Priority < 0 || target.Weight < 0 || target.Weight > MaximumWeight ||
+			target.MaxOutputTokens < 0 || target.MaxOutputTokens > MaximumOutputTokens {
+			return Invalid("invalid_targets")
+		}
+		pair := [2]string{target.ChannelID, target.ModelID}
+		if seen[pair] {
+			return Invalid("invalid_targets")
+		}
+		seen[pair] = true
+	}
+	return nil
 }
 
 func conflictOnDuplicate(err error) error {
@@ -85,6 +104,8 @@ func (service *RouteService) Create(ctx context.Context, actor Actor, projectID 
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
+	configurationMu.Lock()
+	defer configurationMu.Unlock()
 	normalized, err := service.normalize(ctx, input)
 	if err != nil {
 		return nil, err
@@ -100,6 +121,8 @@ func (service *RouteService) Update(ctx context.Context, actor Actor, projectID,
 	if err := RequireVersion(input.Version); err != nil {
 		return nil, err
 	}
+	configurationMu.Lock()
+	defer configurationMu.Unlock()
 	normalized, err := service.normalize(ctx, input)
 	if err != nil {
 		return nil, err
@@ -112,6 +135,8 @@ func (service *RouteService) Delete(ctx context.Context, actor Actor, projectID,
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
+	configurationMu.Lock()
+	defer configurationMu.Unlock()
 	route, err := service.store.Route(ctx, projectID, routeID)
 	if err != nil {
 		return nil, Translate(err)
