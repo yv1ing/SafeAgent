@@ -74,55 +74,60 @@ export function PoliciesPage() {
                         {t.policies.discard}
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      loading={validate.isPending}
-                      onClick={async () => {
-                        const document = parseDocument();
-                        if (document === undefined) return;
-                        try {
-                          const result = await validate.mutateAsync({
-                            projectId,
-                            data: { document },
-                          });
-                          toast[result.valid ? 'success' : 'error'](
-                            result.valid ? t.policies.valid : t.policies.invalid,
-                          );
-                        } catch (error) {
-                          toast.error(errorMessage(t, error));
-                        }
-                      }}
-                    >
-                      {t.policies.validate}
-                    </Button>
-                    <Button
-                      size="sm"
-                      loading={save.isPending}
-                      onClick={async () => {
-                        const document = parseDocument();
-                        if (document === undefined) return;
-                        try {
-                          await save.mutateAsync({
-                            projectId,
-                            data: { document, note: '' },
-                          });
-                          setDraft(null);
-                          toast.success(t.policies.saved);
-                          await refresh();
-                        } catch (error) {
-                          toast.error(errorMessage(t, error));
-                        }
-                      }}
-                    >
-                      {t.policies.save}
-                    </Button>
+                    {admin && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={validate.isPending}
+                        onClick={async () => {
+                          const document = parseDocument();
+                          if (document === undefined) return;
+                          try {
+                            const result = await validate.mutateAsync({
+                              projectId,
+                              data: { document },
+                            });
+                            toast[result.valid ? 'success' : 'error'](
+                              result.valid ? t.policies.valid : t.policies.invalid,
+                            );
+                          } catch (error) {
+                            toast.error(errorMessage(t, error));
+                          }
+                        }}
+                      >
+                        {t.policies.validate}
+                      </Button>
+                    )}
+                    {admin && (
+                      <Button
+                        size="sm"
+                        loading={save.isPending}
+                        onClick={async () => {
+                          const document = parseDocument();
+                          if (document === undefined) return;
+                          try {
+                            await save.mutateAsync({
+                              projectId,
+                              data: { document, note: '' },
+                            });
+                            setDraft(null);
+                            toast.success(t.policies.saved);
+                            await refresh();
+                          } catch (error) {
+                            toast.error(errorMessage(t, error));
+                          }
+                        }}
+                      >
+                        {t.policies.save}
+                      </Button>
+                    )}
                   </>
                 }
               />
               <textarea
                 aria-label={t.policies.document}
                 spellCheck={false}
+                readOnly={!admin}
                 value={editor}
                 onChange={(event) => setDraft(event.target.value)}
                 className="min-h-[28rem] w-full resize-y bg-surface p-3 font-mono text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-accent"

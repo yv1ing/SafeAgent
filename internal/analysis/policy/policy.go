@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/ext"
@@ -32,6 +33,11 @@ const (
 	SeverityInfo   = analysis.SeverityInfo
 	SeverityMedium = analysis.SeverityMedium
 	SeverityHigh   = analysis.SeverityHigh
+
+	MaximumRules          = 200
+	MaximumConditionBytes = 16 << 10
+	MaximumDocumentBytes  = 256 << 10
+	EvaluationTimeout     = 50 * time.Millisecond
 )
 
 // Document is what a project saves. Saving compiles, validates and activates it in one step.
@@ -56,6 +62,10 @@ func DefaultDocument() Document { return Document{Rules: []Rule{}} }
 
 func (document Document) Hash() string {
 	payload, _ := json.Marshal(document)
+	return hashDocument(payload)
+}
+
+func hashDocument(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -194,11 +204,26 @@ func newEnvironment() (*cel.Env, error) {
 }
 
 func Compile(document Document) (*Compiled, error) {
+	if len(document.Rules) > MaximumRules {
+		return nil, fmt.Errorf("a policy document carries at most %d rules", MaximumRules)
+	}
+	for _, rule := range document.Rules {
+		if len(rule.When) > MaximumConditionBytes {
+			return nil, fmt.Errorf("rule %s: the condition exceeds %d bytes", rule.ID, MaximumConditionBytes)
+		}
+	}
+	payload, err := json.Marshal(document)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > MaximumDocumentBytes {
+		return nil, fmt.Errorf("the policy document exceeds %d bytes", MaximumDocumentBytes)
+	}
 	environment, err := newEnvironment()
 	if err != nil {
 		return nil, err
 	}
-	compiled := &Compiled{hash: document.Hash(), hasBlock: map[string]bool{}}
+	compiled := &Compiled{hash: hashDocument(payload), hasBlock: map[string]bool{}}
 	seen := map[string]bool{}
 	for index, rule := range document.Rules {
 		if err := validateRule(rule, seen); err != nil {
@@ -218,7 +243,7 @@ func Compile(document Document) (*Compiled, error) {
 		if ast.OutputType() != cel.BoolType {
 			return nil, fmt.Errorf("rule %s: condition must be a boolean", rule.ID)
 		}
-		program, err := environment.Program(ast)
+		program, err := environment.Program(ast, cel.InterruptCheckFrequency(100))
 		if err != nil {
 			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)
 		}
@@ -264,13 +289,18 @@ func (compiled *Compiled) Hash() string { return compiled.hash }
 func (compiled *Compiled) HasBlockingRule(phase string) bool { return compiled.hasBlock[phase] }
 
 func (compiled *Compiled) Evaluate(ctx context.Context, input Input) (Outcome, error) {
+	ctx, cancel := context.WithTimeout(ctx, EvaluationTimeout)
+	defer cancel()
 	activation := activationFor(input)
 	outcome := Outcome{Decisions: []DecisionResult{}}
 	for _, rule := range compiled.rules {
 		if rule.rule.Phase != input.Phase {
 			continue
 		}
-		value, _, err := rule.condition.Eval(activation)
+		if err := ctx.Err(); err != nil {
+			return Outcome{}, err
+		}
+		value, _, err := rule.condition.ContextEval(ctx, activation)
 		if err != nil {
 			return Outcome{}, fmt.Errorf("rule %s: %w", rule.rule.ID, err)
 		}

@@ -58,19 +58,19 @@ make security       # SBOM + govulncheck + npm audit
 | `tool_hold_bytes` | frames queued while a tool call waits for its verdict (1 MiB default) |
 | `analysis_concurrency` | in-process diagnosis worker count |
 
-Response text is stored and checked for concealed Unicode asynchronously; it is not blocked online. Changing `schema.sql` changes the fingerprint. An existing database must be recreated; there is no migration path.
+Streaming response text is stored and checked for concealed Unicode asynchronously. A non-streaming response also passes the response checkpoint before it is written. Changing `schema.sql` changes the fingerprint. An existing database must be recreated; there is no migration path.
 
 ## Tests
 
 | Package | Coverage |
 | --- | --- |
-| `internal/analysis` | finding identity, normalization, verdict rules, input hashing, analysis diff, typed CEL, finding predicates, axis derivation |
+| `internal/analysis` | finding identity, normalization, verdict rules, input hashing, analysis diff, typed CEL, finding predicates, axis derivation, policy document bounds and evaluation deadlines |
 | `internal/analysis/builtin` | role split, schema checks, trailing JSON, flow relations, secret flow, redacted evidence |
 | `internal/analysis/decision` | answer interpretation, both adapters against fake servers, private endpoint rejection, malformed answer rejection |
 | `internal/observe` | origin and trust, sink inference, two views, stored-event replay, history expansion |
 | `internal/pipeline` | admission, redaction, four checkpoints, tool hold, veto, streaming, failover, quotas, session linking, auxiliary endpoints, audit |
 | `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by pipeline tests, and idempotency by repository integration tests |
-| `internal/service/console` | permission rules, name bounds, password policy, policy member restrictions |
+| `internal/service/console` | permission rules, name bounds, password policy, administrator-only policy editing |
 | `internal/transport/console` | forwarded headers, format defaults, project summary rendering and error labels |
 | `internal/llm/model` | assembler invariants, journal reconstruction, signatures, losses, repairs |
 | `internal/llm/codec` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
@@ -101,7 +101,7 @@ Five contracts define what the rest of the system may rely on. Treat a change to
 
 The observation and audit contracts carry explicit version numbers. A stored event records the schema version it was written with. Startup checks the DDL fingerprint and refuses a database whose events carry a different `auditevent.SchemaVersion`; changing either contract therefore requires recreating the database. Every event is HMAC-chained; see [Audit](audit.md). The console contract is generated from Go types: `make generate` rewrites `web/openapi.json` and `web/src/api/generated`, and `make check` fails when either is stale. Neither generated file is edited by hand.
 
-A protocol conversion that cannot carry a field must emit a `model.Loss` with a path, code and target. A new field is added to the canonical model first, then to each codec and to the matrix fixture. A same-format raw overlay may preserve the original bytes, but it does not replace a canonical mapping and an explicit loss for other targets.
+A protocol conversion that cannot carry a field must emit a `model.Loss` with a code and class, plus a path and direction when they are known. A new field is added to the canonical model first, then to each codec and to the matrix fixture. A same-format raw overlay may preserve the original bytes, but it does not replace a canonical mapping and an explicit loss for other targets.
 
 ## Conventions
 

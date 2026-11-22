@@ -261,6 +261,132 @@ func TestToolResultMediaReachesGemini(t *testing.T) {
 	}
 }
 
+func TestStreamUsageIsOnlyRequestedWhenTheTargetSupportsIt(t *testing.T) {
+	request := &model.Request{Model: "m", Stream: true, Items: []model.Item{model.MessageItem(model.RoleUser, "hi")}}
+	capability := chat.New().BaseCapability()
+	capability.StreamUsage = false
+	body, _, _, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testkit.JSONValue(t, body, "stream_options") != nil {
+		t.Fatalf("a target without stream usage must not be asked for usage: %s", body)
+	}
+	capability.StreamUsage = true
+	body, _, _, err = chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.AssertJSON(t, body, "stream_options.include_usage", true)
+}
+
+func TestTopKFollowsTheTargetCapability(t *testing.T) {
+	topK := int64(20)
+	request := &model.Request{Model: "m", Items: []model.Item{model.MessageItem(model.RoleUser, "hi")}, TopK: &topK}
+	capability := chat.New().BaseCapability()
+	capability.TopK = true
+	body, _, losses, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.AssertJSON(t, body, "top_k", 20)
+	if len(losses) != 0 {
+		t.Fatalf("a capable target must receive top_k without a loss: %+v", losses)
+	}
+	capability.TopK = false
+	body, _, losses, err = chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testkit.JSONValue(t, body, "top_k") != nil || !hasLoss(losses, "top_k") {
+		t.Fatalf("an incapable target must drop top_k with a loss: %s %+v", body, losses)
+	}
+}
+
+func TestParallelToolPolicyFollowsTheTargetCapability(t *testing.T) {
+	disabled := false
+	request := &model.Request{
+		Model: "m", Items: []model.Item{model.MessageItem(model.RoleUser, "hi")},
+		Tools: []model.Tool{{Name: "read"}}, ParallelToolCalls: &disabled,
+	}
+	capability := chat.New().BaseCapability()
+	capability.Tools.Parallel = false
+	body, _, losses, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testkit.JSONValue(t, body, "parallel_tool_calls") != nil || !hasLoss(losses, "parallel_tool_calls") {
+		t.Fatalf("an incapable target must drop the parallel policy with a loss: %s %+v", body, losses)
+	}
+}
+
+func TestDisabledLogprobsAreNotEnabled(t *testing.T) {
+	disabled := false
+	request := &model.Request{
+		Model: "m", Items: []model.Item{model.MessageItem(model.RoleUser, "hi")}, Logprobs: &disabled,
+	}
+	capability := chat.New().BaseCapability()
+	body, _, losses, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testkit.JSONValue(t, body, "logprobs") != nil || len(losses) != 0 {
+		t.Fatalf("logprobs=false must stay off: %s %+v", body, losses)
+	}
+}
+
+func TestUnsupportedStopSequencesAreNotEncoded(t *testing.T) {
+	capability := chat.New().BaseCapability()
+	capability.StopSequences = false
+	request := &model.Request{
+		Source: model.Chat, Model: "m",
+		Items: []model.Item{model.MessageItem(model.RoleUser, "hi")},
+		Stop:  []string{"END"},
+	}
+	body, _, losses, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: capability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testkit.JSONValue(t, body, "stop") != nil {
+		t.Fatalf("an unsupported stop field must not be encoded: %s", body)
+	}
+	if !hasLoss(losses, "stop") {
+		t.Fatalf("the dropped stop field must be reported: %+v", losses)
+	}
+}
+
+func TestResponsesOnlyFieldsAreReportedWhenDropped(t *testing.T) {
+	maxToolCalls := int64(3)
+	store := false
+	request := &model.Request{
+		Source: model.Responses, Model: "m",
+		Items:                []model.Item{model.MessageItem(model.RoleUser, "hi")},
+		Include:              []string{"reasoning.encrypted_content"},
+		Truncation:           "auto",
+		MaxToolCalls:         &maxToolCalls,
+		PromptCacheRetention: "24h",
+		Store:                &store,
+	}
+	_, _, losses, err := chat.New().EncodeRequest(request, codec.Peer{Side: codec.Upstream, Model: "m", Profile: model.Profile{Capability: chat.New().BaseCapability()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"include", "truncation", "max_tool_calls", "prompt_cache_retention", "store"} {
+		if !hasLoss(losses, path) {
+			t.Fatalf("%s must be reported when Chat drops it: %+v", path, losses)
+		}
+	}
+}
+
+func hasLoss(losses []model.Loss, path string) bool {
+	for _, loss := range losses {
+		if loss.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHeaderAllowlistNeverForwardsCredentials(t *testing.T) {
 	source := http.Header{
 		"Anthropic-Beta":      {"features-2025"},

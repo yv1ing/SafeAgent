@@ -263,7 +263,7 @@ func (coder Codec) EncodeRequest(request *model.Request, peer codec.Peer) ([]byt
 		return nil, nil, losses, err
 	}
 	losses = append(losses, nested...)
-	if request.Stream {
+	if request.Stream && peer.Profile.Capability.StreamUsage {
 		root["stream_options"] = map[string]any{"include_usage": true}
 	}
 	losses = append(losses, codec.RawFields(root, request.Raw, model.Chat, "raw")...)

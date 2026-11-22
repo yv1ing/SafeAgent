@@ -16,7 +16,9 @@ import (
 // before the client saw a byte.
 func (state *call) finish(failure *model.Error, stateName string) {
 	record := state.recorder.Call()
-	record.Losses, record.Repairs = convertLosses(state.failureLedger.Losses), convertRepairs(state.failureLedger.Repairs)
+	record.Losses = convertLosses(mergeLosses(state.failureLedger.Losses, nil))
+	record.Repairs = convertRepairs(mergeRepairs(state.failureLedger.Repairs, nil))
+	state.applyLossHeaders(nil)
 	state.settle(stateName, failure, nil, nil)
 	state.reply(failure)
 }

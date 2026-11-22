@@ -13,9 +13,15 @@ import (
 // ProviderRegistry is a one-format provider pointing at a scripted upstream. Tests use it instead
 // of the built-in catalog so a failing attempt cannot fall over to a real provider.
 func ProviderRegistry(format, baseURL string) *provider.Registry {
+	return ProviderRegistryWithTransport(format, baseURL, provider.TransportAuto)
+}
+
+// ProviderRegistryWithTransport pins the endpoint transport, so a test can force a JSON reply for a
+// client that asked to stream.
+func ProviderRegistryWithTransport(format, baseURL string, transport provider.TransportMode) *provider.Registry {
 	kind := model.Format(format)
 	endpoint := provider.EndpointSpec{
-		Format: kind, BaseURL: baseURL, Auth: provider.AuthBearer,
+		Format: kind, BaseURL: baseURL, Auth: provider.AuthBearer, Transport: transport,
 		Capability: capabilityOf(kind), Compat: model.Compat{},
 	}
 	switch kind {

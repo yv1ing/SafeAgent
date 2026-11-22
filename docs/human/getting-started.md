@@ -67,8 +67,8 @@ Opening a project changes the sidebar to that project's pages. Use Settings to c
 
 | Role | Can manage |
 | --- | --- |
-| Project member | routes, non-blocking redaction rules, record-only policy rules, agent keys |
-| Administrator | channels, users, the global log, projects, members, blocking policy and redaction rules, policy restore, the decision model, retention and limit fields |
+| Project member | routes, non-blocking redaction rules, agent keys; policy documents are read-only |
+| Administrator | channels, users, the global log, projects, members, policy editing and restore, blocking redaction rules, the decision model, retention and limit fields |
 
 Trust levels and non-default roles are administrator-only. The Activity page lists changes made to the project.
 
@@ -89,7 +89,7 @@ Create a model route. A route maps a public model name to one or more upstream m
 
 Issue an agent key on the project's keys page. The full key is shown once, so copy it then. A key can carry its own rate and concurrency limits. Only an administrator can set a trust level or a role other than the default agent.
 
-If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page maintains one ordered rule table; saving validates it and makes it active at once, and the history can restore an earlier version.
+If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page maintains one ordered rule table; saving validates it and makes it active at once, and the history can restore an earlier version. Only administrators can edit or restore a policy.
 
 A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background. Add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it.
 

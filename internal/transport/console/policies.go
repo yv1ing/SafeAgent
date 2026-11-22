@@ -2,6 +2,7 @@ package console
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yv1ing/SafeAgent/internal/analysis"
@@ -145,8 +146,12 @@ func (console *Console) registerPolicies() {
 		if err := json.Unmarshal(input.Document, &document); err != nil {
 			return nil, errInvalidRequest
 		}
-		if err := console.Policy.Validate(document); err != nil {
-			return PolicyValidateView{Valid: false}, nil
+		if err := console.Policy.Validate(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), document); err != nil {
+			var failure *service.Failure
+			if errors.As(err, &failure) && failure.Kind == service.KindInvalid {
+				return PolicyValidateView{Valid: false}, nil
+			}
+			return nil, err
 		}
 		return PolicyValidateView{Valid: true}, nil
 	})

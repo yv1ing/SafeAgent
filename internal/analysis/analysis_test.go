@@ -2,7 +2,11 @@ package analysis_test
 
 import (
 	"context"
+	"errors"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
@@ -165,6 +169,48 @@ func TestTypedCELRejectsUnknownFieldsAndFires(t *testing.T) {
 	}
 	if !compiled.HasBlockingRule(policy.PhaseRequest) || compiled.HasBlockingRule(policy.PhaseToolCall) {
 		t.Fatal("blocking capability must be per phase")
+	}
+}
+
+func TestPolicyDocumentsAreBounded(t *testing.T) {
+	rule := func(id, when string) policy.Rule {
+		return policy.Rule{ID: id, Enabled: true, Phase: policy.PhaseRequest, When: when, Action: policy.ActionRecord}
+	}
+	rules := make([]policy.Rule, policy.MaximumRules)
+	for index := range rules {
+		rules[index] = rule("rule_"+strconv.Itoa(index), "true")
+	}
+	if _, err := policy.Compile(policy.Document{Rules: rules}); err != nil {
+		t.Fatalf("a document at the rule limit must compile: %v", err)
+	}
+	over := append(append([]policy.Rule{}, rules...), rule("over", "true"))
+	if _, err := policy.Compile(policy.Document{Rules: over}); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("a document above the rule limit must be rejected by the rule check: %v", err)
+	}
+	atConditionLimit := "true" + strings.Repeat(" ", policy.MaximumConditionBytes-len("true"))
+	if _, err := policy.Compile(policy.Document{Rules: []policy.Rule{rule("long", atConditionLimit)}}); err != nil {
+		t.Fatalf("a condition at the byte limit must compile: %v", err)
+	}
+	if _, err := policy.Compile(policy.Document{Rules: []policy.Rule{rule("long", atConditionLimit+" ")}}); err == nil || !strings.Contains(err.Error(), "condition exceeds") {
+		t.Fatalf("a condition above the byte limit must be rejected by the condition check: %v", err)
+	}
+	if _, err := policy.Compile(policy.Document{Note: strings.Repeat("x", policy.MaximumDocumentBytes)}); err == nil || !strings.Contains(err.Error(), "document exceeds") {
+		t.Fatalf("a document above the byte limit must be rejected by the document check: %v", err)
+	}
+}
+
+func TestPolicyEvaluationHonorsDeadlines(t *testing.T) {
+	compiled, err := policy.Compile(policy.Document{Rules: []policy.Rule{{
+		ID: "record", Enabled: true, Phase: policy.PhaseRequest, When: "true", Action: policy.ActionRecord,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	if _, err := compiled.Evaluate(ctx, policy.Input{Phase: policy.PhaseRequest}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("an expired evaluation must report its deadline: %v", err)
 	}
 }
 

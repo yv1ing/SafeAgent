@@ -75,9 +75,13 @@ The principal comes from the authenticated agent key. Client-supplied metadata i
 - `POST /console/api/projects/{project_id}/policies` validates the document, writes the next version and activates it in the same transaction. There is no draft state.
 - `POST /console/api/projects/{project_id}/policies/{version}/rollback` saves an older document as a new version. History is never rewritten.
 - The gateway pins the active version at admission, so a save during a call does not change that call.
-- Members may save record rules with priority 0. Every blocking rule already active must remain in the submitted document unchanged; a member cannot add, change or remove one. Priorities, restore and the decision model are administrator-only.
+- Policy editing, validation, testing and restore are administrator-only. Members can read the active document and its history. The decision model is administrator-only too.
 
 Version allocation locks the project row, so two concurrent saves cannot choose the same version. Compilation happens on save and once per policy version; an invalid saved document cannot exist. Startup compiles the newest document of every project, so an unreadable row stops the process before the first request arrives.
+
+## Resource limits
+
+A document carries at most 200 rules, a condition is at most 16 KiB and the encoded document is at most 256 KiB; compilation rejects anything larger. Each checkpoint evaluates its phase rules under a 50 ms budget. Exceeding it is a guard failure, handled like any other evaluation error.
 
 ## Failure
 

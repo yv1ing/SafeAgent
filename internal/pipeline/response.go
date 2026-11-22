@@ -40,7 +40,6 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 	}
 	ledger := state.ledger(journal)
 	state.recordResponse(response, ledger, responseMeta{Committed: true, Identify: true, Stored: state.responseStore()})
-	state.applyLossHeaders()
 	if !state.settle("completed", nil, response.Usage, upstream.endpoint.channel) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		session.Close()
@@ -107,7 +106,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	if refusal := state.evaluateCollectedResponse(response); refusal != nil {
 		ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
 		state.recordResponse(response, ledger, responseMeta{Blocked: true})
-		state.applyLossHeaders()
+		state.applyLossHeaders(ledger.Losses)
 		if !state.settle("blocked", refusal, response.Usage, upstream.endpoint.channel) {
 			refusal = internal("audit_unavailable", "The response could not be recorded.")
 		}
@@ -129,7 +128,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	state.recordFirstToken()
 	ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
 	state.recordResponse(response, ledger, responseMeta{Identify: true, Stored: state.responseStore()})
-	state.applyLossHeaders()
+	state.applyLossHeaders(ledger.Losses)
 	if !state.settle("completed", nil, response.Usage, upstream.endpoint.channel) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		state.reply(failure)
@@ -305,9 +304,11 @@ func (state *call) restoreResponse(response *model.Response) {
 	}
 }
 
-func (state *call) applyLossHeaders() {
+func (state *call) applyLossHeaders(losses []model.Loss) {
 	header := state.writer.Header()
-	losses := mergeLosses(state.failureLedger.Losses, nil)
+	header.Del("X-SafeAgent-Losses")
+	header.Del("X-SafeAgent-Loss-Count")
+	losses = mergeLosses(losses, nil)
 	codes := map[string]bool{}
 	for _, loss := range losses {
 		codes[string(loss.Code)] = true

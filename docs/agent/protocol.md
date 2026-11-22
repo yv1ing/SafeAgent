@@ -20,7 +20,7 @@ Codecs never branch on a vendor name. They read `Peer.Profile`, which carries th
 
 The four formats (`openai_chat`, `openai_responses`, `anthropic_messages`, `google_gemini`) map onto one item model:
 
-- `Request`: model, instructions, ordered items, tools, tool choice, parallel policy, response format, reasoning, limits, stop, stream options, choice count, safety settings, provider-state fields (`store`, `background`, `conversation`, `include`, `truncation`, `max_tool_calls`, `prompt_cache_retention`), identity and raw overlay.
+- `Request`: model, instructions, ordered items, tools and tool policy, response format, reasoning, limits, sampling (`temperature`, `top_p`, `top_k`, `stop`, `seed`, penalties, `logit_bias`, `logprobs`, `modalities`), stream options, choice count, safety settings, provider-state fields (`previous_response_id`, `store`, `background`, `conversation`, `include`, `truncation`, `max_tool_calls`, `prompt_cache_retention`), identity (`metadata`, `user`, `service_tier`, `prompt_cache_key`, `safety_identifier`, `verbosity`) and raw overlay.
 - `Item`: message, reasoning, tool call, tool result, server tool call, server tool result or native provider object. A server item carries `Server *ServerInfo{Format, Type, Capability, Config}` so the same format replays it exactly.
 - `Part`: text, refusal, reasoning text/summary, redacted reasoning, tool arguments, media or native payload. Citations, logprobs and prompt-cache markers attach to parts.
 - `Response`: items, `Status`, `Finish`, `Usage`, failure, `Meta` (id, model, created, fingerprint, service tier) and raw overlay.
@@ -47,13 +47,17 @@ A decoder that reaches a clean EOF synthesizes the terminal event and records `c
 
 A same-format request may be forwarded as raw bytes only when all of the following hold:
 
-- source and target format are the same;
+- source and target are the same Chat, Messages or Gemini format (Responses always re-encodes because the gateway owns `store`, `include` and `previous_response_id`);
 - redaction made no hit and no signature was unsealed;
 - history was not expanded and no repair ran;
-- the endpoint's `rawSafe` conditions pass (for Messages, an output limit is present; for Responses, `previous_response_id` is empty and `store` is false/absent);
+- adaptation, compatibility rewrites, output-limit defaults, custom-tool downgrades and capability preflight produced no loss;
+- the canonical encoder would preserve every modelled field: unsupported sampling fields, stream options, tool schemas or selections, response formats, reasoning budgets, rewritten roles and legacy Chat aliases all disable the fast path;
+- for Messages, an output limit is present;
 - no reasoning item is missing.
 
-Only `model`, `stream`, Chat `include_usage` and Responses state fields are patched. Responses never uses the raw response fast path; other same-format responses are forwarded raw while every part is text, refusal or reasoning text/summary. A tool, media, native item or incompatible ID switches to the canonical encoder. Losses and the request-side summary are still recorded; the summary is returned as `X-SafeAgent-Losses` (unique codes) and `X-SafeAgent-Loss-Count`, while a streaming response keeps its response-side losses in the audit record. A non-streaming response is encoded before its headers are sent, so its response conversion losses are included in the same headers.
+Only `model`, `stream` and Chat `include_usage` are patched. Responses responses are also encoded canonically; other same-format responses are forwarded raw while every part is text, refusal or reasoning text/summary. A tool, media, native item or incompatible ID switches to the canonical encoder.
+
+Every generation conversion loss is written to the call's audit record. A streaming response sets `X-SafeAgent-Losses` (unique request-side codes) and `X-SafeAgent-Loss-Count` before its first byte; response-side losses stay in the audit record. A non-streaming response is encoded before its headers are sent, so its headers carry the complete conversion ledger. Auxiliary endpoints report their own conversion losses only where their wire shape exposes them.
 
 ## Provider catalog
 
@@ -63,14 +67,14 @@ A channel stores `provider_id`, per-format endpoint overrides (base URL, path, d
 
 ## Loss ledger
 
-`Ledger` holds `Losses` and `Repairs`. Every loss has a path, a code, a class, the source/target formats and an item key:
+`Ledger` holds `Losses` and `Repairs`. A loss carries a code and class; its path, source/target formats and item key are filled when they apply:
 
 - `fatal`: the target cannot represent core semantics. The gateway rejects before any upstream call. Media that cannot be carried and a required server tool with no equivalent are fatal.
 - `degraded`: private or secondary data is dropped while the request continues. Foreign signatures, provider fields, citation subfields, usage breakdowns, logprobs and mapped tool kinds are degraded.
 
-Additional codes include `server_tool_mapped`, `tool_arg_granularity`, `signature_resealed`, `media_fetched`, `media_unavailable`, `capability_field_removed`, `multi_choice_requires_passthrough`, `count_estimated`, `usage_estimated` and `http200_failed_status`.
+Additional codes include `server_tool_mapped`, `item_id_synthesized`, `capability_field_removed` and `multi_choice_requires_passthrough`.
 
-`RepairRequest` restores target invariants and records each change: empty items, unanswered calls, orphan results, tool results after their assistant turn, assistant text before tool calls in Responses, reasoning order for Responses and Messages, and an impossible tool choice.
+`RepairRequest` restores target invariants and records each change: empty items, unanswered calls, orphan or duplicate results, duplicate calls, tool results after their assistant turn, assistant text before tool calls in Responses, reasoning order for Responses and Messages, and an impossible tool choice.
 
 ## Conversion policy
 

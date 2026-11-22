@@ -55,24 +55,33 @@ func EncodeParams(request *model.Request, target model.Format, root map[string]a
 		switch {
 		case compat.IgnoreTopK:
 			loss("top_k", "the target endpoint ignores top-k sampling")
+		case !profile.Capability.TopK:
+			losses = append(losses, model.Loss{
+				Path: "top_k", Code: model.LossFieldDropped, Class: model.LossDegraded,
+				Detail: "the target has no top-k sampling", From: request.Source, To: target,
+			})
 		case target == model.Gemini:
 			generationConfig(root)["topK"] = *request.TopK
-		case target == model.Messages:
+		case target == model.Chat, target == model.Messages:
 			root["top_k"] = *request.TopK
 		default:
 			loss("top_k", "target has no top-k sampling")
 		}
 	}
 	if len(request.Stop) > 0 {
-		switch target {
-		case model.Messages:
-			root["stop_sequences"] = request.Stop
-		case model.Gemini:
-			generationConfig(root)["stopSequences"] = request.Stop
-		case model.Responses:
-			loss("stop", "Responses has no stop sequence field")
-		default:
-			root["stop"] = request.Stop
+		if !profile.Capability.StopSequences {
+			losses = append(losses, model.Loss{Path: "stop", Code: model.LossFieldDropped, Class: model.LossDegraded, Detail: "the target has no stop sequence field", From: request.Source, To: target})
+		} else {
+			switch target {
+			case model.Messages:
+				root["stop_sequences"] = request.Stop
+			case model.Gemini:
+				generationConfig(root)["stopSequences"] = request.Stop
+			case model.Responses:
+				loss("stop", "Responses has no stop sequence field")
+			default:
+				root["stop"] = request.Stop
+			}
 		}
 	}
 	losses = append(losses, encodeIdentity(request, target, root)...)
@@ -114,7 +123,8 @@ func EncodeParams(request *model.Request, target model.Format, root map[string]a
 			loss("service_tier", "target has no OpenAI service tier")
 		}
 	}
-	if request.Logprobs != nil || request.TopLogprobs != nil {
+	includeLogprobs := request.TopLogprobs != nil || request.Logprobs != nil && *request.Logprobs
+	if includeLogprobs {
 		if target == model.Chat && profile.Capability.Logprobs {
 			root["logprobs"] = true
 			if request.TopLogprobs != nil {
@@ -138,12 +148,12 @@ func EncodeParams(request *model.Request, target model.Format, root map[string]a
 				unsupported = true
 			}
 		}
-		if unsupported {
+		switch {
+		case unsupported:
 			loss("modalities", "non-text output modalities are not first-class")
-		}
-		if (target == model.Chat || target == model.Responses) && !unsupported {
+		case target == model.Chat, target == model.Responses:
 			root["modalities"] = request.Modalities
-		} else if target != model.Chat && target != model.Responses {
+		default:
 			loss("modalities", "target has no output modality selection")
 		}
 	}
@@ -169,6 +179,18 @@ func EncodeParams(request *model.Request, target model.Format, root map[string]a
 	if request.PromptCacheRetention != "" && target != model.Responses {
 		loss("prompt_cache_retention", "only Responses controls prompt cache retention")
 	}
+	if request.Store != nil && target != model.Responses {
+		loss("store", "only Responses carries stored-response state")
+	}
+	if len(request.Include) > 0 && target != model.Responses {
+		loss("include", "only Responses carries include selections")
+	}
+	if request.Truncation != "" && target != model.Responses {
+		loss("truncation", "only Responses controls truncation")
+	}
+	if request.MaxToolCalls != nil && target != model.Responses {
+		loss("max_tool_calls", "only Responses limits tool calls")
+	}
 	if len(request.SafetySettings) > 0 && target != model.Gemini {
 		loss("safety_settings", "only Gemini carries content safety thresholds")
 	}
@@ -179,7 +201,7 @@ func EncodeParams(request *model.Request, target model.Format, root map[string]a
 			loss("safety_identifier", "target has no safety identifier")
 		}
 	}
-	nested, err := encodeToolPolicy(request, target, root)
+	nested, err := encodeToolPolicy(request, target, root, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +256,7 @@ func encodeIdentity(request *model.Request, target model.Format, root map[string
 	return losses
 }
 
-func encodeToolPolicy(request *model.Request, target model.Format, root map[string]any) ([]model.Loss, error) {
+func encodeToolPolicy(request *model.Request, target model.Format, root map[string]any, profile model.Profile) ([]model.Loss, error) {
 	var losses []model.Loss
 	var choice any
 	if request.ToolChoice != nil && root["tools"] != nil {
@@ -254,6 +276,12 @@ func encodeToolPolicy(request *model.Request, target model.Format, root map[stri
 	}
 	if request.ParallelToolCalls == nil {
 		return losses, nil
+	}
+	if !profile.Capability.Tools.Parallel {
+		return append(losses, model.Loss{
+			Path: "parallel_tool_calls", Code: model.LossFieldDropped, Class: model.LossDegraded,
+			Detail: "the target cannot enforce a parallel tool policy", From: request.Source, To: target,
+		}), nil
 	}
 	switch target {
 	case model.Chat, model.Responses:

@@ -253,7 +253,7 @@ export const zhCN: Messages = {
     saved: '策略已生效。',
     restored: '已恢复该版本并生效。',
     discard: '放弃修改',
-    membersReadOnly: '成员可以保存不含优先级的记录规则，阻断规则仍由管理员控制。',
+    membersReadOnly: '只有管理员可以编辑和保存策略。成员可以查看当前文档与历史版本。',
     denyOverrides: '任一阻断规则命中即阻断；默认不产生动作。',
   },
   overview: {

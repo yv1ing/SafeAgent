@@ -151,6 +151,22 @@ func (journal *Journal) Item(index int) *Item {
 	return &item
 }
 
+// Remove drops an item that was folded while it streamed but never released to the client. A gate
+// refusal uses it so the stored response describes what the client saw, not what was withheld.
+func (journal *Journal) Remove(index int) {
+	if _, found := journal.items[index]; !found {
+		return
+	}
+	delete(journal.items, index)
+	for position, value := range journal.order {
+		if value != index {
+			continue
+		}
+		journal.order = append(journal.order[:position], journal.order[position+1:]...)
+		return
+	}
+}
+
 func (journal *Journal) SetMeta(meta ResponseMeta) { journal.meta = meta }
 
 func (journal *Journal) Meta() ResponseMeta { return journal.meta }

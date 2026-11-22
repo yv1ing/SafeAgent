@@ -434,6 +434,16 @@ func TestSavePolicyVersionActivatesImmediately(t *testing.T) {
 	}
 }
 
+func TestSavePolicyVersionReportsAMissingProject(t *testing.T) {
+	database := prepared(t)
+	_, err := database.SavePolicyVersion(context.Background(), &entity.PolicyVersion{
+		ID: "pol_missing", ProjectID: "prj_missing", Document: []byte(`{"rules":[]}`), Hash: "h", CreatedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("saving against a missing project must report not found: %v", err)
+	}
+}
+
 func TestProjectAndChannelUpdatesPersistGatewayDefaults(t *testing.T) {
 	database := prepared(t)
 	ctx := context.Background()

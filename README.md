@@ -2,7 +2,7 @@
 
 <p align="center"><strong>Make every agent call in production usable, controllable and traceable</strong></p>
 
-<p align="center">English·<a href="README_zh.md">中文</a></p>
+<p align="center">English · <a href="README_zh.md">中文</a></p>
 
 SafeAgent is a self-hostable security gateway platform built for agent behavior control. It unifies model APIs from different vendors, redacts data before a request leaves the organization, and turns an agent's call trace, tool actions and policy decisions into verifiable audit evidence.
 
@@ -20,21 +20,7 @@ The three problems sit at the interface, the data flow and the record of behavio
 
 ## Why SafeAgent
 
-Built separately, each capability covers only one segment of the call chain:
-
-- A protocol gateway sees the request and response, but not how a tool executes on the client side.
-- An agent-side guardrail inspects tool arguments, but lacks the full session history and data flow.
-- A logging platform records outcomes, but cannot prove the record was not altered.
-
-Three separate records cannot support a single security decision.
-
-On one call path, the three share the same call context:
-
-- Interface conversion decodes and re-encodes requests, preserving the full call context.
-- The data boundary limits what is sent to the model and upstream.
-- Behavior audit keeps reviewable evidence for every decision, release and block.
-
-Policy therefore applies per call and takes effect across all clients.
+Built separately, a protocol gateway sees only the request and response, an agent-side guard sees only the tool call, and a logging platform cannot prove the record was not altered. SafeAgent runs conversion, the data boundary and audit on one call path with one shared context, so policy applies per call and takes effect across every client.
 
 ## Core capabilities
 
@@ -43,8 +29,8 @@ Policy therefore applies per call and takes effect across all clients.
 Chat Completions, Responses, Anthropic Messages and Gemini convert in both directions through one internal model. A client and an upstream may use different formats, and each side encodes requests and responses on its own terms.
 
 - All four interfaces convert in both directions, with the same semantics for streaming and non-streaming.
-- Fields the target protocol cannot express are recorded in the loss ledger, not dropped silently.
-- Same-format traffic that needs no rewrite passes through as-is.
+- Generation conversions record dropped or rewritten fields in the loss ledger.
+- Same-format Chat, Messages and Gemini traffic that needs no rewrite passes through as-is; Responses always takes the canonical path because the gateway owns request state.
 - The provider catalog maintains endpoints, authentication, capability profiles and model discovery.
 
 ### Sensitive data boundary
@@ -154,29 +140,7 @@ The first start creates the schema and prints the initial administrator account 
 
 ## Verification
 
-Release acceptance results:
-
-| Area                     | Result                                          |
-| ------------------------ | ----------------------------------------------- |
-| Protocol matrix          | 180 passed, 0 failed, 60 skipped                |
-| Auxiliary endpoints      | 5 passed, 0 failed, 1 skipped                   |
-| Agent CLIs               | 15 passed, 0 failed                             |
-| Online policy            | 25 passed, 0 failed                             |
-| Diagnosis and redaction  | 12 passed, 0 failed                             |
-| Security and permissions | 16 passed, 0 failed                             |
-| Fault handling           | 9 passed, 0 failed                              |
-| Console                  | 17 pages passed                                 |
-| Load smoke               | 6 native and 24 cross-format comparisons passed |
-| Audit chains             | all verified                                    |
-
-The performance gate runs 150 requests at concurrency 4 and reports relative differences in P95 and throughput (earlier run):
-
-| Scenario        | P95     | Throughput |
-| --------------- | ------- | ---------- |
-| Messages stream | −105 ms | −0.2%      |
-| Chat stream     | −45 ms  | +7.9%      |
-
-The [verification guide](docs/human/verification.md) documents the method, the skipped capabilities and the performance procedure.
+Static and contract checks, race tests, database integration tests and the Docker acceptance lab cover the protocol matrix, agent clients, policy, diagnosis, security, faults, the console, load and audit chains. `make verify` runs the local layers; the [verification guide](docs/human/verification.md) describes the lab and the performance procedure.
 
 ## Documentation
 

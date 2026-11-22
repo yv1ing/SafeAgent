@@ -47,7 +47,7 @@ The hard part of streaming conversion is deciding when bytes may reach the clien
 3. **Termination.** Terminal frames are staged until losses and audit are settled. A clean EOF may synthesize termination; a truncated stream must fail.
 4. **Cancellation.** Stop writing, cancel upstream, and store what the client already received as a partial response.
 
-When the request is same-format and needs no rewrite, it can be forwarded as raw bytes with only the model name, the streaming flag and necessary state fields patched. A response can be forwarded raw while it contains only text, refusal or reasoning text. A tool, media or native item switches back to the canonical encoder. The text hot path avoids re-encoding, while complex paths still get termination and audit from one set of logic.
+When a Chat, Messages or Gemini request is same-format and needs no rewrite, it can be forwarded as raw bytes with only the model name, the streaming flag and Chat usage selection patched. A response can be forwarded raw while it contains only text, refusal or reasoning text. A tool, media or native item switches back to the canonical encoder. The text hot path avoids re-encoding, while complex paths still get termination and audit from one set of logic.
 
 ## Loss ledger
 
@@ -66,12 +66,13 @@ The ledger lets an operator see what a conversion discarded.
 
 Raw pass-through has strict conditions:
 
-- source and target formats match;
+- source and target are the same Chat, Messages or Gemini format;
 - no redaction hit and no gateway signature waiting to be restored;
-- no history expansion and no repair;
-- the endpoint itself allows raw pass-through.
+- no history expansion, repair, compatibility rewrite or capability loss changed the request;
+- the target codec would keep every modelled field, so raw bytes do not preserve something canonical encoding would drop;
+- for Messages, the request carries an output limit.
 
-Responses responses always take the canonical path because the gateway owns response state and retrievable IDs; other same-format responses may still be forwarded raw while they contain plain text only.
+Responses requests and responses always take the canonical path because the gateway owns response state, include selections and retrievable IDs; other same-format responses may still be forwarded raw while they contain plain text only.
 
 ## Provider catalog
 

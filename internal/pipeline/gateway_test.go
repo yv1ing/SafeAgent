@@ -17,6 +17,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis/decision"
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
+	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/pipeline"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
@@ -65,8 +66,14 @@ func newRigVeto(t *testing.T, veto pipeline.Veto, script func(testkit.Received) 
 
 func newRigWith(t *testing.T, upstreamFormat string, veto pipeline.Veto, script func(testkit.Received) testkit.Reply) *rig {
 	t.Helper()
+	return newRigWithTransport(t, upstreamFormat, provider.TransportAuto, veto, script)
+}
+
+func newRigWithTransport(t *testing.T, upstreamFormat string, transport provider.TransportMode, veto pipeline.Veto, script func(testkit.Received) testkit.Reply) *rig {
+	t.Helper()
 	upstream := testkit.NewUpstream(t, script)
 	store := testkit.NewMemory(upstream.URL, upstreamFormat)
+	store.Registry = testkit.ProviderRegistryWithTransport(upstreamFormat, upstream.URL, transport)
 	breakers := routing.NewBreakers(nil)
 	selector := routing.NewSelector(breakers, routing.NewKeyPool(nil), routing.NewSticky(nil), 3)
 	limiter := limit.New(nil)
@@ -470,8 +477,35 @@ func TestBlockingPolicyHoldsToolCallsAndRecordsThem(t *testing.T) {
 	if !strings.Contains(full, "thinking") || strings.Contains(full, "/etc/passwd") || !strings.Contains(full, "tool_call_blocked") {
 		t.Fatalf("held tool call leaked or no error frame: %s", full)
 	}
-	if call := rig.store.Calls[0]; call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+	call := rig.store.Calls[0]
+	if call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
 		t.Fatalf("call %+v", call)
+	}
+	response := string(firstEvent(t, rig.store.EventsOf(call.ID), auditevent.KindResponse))
+	if strings.Contains(response, "/etc/passwd") {
+		t.Fatalf("a blocked tool call must not appear in the recorded response: %s", response)
+	}
+}
+
+func TestStreamingLossHeadersAreWrittenBeforeCommit(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+		{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
+		{Data: `{"type":"content_block_stop","index":0}`},
+		{Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+		{Data: `{"type":"message_stop"}`},
+	}
+	rig := newRigFor(t, string(model.Messages), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: frames}
+	})
+	writer := rig.send(pipeline.Request{Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"seed":7,"max_completion_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)})
+	if writer.Code != 200 {
+		t.Fatalf("%d %s", writer.Code, writer.Body)
+	}
+	header := writer.Result().Header
+	if header.Get("X-SafeAgent-Losses") != "field_dropped" || header.Get("X-SafeAgent-Loss-Count") != "1" {
+		t.Fatalf("request-side losses missing from the committed stream headers: %+v", header)
 	}
 }
 
@@ -1139,5 +1173,113 @@ func TestRawPassThroughIsDisabledWhenAnUnmodelledFieldMatches(t *testing.T) {
 	sent := rig.upstream.Requests()[0].Body
 	if strings.Contains(sent, "me@example.com") || !strings.Contains(sent, "[EMAIL_") {
 		t.Fatalf("a hidden request field must be redacted before the upstream: %s", sent)
+	}
+}
+
+func TestResponsesRequestsAlwaysUseTheCanonicalEncoder(t *testing.T) {
+	rig := newRigFor(t, string(model.Responses), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Body: `{"id":"resp_1","object":"response","created_at":1,"model":"m","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1}}`}
+	})
+	response := rig.send(pipeline.Request{Kind: model.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hi","store":false}`)})
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if !strings.Contains(sent, `"store":false`) || !strings.Contains(sent, `"reasoning.encrypted_content"`) {
+		t.Fatalf("a Responses request must be re-encoded with gateway-owned state: %s", sent)
+	}
+}
+
+func TestStreamingClientKeepsJSONUpstreamLosses(t *testing.T) {
+	rig := newRigWithTransport(t, string(model.Chat), provider.TransportJSON, nil, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Body: `{"id":"c1","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"a"},"finish_reason":"stop"},{"index":1,"message":{"role":"assistant","content":"b"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`}
+	})
+	response := rig.send(pipeline.Request{Kind: model.Chat, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)})
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	found := false
+	for _, loss := range rig.store.Calls[0].Losses {
+		found = found || loss.Code == string(model.LossMultiChoicePassthrough)
+	}
+	if !found {
+		t.Fatalf("a JSON response loss must reach the audit ledger: %+v", rig.store.Calls[0].Losses)
+	}
+}
+
+func TestRawChatPassThroughRejectsTheLegacyTokenLimit(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
+	response := rig.chat(`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if strings.Contains(sent, `"max_tokens"`) || !strings.Contains(sent, `"max_completion_tokens":16`) {
+		t.Fatalf("a legacy limit must be re-encoded under its canonical name: %s", sent)
+	}
+}
+
+func TestRawMessagesPassThroughRejectsAnInlineSystemRole(t *testing.T) {
+	frames := []testkit.Frame{
+		{Data: `{"type":"message_start","message":{"id":"msg_1","model":"claude"}}`},
+		{Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{Data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
+		{Data: `{"type":"content_block_stop","index":0}`},
+		{Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+		{Data: `{"type":"message_stop"}`},
+	}
+	rig := newRigFor(t, string(model.Messages), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: frames}
+	})
+	response := rig.send(pipeline.Request{Kind: model.Messages, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"system","content":"rules"},{"role":"user","content":"hi"}]}`)})
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if strings.Contains(sent, `"role":"system"`) || !strings.Contains(sent, `"system"`) {
+		t.Fatalf("an inline system role must be relocated before the upstream: %s", sent)
+	}
+}
+
+func TestRawRequestPassThroughRejectsFieldsTheTargetCannotCarry(t *testing.T) {
+	rig := newRigFor(t, string(model.Responses), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Body: `{"id":"resp_1","object":"response","created_at":1,"model":"m","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1}}`}
+	})
+	response := rig.send(pipeline.Request{Kind: model.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hi","seed":7,"store":false}`)})
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if strings.Contains(sent, `"seed"`) {
+		t.Fatalf("a field the Responses codec cannot carry must not be raw-forwarded: %s", sent)
+	}
+	found := false
+	for _, loss := range rig.store.Calls[0].Losses {
+		found = found || loss.Path == "seed" && loss.Code == string(model.LossFieldDropped)
+	}
+	if !found {
+		t.Fatalf("the dropped field must be recorded: %+v", rig.store.Calls[0].Losses)
+	}
+}
+
+func TestRawRequestPassThroughIsDisabledWhenCompatibilityRewritesTheBody(t *testing.T) {
+	rig := newRigFor(t, string(model.Responses), func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Body: `{"id":"resp_1","object":"response","created_at":1,"model":"m","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1}}`}
+	})
+	rig.store.Channel[0].CapabilityOverrides = []entity.CapabilityOverride{{Format: string(model.Responses), Field: "thinking"}}
+	response := rig.send(pipeline.Request{Kind: model.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hi","reasoning":{"effort":"high"},"store":false}`)})
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body)
+	}
+	sent := rig.upstream.Requests()[0].Body
+	if strings.Contains(sent, `"reasoning"`) || !strings.Contains(sent, `"input"`) {
+		t.Fatalf("a compatibility rewrite must leave the raw request path: %s", sent)
+	}
+	found := false
+	for _, loss := range rig.store.Calls[0].Losses {
+		found = found || loss.Path == "reasoning" && loss.Code == string(model.LossFieldDropped)
+	}
+	if !found {
+		t.Fatalf("the compatibility rewrite must be recorded: %+v", rig.store.Calls[0].Losses)
 	}
 }

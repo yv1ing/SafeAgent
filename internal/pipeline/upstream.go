@@ -129,7 +129,7 @@ func upstreamDecodeFailure(err error) *model.Error {
 	return transient("invalid_upstream_response", "The upstream response could not be decoded.")
 }
 
-func patchRawBody(body []byte, kind model.Format, upstreamModel string, stream bool) ([]byte, error) {
+func patchRawBody(body []byte, kind model.Format, upstreamModel string, stream, includeUsage bool) ([]byte, error) {
 	if kind == model.Gemini {
 		return body, nil
 	}
@@ -139,21 +139,17 @@ func patchRawBody(body []byte, kind model.Format, upstreamModel string, stream b
 	}
 	root["model"] = upstreamModel
 	root["stream"] = stream
-	switch kind {
-	case model.Chat:
-		if stream {
+	if kind == model.Chat {
+		if stream && includeUsage {
 			options := model.Object(root["stream_options"])
 			if options == nil {
 				options = map[string]any{}
 				root["stream_options"] = options
 			}
 			options["include_usage"] = true
-		} else {
+		} else if !stream {
 			delete(root, "stream_options")
 		}
-	case model.Responses:
-		root["store"] = false
-		delete(root, "previous_response_id")
 	}
 	return model.Marshal(root), nil
 }

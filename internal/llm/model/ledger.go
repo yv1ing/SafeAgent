@@ -18,15 +18,8 @@ const (
 	LossReasoningNotReplayable LossCode = "reasoning_not_replayable"
 	LossServerToolMapped       LossCode = "server_tool_mapped"
 	LossItemIDMapped           LossCode = "item_id_synthesized"
-	LossToolArgGranularity     LossCode = "tool_arg_granularity"
-	LossSignatureResealed      LossCode = "signature_resealed"
-	LossMediaFetched           LossCode = "media_fetched"
-	LossMediaUnavailable       LossCode = "media_unavailable"
 	LossCapabilityRemoved      LossCode = "capability_field_removed"
 	LossMultiChoicePassthrough LossCode = "multi_choice_requires_passthrough"
-	LossCountEstimated         LossCode = "count_estimated"
-	LossUsageEstimated         LossCode = "usage_estimated"
-	LossHTTP200Failed          LossCode = "http200_failed_status"
 )
 
 // LossClass separates a conversion that cannot preserve core semantics (fatal, rejected before

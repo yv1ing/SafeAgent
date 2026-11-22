@@ -260,7 +260,7 @@ export const en = {
     restored: 'The earlier version is active again.',
     discard: 'Discard changes',
     membersReadOnly:
-      'Members may save record-only rules without priorities; blocking rules remain under administrator control.',
+      'Only administrators can edit and save policies. Members can read the active document and its history.',
     denyOverrides: 'Any matching block rule wins; the default is to record nothing.',
   },
   overview: {

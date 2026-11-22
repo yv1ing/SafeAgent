@@ -83,29 +83,9 @@ Latency and throughput describe this sample only and do not establish production
 
 ## Performance gate
 
-The hard gate uses a longer run, which in the recorded acceptance used 150 requests per scenario at concurrency 4. It allows a candidate P95 of up to 1.2 × the direct baseline plus a fixed allowance (100 ms by default), requires throughput of at least 90% of the direct baseline, and also checks protocol correctness, terminal events and error rates. The short smoke is a regression signal and makes no capacity claim.
+The hard gate uses a longer run, 150 requests per scenario at concurrency 4 by default. It allows a candidate P95 of up to 1.2 × the direct baseline plus a fixed allowance (100 ms by default), requires throughput of at least 90% of the direct baseline, and also checks protocol correctness, terminal events and error rates. The short smoke is a regression signal and makes no capacity claim.
 
 The measured path covers protocol conversion, redaction, observation, online policy, audit persistence and streaming relay; it does not cover tool holding, console traffic, background diagnosis, retention or multi-instance behavior.
-
-## Current results
-
-The lab is not bound to any provider: any endpoint that speaks Chat Completions, Responses, Anthropic Messages or Gemini can be configured through `.env`. In the recorded run, one upstream endpoint served all three formats, covering the timeline, signed audit chain, tool-result and response checkpoints.
-
-| Check | Result |
-| --- | --- |
-| `make verify` | passed |
-| Repository integration | passed |
-| Protocol matrix | 180 passed, 0 failed, 60 skipped |
-| Auxiliary endpoints | 5 passed, 0 failed, 1 skipped |
-| Agent CLIs | 15 passed, 0 failed; native Gemini deep task skipped |
-| Online policy | 25 passed, 0 failed |
-| Diagnosis and redaction | 12 passed, 0 failed |
-| Authentication, quotas, isolation and console permissions | 16 passed, 0 failed |
-| Failover, truncation, tool holds, headers and defaults | 9 passed, 0 failed |
-| Console | 17 pages at desktop and mobile widths passed |
-| Load smoke | 6 native and 24 cross-format comparisons passed |
-| Audit chains | every call verified |
-| Hard performance gate (earlier run) | Messages P95 −105 ms, throughput −0.2%; Chat P95 −45 ms, +7.9% |
 
 ## Skips
 
@@ -133,7 +113,7 @@ The first run builds the console and binary, starts the database, and creates th
 ## Limits
 
 - Acceptance depends on real model behavior; tool cases vary with model choice.
-- No matched benchmark against peer projects was run, so these results do not imply a ranking.
+- No matched benchmark against peer projects is part of the lab, so it does not imply a ranking.
 - Performance numbers are relative comparisons only.
 - Security review covers code and dependencies, not the operator's network, database or key management.
 

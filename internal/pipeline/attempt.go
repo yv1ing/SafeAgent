@@ -131,14 +131,15 @@ const (
 func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate, key routing.Key) (attemptResult, *model.Error) {
 	ctx, cancel := attemptContext(state.ctx, channel)
 	defer cancel()
+	state.applyLossHeaders(nil)
 	prepared, failure := state.prepare(candidate)
 	if failure != nil {
 		return attemptFailed, failure
 	}
 	upstream, failure, field := state.openUpstream(ctx, prepared, candidate, key)
 	if field != "" && upstream == nil {
-		if retried, retryFailure := state.retryWithoutField(ctx, candidate, key, field); retried != nil {
-			upstream, failure = retried, nil
+		if retried, retriedPrepared, retryFailure := state.retryWithoutField(ctx, candidate, key, field); retried != nil {
+			upstream, prepared, failure = retried, retriedPrepared, nil
 		} else if retryFailure != nil {
 			failure = retryFailure
 		}
@@ -155,6 +156,7 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	record.ChannelID, record.UpstreamModel, record.Currency = channel.ID, candidate.Target.UpstreamModel, channel.Currency
 	record.EndpointFormat = string(upstream.endpoint.format)
 	if state.stream {
+		state.applyLossHeaders(prepared.losses)
 		return state.streamResponse(ctx, upstream, candidate)
 	}
 	return state.collectResponse(ctx, upstream, candidate)
@@ -168,14 +170,15 @@ func attemptContext(parent context.Context, channel *entity.Channel) (context.Co
 }
 
 // retryWithoutField drops one request field the upstream rejected and retries the same key once.
-func (state *call) retryWithoutField(ctx context.Context, candidate routing.Candidate, key routing.Key, field string) (*upstreamCall, *model.Error) {
+func (state *call) retryWithoutField(ctx context.Context, candidate routing.Candidate, key routing.Key, field string) (*upstreamCall, *prepared, *model.Error) {
 	endpoint, found := state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))]
 	if !found {
-		return nil, nil
+		return nil, nil, nil
 	}
 	applyCapabilityOverride(&endpoint.endpoint, field)
 	state.endpoints[endpointKey(candidate.Target.ChannelID, candidate.Target.UpstreamModel, model.Format(candidate.Target.Format))] = endpoint
-	state.failureLedger.Losses = append(state.failureLedger.Losses, model.Loss{Path: field, Code: model.LossCapabilityRemoved, Class: model.LossDegraded, Detail: "the upstream rejected this field; it is now omitted for this channel", To: endpoint.format})
+	removed := model.Loss{Path: field, Code: model.LossCapabilityRemoved, Class: model.LossDegraded, Detail: "the upstream rejected this field; it is now omitted for this channel", To: endpoint.format}
+	state.failureLedger.Losses = append(state.failureLedger.Losses, removed)
 	persist, cancel := persistenceContext()
 	if err := state.pipeline.repository.AddCapabilityOverride(persist, endpoint.channel.ID, string(endpoint.format), field, "rejected by the upstream"); err != nil {
 		state.pipeline.logger.Warn("capability override could not be stored", "channel", endpoint.channel.ID, "field", field, "error", err)
@@ -183,10 +186,11 @@ func (state *call) retryWithoutField(ctx context.Context, candidate routing.Cand
 	cancel()
 	prepared, failure := state.prepare(candidate)
 	if failure != nil {
-		return nil, failure
+		return nil, nil, failure
 	}
+	prepared.losses = append(prepared.losses, removed)
 	upstream, failure, _ := state.openUpstream(ctx, prepared, candidate, key)
-	return upstream, failure
+	return upstream, prepared, failure
 }
 
 func (state *call) streamResponse(ctx context.Context, upstream *upstreamCall, candidate routing.Candidate) (attemptResult, *model.Error) {
@@ -209,6 +213,7 @@ func (state *call) streamResponse(ctx context.Context, upstream *upstreamCall, c
 		OnFirstToken:   state.recordFirstToken,
 	})
 	if upstream.response != nil {
+		state.failureLedger.Losses = append(state.failureLedger.Losses, upstream.losses...)
 		for _, event := range stream.Events(upstream.response) {
 			if failure := session.Handle([]model.Event{event}, nil); failure != nil {
 				return state.endSessionFailure(session, upstream, failure)

@@ -152,24 +152,11 @@ func (store *Store) PolicyVersion(ctx context.Context, projectID string, version
 // transaction. The project row is locked first so two concurrent saves cannot choose the same
 // version. Saving is activation: there is no draft state.
 func (store *Store) SavePolicyVersion(ctx context.Context, policy *entity.PolicyVersion) (int64, error) {
-	return store.savePolicyVersion(ctx, policy, -1)
-}
-
-// SavePolicyVersionChecked also refuses to activate when the project's active version changed since
-// the caller validated a member document.
-func (store *Store) SavePolicyVersionChecked(ctx context.Context, policy *entity.PolicyVersion, expected int64) (int64, error) {
-	return store.savePolicyVersion(ctx, policy, expected)
-}
-
-func (store *Store) savePolicyVersion(ctx context.Context, policy *entity.PolicyVersion, expected int64) (int64, error) {
 	var version int64
 	err := store.DB.RunInTx(ctx, nil, func(ctx context.Context, transaction bun.Tx) error {
 		var active int64
 		if err := transaction.NewRaw(`SELECT active_policy_version FROM projects WHERE id = ? FOR UPDATE`, policy.ProjectID).Scan(ctx, &active); err != nil {
-			return err
-		}
-		if expected >= 0 && active != expected {
-			return ErrVersionConflict
+			return missing(err)
 		}
 		if err := transaction.NewRaw(`SELECT COALESCE(max(version), 0) + 1 FROM policy_versions WHERE project_id = ?`, policy.ProjectID).Scan(ctx, &version); err != nil {
 			return err

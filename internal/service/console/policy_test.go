@@ -1,34 +1,49 @@
 package console
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
-func TestMembersMustPreserveBlockingRules(t *testing.T) {
-	block := policy.Rule{
-		ID: "block", Name: "block", Enabled: true, Priority: 100, Phase: policy.PhaseToolCall,
-		When: "true", Action: policy.ActionBlock, Severity: "high",
+type policyAccess struct{}
+
+func (policyAccess) Project(_ context.Context, id string) (*entity.Project, error) {
+	return &entity.Project{ID: id}, nil
+}
+
+func (policyAccess) Membership(context.Context, string, string) (bool, error) { return true, nil }
+
+func TestPolicyWritesRequireAnAdministrator(t *testing.T) {
+	service := &PolicyService{access: policyAccess{}}
+	actor := Actor{UserID: "member"}
+	ctx := context.Background()
+	document := policy.DefaultDocument()
+
+	checks := map[string]func() error{
+		"save": func() error {
+			_, err := service.Save(ctx, actor, "project_1", document, "")
+			return err
+		},
+		"validate": func() error {
+			return service.Validate(ctx, actor, "project_1", document)
+		},
+		"test": func() error {
+			_, err := service.Test(ctx, actor, "project_1", document, nil)
+			return err
+		},
+		"rollback": func() error {
+			_, err := service.Rollback(ctx, actor, "project_1", 1)
+			return err
+		},
 	}
-	active := policy.Document{Rules: []policy.Rule{block}}
-	if err := memberDocument(active, policy.Document{Rules: []policy.Rule{block}}); err != nil {
-		t.Fatalf("an unchanged block rule must be allowed: %v", err)
-	}
-	if err := memberDocument(active, policy.Document{}); err == nil {
-		t.Fatal("a member removed an administrator's block rule")
-	}
-	changed := block
-	changed.When = "false"
-	if err := memberDocument(active, policy.Document{Rules: []policy.Rule{changed}}); err == nil {
-		t.Fatal("a member changed an administrator's block rule")
-	}
-	added := policy.Rule{ID: "new", Enabled: true, Phase: policy.PhaseRequest, When: "true", Action: policy.ActionBlock}
-	if err := memberDocument(active, policy.Document{Rules: []policy.Rule{block, added}}); err == nil {
-		t.Fatal("a member added a block rule")
-	}
-	record := policy.Rule{ID: "record", Enabled: true, Phase: policy.PhaseRequest, When: "true", Action: policy.ActionRecord}
-	if err := memberDocument(active, policy.Document{Rules: []policy.Rule{block, record}}); err != nil {
-		t.Fatalf("a member may add a record rule next to the block rule: %v", err)
+	for name, check := range checks {
+		var failure *Failure
+		if err := check(); !errors.As(err, &failure) || failure.Kind != KindForbidden {
+			t.Fatalf("%s must require an administrator: %v", name, err)
+		}
 	}
 }

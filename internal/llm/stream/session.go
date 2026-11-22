@@ -423,10 +423,6 @@ func (session *Session) emit(event model.Event) *model.Error {
 		session.materialize(state)
 		session.normalizeTool(&state.item)
 		event.Item = &state.item
-		session.journal.Apply(event)
-		if failure := session.encode(event, event.ItemIndex); failure != nil {
-			return failure
-		}
 		if state.tool && !state.judged {
 			state.judged = true
 			if session.gate != nil {
@@ -434,6 +430,10 @@ func (session *Session) emit(event model.Event) *model.Error {
 					return failure
 				}
 			}
+		}
+		session.journal.Apply(event)
+		if failure := session.encode(event, event.ItemIndex); failure != nil {
+			return failure
 		}
 		if state.tool {
 			return session.release(event.ItemIndex)
@@ -506,6 +506,7 @@ func (session *Session) materialize(state *itemState) {
 
 func (session *Session) judge(index int, state *itemState) *model.Error {
 	if failure := session.gate(state.item); failure != nil {
+		session.journal.Remove(index)
 		session.discard(index)
 		return failure
 	}
