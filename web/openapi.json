@@ -2490,6 +2490,16 @@
           "retention_days": {
             "nullable": true,
             "type": "integer"
+          },
+          "stream_review_bytes": {
+            "description": "Leading streaming text bytes reviewed before the first byte; 0 disables review",
+            "nullable": true,
+            "type": "integer"
+          },
+          "stream_review_timeout_ms": {
+            "description": "Delay before a partially filled review window is checked on the next frame",
+            "nullable": true,
+            "type": "integer"
           }
         },
         "required": [
@@ -2545,6 +2555,14 @@
           "retention_days": {
             "type": "integer"
           },
+          "stream_review_bytes": {
+            "description": "Leading streaming text bytes reviewed before the first byte; 0 disables review",
+            "type": "integer"
+          },
+          "stream_review_timeout_ms": {
+            "description": "Delay before a partially filled review window is checked on the next frame",
+            "type": "integer"
+          },
           "version": {
             "type": "integer"
           }
@@ -2556,6 +2574,8 @@
           "requests_per_minute",
           "concurrency",
           "daily_token_quota",
+          "stream_review_bytes",
+          "stream_review_timeout_ms",
           "active_policy_version",
           "version",
           "created_at"
@@ -3703,6 +3723,14 @@
             "type": "integer"
           },
           "retention_days": {
+            "type": "integer"
+          },
+          "stream_review_bytes": {
+            "description": "Leading streaming text bytes reviewed before the first byte; 0 disables review",
+            "type": "integer"
+          },
+          "stream_review_timeout_ms": {
+            "description": "Delay before a partially filled review window is checked on the next frame",
             "type": "integer"
           },
           "version": {

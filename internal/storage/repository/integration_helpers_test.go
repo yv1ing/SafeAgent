@@ -3,6 +3,7 @@
 package repository_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
+var testInstanceKey = bytes.Repeat([]byte{7}, 32)
+
 // open connects to SAFEAGENT_TEST_DATABASE. Every test drops and recreates the public schema, so
 // the variable must name a database reserved for tests.
 func open(t *testing.T) *repository.Store {
@@ -20,7 +23,7 @@ func open(t *testing.T) *repository.Store {
 	if dsn == "" {
 		t.Fatal("SAFEAGENT_TEST_DATABASE is not set; use make lab-integration")
 	}
-	database := repository.Open(dsn)
+	database := repository.Open(dsn, testInstanceKey)
 	t.Cleanup(func() { _ = database.Close() })
 	return database
 }

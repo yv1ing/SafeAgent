@@ -37,6 +37,9 @@ cleanup() {
   if [ -n "${project:-}" ]; then
     delete "/projects/$project"
   fi
+  if [ -n "${review_project:-}" ]; then
+    delete "/projects/$review_project"
+  fi
   local channels models
   channels=$(get /channels 2>/dev/null || true)
   for id in $(jq -r --arg suffix " $run" '.[] | select(.name | endswith($suffix)) | .id' <<<"${channels:-[]}"); do
@@ -76,11 +79,18 @@ read -r text_channel text_model <<<"$(channel "Fault Text" openai_chat openai /c
 read -r fail_channel fail_model <<<"$(channel "Fault Fail" openai_chat openai /chat/fail)"
 read -r partial_channel partial_model <<<"$(channel "Fault Partial" openai_chat openai /chat/partial)"
 read -r tool_channel tool_model <<<"$(channel "Fault Tool" openai_chat openai /chat/tool)"
+read -r sibling_channel sibling_model <<<"$(channel "Fault Sibling" openai_chat openai /chat/tool-sibling)"
+read -r review_channel review_model <<<"$(channel "Fault Review Source" openai_chat openai /chat/review)"
 read -r multi_channel multi_model <<<"$(channel "Fault Multi" openai_chat openai /chat/multi)"
 read -r echo_channel echo_model <<<"$(channel "Fault Echo" openai_chat openai /chat/echo yes)"
 read -r messages_channel messages_model <<<"$(channel "Fault Messages" anthropic_messages anthropic /messages/echo)"
+embedding_model="fault-embedding-$run"
+embedding_model_id=$(post /models "$(jq -nc --arg model "$embedding_model" \
+  '{provider_id:"openai",upstream_name:$model,kind:"embedding",formats:["openai_chat"],currency:"USD",enabled:true}')" | jq -r .id)
+embedding_channel=$(post /channels "$(jq -nc --arg name "Fault Embedding $run" --arg model_id "$embedding_model_id" \
+  '{name:$name,provider_id:"openai",endpoints:[{format:"openai_chat",base_url:"http://127.0.0.1:18080"}],model_ids:[$model_id],enabled:true,allow_private_network:true}')" | jq -r .id)
 
-for id in "$text_channel" "$fail_channel" "$partial_channel" "$tool_channel" "$multi_channel" "$echo_channel" "$messages_channel"; do
+for id in "$text_channel" "$fail_channel" "$partial_channel" "$tool_channel" "$sibling_channel" "$review_channel" "$multi_channel" "$echo_channel" "$messages_channel" "$embedding_channel"; do
   post "/channels/$id/keys" '{"label":"fault","secret":"fault-key"}' >/dev/null
 done
 
@@ -95,10 +105,20 @@ target() {
 route fault-failover "$(jq -nc --argjson first "$(target "$fail_channel" "$fail_model" 0)" --argjson second "$(target "$text_channel" "$text_model" 1)" '[$first,$second]')"
 route fault-midstream "$(jq -nc --argjson target "$(target "$partial_channel" "$partial_model" 0)" '[$target]')"
 route fault-tool "$(jq -nc --argjson target "$(target "$tool_channel" "$tool_model" 0)" '[$target]')"
+route fault-sibling "$(jq -nc --argjson target "$(target "$sibling_channel" "$sibling_model" 0)" '[$target]')"
+route fault-embed "$(jq -nc --argjson target "$(target "$embedding_channel" "$embedding_model_id" 0)" '[$target]')"
 route fault-multi "$(jq -nc --argjson target "$(target "$multi_channel" "$multi_model" 0)" '[$target]')"
 route fault-echo "$(jq -nc --argjson target "$(target "$echo_channel" "$echo_model" 0)" '[$target]')"
 route fault-default "$(jq -nc --argjson target "$(target "$messages_channel" "$messages_model" 0 111)" '[$target]')"
 fault_key=$(post "/projects/$project/keys" '{"label":"fault","requests_per_minute":0,"concurrency":0,"trust_level":1,"role":"agent","enabled":true}' | jq -r .secret)
+
+review_project=$(post /projects '{"name":"Fault Review","retention_days":1,"requests_per_minute":0,"concurrency":0,"daily_token_quota":0,"stream_review_bytes":10,"stream_review_timeout_ms":1000}' | jq -r .id)
+post "/projects/$review_project/routes" \
+  "$(jq -nc --arg channel "$review_channel" --arg model_id "$review_model" '{name:"fault-review",targets:[{channel_id:$channel,model_id:$model_id,priority:0,weight:1}]}')" >/dev/null
+review_key=$(post "/projects/$review_project/keys" '{"label":"review","requests_per_minute":0,"concurrency":0,"trust_level":1,"role":"agent","enabled":true}' | jq -r .secret)
+jq -nc --arg when "response.text.contains('REVIEW_BAD')" \
+  '{document:{rules:[{id:"fault-review",name:"Fault review",enabled:true,priority:100,phase:"response",when:$when,action:"block",severity:"high",reason:"fault review"}]},note:"fault"}' |
+  curl -fsS -b "$jar" "${marker[@]}" -X POST "$api/projects/$review_project/policies" -d @- >/dev/null
 
 send_chat() {
   local model=$1 file=$2 body=$3
@@ -141,6 +161,47 @@ else
 fi
 curl -fsS -b "$jar" "${marker[@]}" -X POST "$api/projects/$project/policies/1/rollback" >/dev/null || true
 
+http=$(curl -sS -o "$runtime/fault-embeddings.json" -w '%{http_code}' -m 60 "$base/v1/embeddings" \
+  -H "Authorization: Bearer $fault_key" -H 'Content-Type: application/json' \
+  -d '{"model":"fault-embed","input":"hello"}')
+if [ "$http" = "200" ] && jq -e --arg model "$embedding_model" '.model == $model and (.data[0].embedding | length) == 2' "$runtime/fault-embeddings.json" >/dev/null; then
+  pass "embeddings passthrough applies the upstream model name"
+else
+  fail "embeddings passthrough: HTTP $http $(head -c 300 "$runtime/fault-embeddings.json")"
+fi
+embedding_call=$(get "/projects/$project/calls?model=fault-embed&limit=10" | jq -r '.items[0] // empty')
+if [ -n "$embedding_call" ] &&
+  [ "$(jq -r '.channel_id' <<<"$embedding_call")" = "$embedding_channel" ] &&
+  [ "$(jq -r '.model_id' <<<"$embedding_call")" = "$embedding_model_id" ] &&
+  [ "$(jq -r '.upstream_model' <<<"$embedding_call")" = "$embedding_model" ]; then
+  pass "the auxiliary call records its channel model"
+else
+  fail "auxiliary audit: $embedding_call"
+fi
+
+jq -nc '{document:{rules:[{id:"fault-sibling",name:"Fault sibling",enabled:true,priority:100,phase:"tool_call",when:"tool.name == '\''one'\''",action:"block",severity:"high",reason:"fault sibling"}]},note:"fault"}' |
+  curl -fsS -b "$jar" "${marker[@]}" -X POST "$api/projects/$project/policies" -d @- >/dev/null
+http=$(send_chat fault-sibling "$runtime/fault-sibling.json" '{"model":"fault-sibling","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"call both tools"}]}')
+if [ "$http" = "200" ] && grep -q "delivered" "$runtime/fault-sibling.json" && grep -q "tool_call_blocked" "$runtime/fault-sibling.json" && ! grep -q "call_2" "$runtime/fault-sibling.json"; then
+  pass "a held sibling is withheld from the client after a block"
+else
+  fail "sibling hold: HTTP $http $(head -c 300 "$runtime/fault-sibling.json")"
+fi
+sibling_call=$(get "/projects/$project/calls?model=fault-sibling&limit=10" | jq -r '.items[0].id // empty')
+sibling_detail=""
+if [ -n "$sibling_call" ]; then
+  sibling_detail=$(get "/projects/$project/calls/$sibling_call")
+fi
+if [ -n "$sibling_call" ] &&
+  jq -e '[.events[] | select(.kind == "response") | .payload.response.items[]? | .parts[]? | .text | select(contains("delivered"))] | length > 0' <<<"$sibling_detail" >/dev/null &&
+  jq -e '[.events[] | select(.kind == "response") | .payload.response.items[]? | select(.tool_call.id == "call_2")] | length == 0' <<<"$sibling_detail" >/dev/null &&
+  jq -e '[.events[] | select(.kind == "tool_call") | .payload.id | select(. == "call_2")] | length == 0' <<<"$sibling_detail" >/dev/null; then
+  pass "the audit response excludes the held sibling"
+else
+  fail "sibling audit: $sibling_detail"
+fi
+curl -fsS -b "$jar" "${marker[@]}" -X POST "$api/projects/$project/policies/1/rollback" >/dev/null || true
+
 http=$(send_chat fault-multi "$runtime/fault-multi.json" '{"model":"fault-multi","stream":true,"n":2,"messages":[{"role":"user","content":"hello"}]}')
 if [ "$http" = "200" ] && grep -q "MULTI_0" "$runtime/fault-multi.json" && grep -q "MULTI_1" "$runtime/fault-multi.json" && grep -q "DONE" "$runtime/fault-multi.json"; then
   pass "a same-format streaming multi-choice response passes through"
@@ -178,6 +239,25 @@ if [ "$http" = "422" ] && grep -q "background_not_supported" "$runtime/fault-sta
   pass "background responses are rejected before the upstream"
 else
   fail "background rejection: HTTP $http $(head -c 300 "$runtime/fault-state.json")"
+fi
+
+http=$(curl -sS -o "$runtime/fault-review.json" -w '%{http_code}' -N -m 60 "$base/v1/chat/completions" \
+  -H "Authorization: Bearer $review_key" -H 'Content-Type: application/json' \
+  -d '{"model":"fault-review","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"hello"}]}')
+if [ "$http" = "403" ] && ! grep -q "REVIEW_BAD" "$runtime/fault-review.json" && grep -q "response_blocked" "$runtime/fault-review.json"; then
+  pass "stream review blocks before the first byte"
+else
+  fail "stream review: HTTP $http $(head -c 300 "$runtime/fault-review.json")"
+fi
+review_detail=$(get "/projects/$review_project/calls?model=fault-review&limit=10")
+review_call=$(jq -r '.items[0].id // empty' <<<"$review_detail")
+if [ -n "$review_call" ] &&
+  [ "$(jq -r '.items[0].state' <<<"$review_detail")" = "blocked" ] &&
+  [ "$(jq -r '.items[0].error_code' <<<"$review_detail")" = "response_blocked" ] &&
+  jq -e '[.events[] | select(.kind == "response") | .payload.blocked] | any' <<<"$(get "/projects/$review_project/calls/$review_call")" >/dev/null; then
+  pass "a stream review block records a blocked response"
+else
+  fail "stream review audit: $review_detail"
 fi
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"

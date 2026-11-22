@@ -21,7 +21,7 @@ make deps
 
 ## Configure and start
 
-Copy the example configuration and set `database_url`:
+Copy the example configuration and set `database_url` and `instance_key`:
 
 ```sh
 cp config.example.toml config.toml
@@ -30,10 +30,11 @@ cp config.example.toml config.toml
 ```toml
 listen = "127.0.0.1:8080"
 database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=disable"
+instance_key = "<output of: openssl rand -base64 32>"
 secure_cookies = false
 ```
 
-Every other key has a default. Two settings depend on the deployment:
+The instance key is required. It authenticates the audit chain and seals upstream credentials; the database never stores it. Keep it: losing it makes stored channel keys and the existing audit chain unreadable. Every other key has a default. Two settings depend on the deployment:
 
 - `secure_cookies`: set to `false` only while the console is reached over plain HTTP on loopback. Any other deployment uses HTTPS and sets it to `true`; a Secure cookie is dropped on plain HTTP.
 - `sslmode`: `disable` is for a local database only. A remote database should use TLS.
@@ -63,7 +64,7 @@ Sign in as `admin` at <http://127.0.0.1:8080/console/>. The first sign-in requir
 
 Create a project. A project name is sufficient; the defaults can be changed later. New projects start with the common redaction detectors enabled and an empty, inspectable policy document.
 
-Opening a project changes the sidebar to that project's pages. Use Settings to change the name and, as an administrator, the retention period and usage limits.
+Opening a project changes the sidebar to that project's pages. Use Settings to change the name and, as an administrator, the retention period, usage limits and the optional stream review window.
 
 | Role | Can manage |
 | --- | --- |
@@ -92,7 +93,7 @@ Issue an agent key on the project's keys page. The full key is shown once, so co
 
 If those defaults do not suit the project, adjust redaction and policy. The redaction page can test a rule against sample text. The policies page maintains one ordered rule table; saving validates it and makes it active at once, and the history can restore an earlier version. Only administrators can edit or restore a policy.
 
-A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background. Add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it.
+A new project starts with no policy rules, so requests are forwarded and only diagnosed in the background. Add a blocking rule to make the gateway stop traffic. Project settings also offer an optional decision model, which can veto a side-effecting tool call after the rules have allowed it. The same page offers a stream review window: when enabled, the leading streaming text is checked before the first byte; zero keeps direct streaming.
 
 ## Connect an agent
 
@@ -133,6 +134,7 @@ Inside a container the service has to listen on all interfaces and reach the dat
 ```toml
 listen = "0.0.0.0:8080"
 database_url = "postgres://safeagent:change-me@db-host:5432/safeagent?sslmode=require"
+instance_key = "<output of: openssl rand -base64 32>"
 secure_cookies = true
 ```
 
@@ -143,6 +145,7 @@ With `secure_cookies = true`, the console requires HTTPS. Serve it through a rev
 | Message or symptom | What to do |
 | --- | --- |
 | `database_url is required` | Set it in the configuration file, or check that the process is reading the file you edited. |
+| `instance_key is required` | Add a 32-byte base64 `instance_key` to the configuration file. |
 | Unknown configuration key at startup | A key is misspelled. Use the name reported in the error. |
 | `the database schema does not match this build` | The database belongs to another build. Recreate it; there is no migration. |
 | `the database has tables but no schema fingerprint` | The database was created by another tool or a partial start. Recreate it; guessing at the missing state is unsafe. |

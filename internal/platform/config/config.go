@@ -1,13 +1,16 @@
 // Package config loads the process configuration from a TOML file and applies defaults.
-// A missing database URL is the only value without a default and fails at startup.
+// The database URL and the instance key are required and fail at startup when absent.
 package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -15,6 +18,7 @@ import (
 type Config struct {
 	Listen              string   `toml:"listen"`
 	DatabaseURL         string   `toml:"database_url"`
+	InstanceKey         string   `toml:"instance_key"`
 	SecureCookies       bool     `toml:"secure_cookies"`
 	PublicOrigin        string   `toml:"public_origin"`
 	MaxRequestBytes     int64    `toml:"max_request_bytes"`
@@ -45,6 +49,20 @@ func defaults() Config {
 	}
 }
 
+// Key decodes the 32-byte instance key. It is the only secret the process needs to start: it
+// authenticates the audit chain and seals channel and decision-model credentials.
+func (configuration Config) Key() ([]byte, error) {
+	encoded := strings.TrimSpace(configuration.InstanceKey)
+	if encoded == "" {
+		return nil, errors.New("instance_key is required; set it in the configuration file")
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("instance_key must be 32 bytes encoded as standard base64")
+	}
+	return key, nil
+}
+
 func Load(path string) (Config, error) {
 	configuration := defaults()
 	payload, err := os.ReadFile(path)
@@ -52,6 +70,9 @@ func Load(path string) (Config, error) {
 		return configuration, err
 	}
 	if err = toml.NewDecoder(bytes.NewReader(payload)).DisallowUnknownFields().Decode(&configuration); err != nil {
+		return configuration, err
+	}
+	if _, err := configuration.Key(); err != nil {
 		return configuration, err
 	}
 	if configuration.PublicOrigin != "" {

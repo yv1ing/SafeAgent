@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/chat"
@@ -71,7 +73,7 @@ func newSession(t *testing.T, response *model.Response, restorers stream.Restore
 		Gate:       gate,
 		Format:     model.Chat,
 		ResponseID: meta.ID, ResponseModel: meta.Model,
-		Raw: raw, HoldLimit: holdLimit, PreCommitBytes: 1,
+		Raw: raw, HoldLimit: holdLimit,
 	})
 	return session, writer
 }
@@ -148,6 +150,244 @@ func TestFailureBeforeContentIsNotCommitted(t *testing.T) {
 	}
 	if writer.status != 0 {
 		t.Fatalf("no HTTP status may be written before content: %d", writer.status)
+	}
+}
+
+func TestReviewBlocksBeforeTheFirstByte(t *testing.T) {
+	response := &model.Response{
+		Meta:  model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+		Items: []model.Item{{Kind: model.ItemMessage, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartText, Text: "bad content"}}}},
+	}
+	writer := &collector{header: http.Header{}}
+	reviews := 0
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(response.Meta, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Review: func(input stream.ReviewInput) *model.Error {
+			reviews++
+			if input.Items != 1 || input.ToolCalls != 0 {
+				t.Fatalf("unexpected review input: %+v", input)
+			}
+			if strings.Contains(input.Text, "bad") {
+				return &model.Error{Kind: "blocked", Class: model.ClassPolicy, Code: "response_blocked", Message: "blocked", Status: 403}
+			}
+			return nil
+		},
+		ReviewBytes: 4, ReviewTimeout: time.Hour,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	failure := feed(t, session, response)
+	if failure == nil || failure.Code != "response_blocked" {
+		t.Fatalf("expected a review block, got %+v", failure)
+	}
+	if reviews != 1 {
+		t.Fatalf("review ran %d times", reviews)
+	}
+	if session.Committed() || writer.status != 0 || writer.body.Len() != 0 {
+		t.Fatalf("a blocked review must not commit: status=%d body=%q", writer.status, writer.body.String())
+	}
+}
+
+func TestReviewReleasesTheWindowAndContinues(t *testing.T) {
+	response := &model.Response{
+		Meta:  model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+		Items: []model.Item{{Kind: model.ItemMessage, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartText, Text: "safe content"}}}},
+	}
+	writer := &collector{header: http.Header{}}
+	session := stream.New(stream.Options{
+		Encoder:     chat.New().NewStreamEncoder(response.Meta, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:      writer,
+		Journal:     model.NewJournal(),
+		Restorers:   passthrough{},
+		Review:      func(stream.ReviewInput) *model.Error { return nil },
+		ReviewBytes: 2, ReviewTimeout: time.Hour,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	if failure := feed(t, session, response); failure != nil {
+		t.Fatal(failure)
+	}
+	if !session.Committed() || writer.status != http.StatusOK {
+		t.Fatalf("an allowed review must commit: committed=%v status=%d", session.Committed(), writer.status)
+	}
+	if !strings.Contains(writer.body.String(), "safe content") {
+		t.Fatalf("the reviewed window must reach the client: %s", writer.body.String())
+	}
+}
+
+func TestReviewTimeoutIsCheckedOnTheNextFrame(t *testing.T) {
+	response := &model.Response{
+		Meta:  model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+		Items: []model.Item{{Kind: model.ItemMessage, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartText, Text: "ok"}}}},
+	}
+	writer := &collector{header: http.Header{}}
+	reviews := 0
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(response.Meta, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Review: func(stream.ReviewInput) *model.Error {
+			reviews++
+			return nil
+		},
+		ReviewBytes: 1024, ReviewTimeout: time.Nanosecond,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	if failure := feed(t, session, response); failure != nil {
+		t.Fatal(failure)
+	}
+	if reviews != 1 || !session.Committed() || writer.status != http.StatusOK {
+		t.Fatalf("reviews=%d committed=%v status=%d", reviews, session.Committed(), writer.status)
+	}
+}
+
+func TestReviewWindowKeepsUTF8Intact(t *testing.T) {
+	response := &model.Response{
+		Meta:  model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+		Items: []model.Item{{Kind: model.ItemMessage, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartText, Text: "你好"}}}},
+	}
+	writer := &collector{header: http.Header{}}
+	reviewed := ""
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(response.Meta, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Review: func(input stream.ReviewInput) *model.Error {
+			reviewed = input.Text
+			if !utf8.ValidString(input.Text) {
+				t.Fatalf("the review window split a rune: %q", input.Text)
+			}
+			return nil
+		},
+		ReviewBytes: 2, ReviewTimeout: time.Hour,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	if failure := feed(t, session, response); failure != nil {
+		t.Fatal(failure)
+	}
+	if reviewed != "你" {
+		t.Fatalf("reviewed text = %q", reviewed)
+	}
+	if !strings.Contains(writer.body.String(), "你好") {
+		t.Fatalf("the full text must reach the client: %s", writer.body.String())
+	}
+}
+
+func TestReviewWindowKeepsAContiguousUTF8Prefix(t *testing.T) {
+	response := &model.Response{
+		Meta:  model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+		Items: []model.Item{{Kind: model.ItemMessage, Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartText, Text: "ab你好"}}}},
+	}
+	writer := &collector{header: http.Header{}}
+	reviewed := ""
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(response.Meta, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Review: func(input stream.ReviewInput) *model.Error {
+			reviewed = input.Text
+			return nil
+		},
+		ReviewBytes: 3, ReviewTimeout: time.Hour,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	if failure := feed(t, session, response); failure != nil {
+		t.Fatal(failure)
+	}
+	if reviewed != "ab你" {
+		t.Fatalf("reviewed text = %q", reviewed)
+	}
+}
+
+func TestRawReviewReportsTheJournalItemCount(t *testing.T) {
+	writer := &collector{header: http.Header{}}
+	items := -1
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(model.ResponseMeta{ID: "chatcmpl-1", Model: "m"}, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Format:    model.Chat, Raw: true,
+		Review: func(input stream.ReviewInput) *model.Error {
+			items = input.Items
+			return nil
+		},
+		ReviewBytes: 5, ReviewTimeout: time.Hour,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	frame := codec.Frame{Data: []byte(`{"ok":true}`)}
+	events := []model.Event{
+		{Kind: model.EventMessageStart, Meta: &model.ResponseMeta{ID: "chatcmpl-1", Model: "m"}},
+		{Kind: model.EventItemStart, ItemIndex: 0, Item: &model.Item{Kind: model.ItemMessage, Role: model.RoleAssistant}},
+		{Kind: model.EventPartStart, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartText}},
+		{Kind: model.EventPartDelta, ItemIndex: 0, PartIndex: 0, Delta: "hello"},
+		{Kind: model.EventPartStop, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartText}},
+		{Kind: model.EventItemStop, ItemIndex: 0, Item: &model.Item{Kind: model.ItemMessage, Role: model.RoleAssistant}},
+		{Kind: model.EventMessageStop},
+	}
+	if failure := session.Handle(events, &frame); failure != nil {
+		t.Fatal(failure)
+	}
+	if items != 1 {
+		t.Fatalf("raw review item count = %d", items)
+	}
+}
+
+func TestPruneUndeliveredDropsAHeldSibling(t *testing.T) {
+	writer := &collector{header: http.Header{}}
+	session := stream.New(stream.Options{
+		Encoder:   chat.New().NewStreamEncoder(model.ResponseMeta{ID: "chatcmpl-1", Model: "m"}, codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m"}),
+		Writer:    writer,
+		Journal:   model.NewJournal(),
+		Restorers: passthrough{},
+		Gate: func(item model.Item) *model.Error {
+			if item.ToolCall != nil && item.ToolCall.ID == "call_1" {
+				return &model.Error{Kind: "blocked", Class: model.ClassPolicy, Code: "tool_call_blocked", Message: "blocked", Status: 403}
+			}
+			return nil
+		},
+		Format: model.Chat, ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	events := []model.Event{
+		{Kind: model.EventMessageStart, Meta: &model.ResponseMeta{ID: "chatcmpl-1", Model: "m"}},
+		{Kind: model.EventItemStart, ItemIndex: 0, Item: &model.Item{Kind: model.ItemMessage, Role: model.RoleAssistant}},
+		{Kind: model.EventPartStart, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartText}},
+		{Kind: model.EventPartDelta, ItemIndex: 0, PartIndex: 0, Delta: "thinking"},
+		{Kind: model.EventPartStop, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartText}},
+		{Kind: model.EventItemStop, ItemIndex: 0, Item: &model.Item{Kind: model.ItemMessage, Role: model.RoleAssistant}},
+		{Kind: model.EventItemStart, ItemIndex: 1, Item: &model.Item{Kind: model.ItemToolCall, Role: model.RoleAssistant, ToolCall: &model.ToolCall{Kind: model.ToolFunction, ID: "call_1", Name: "one"}}},
+		{Kind: model.EventPartStart, ItemIndex: 1, PartIndex: 0, Part: &model.Part{Kind: model.PartToolArguments}},
+		{Kind: model.EventItemStart, ItemIndex: 2, Item: &model.Item{Kind: model.ItemToolCall, Role: model.RoleAssistant, ToolCall: &model.ToolCall{Kind: model.ToolFunction, ID: "call_2", Name: "two"}}},
+		{Kind: model.EventPartStart, ItemIndex: 2, PartIndex: 0, Part: &model.Part{Kind: model.PartToolArguments}},
+		{Kind: model.EventPartDelta, ItemIndex: 1, PartIndex: 0, Delta: `{"a":1}`},
+		{Kind: model.EventPartDelta, ItemIndex: 2, PartIndex: 0, Delta: `{"b":2}`},
+		{Kind: model.EventPartStop, ItemIndex: 1, PartIndex: 0, Part: &model.Part{Kind: model.PartToolArguments}},
+		{Kind: model.EventItemStop, ItemIndex: 1},
+	}
+	var failure *model.Error
+	for _, event := range events {
+		if failure = session.Handle([]model.Event{event}, nil); failure != nil {
+			break
+		}
+	}
+	if failure == nil || failure.Code != "tool_call_blocked" {
+		t.Fatalf("the gate must stop the stream: %+v", failure)
+	}
+	if !session.Committed() {
+		t.Fatal("the text must have committed the stream")
+	}
+	session.PruneUndelivered()
+	for _, item := range session.Journal().Response(model.Chat).Items {
+		if item.ToolCall != nil && item.ToolCall.ID == "call_2" {
+			t.Fatal("a held sibling tool call must not survive the audit projection")
+		}
+	}
+	if strings.Contains(writer.body.String(), "call_2") {
+		t.Fatal("the client must not receive the held sibling")
 	}
 }
 

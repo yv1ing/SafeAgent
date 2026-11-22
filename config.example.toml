@@ -1,8 +1,13 @@
-# Copy to config.toml and adjust. Every key except database_url has a default.
+# Copy to config.toml and adjust. database_url and instance_key are required; every other key has a default.
 # In a container, set listen = "0.0.0.0:8080" and mount this file at /app/config.toml.
 
 listen = "127.0.0.1:8080"
 database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=disable"
+
+# 32 bytes encoded as standard base64. Required. It authenticates the audit chain and seals
+# channel and decision-model credentials; it is never stored in the database.
+# Generate one with: openssl rand -base64 32
+instance_key = ""
 
 # Cookies are Secure by default. Set false only for plain-HTTP local development.
 secure_cookies = true

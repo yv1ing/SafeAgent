@@ -9,9 +9,9 @@ SafeAgent is verified by four layers of evidence: static checks, unit and race t
 | Layer | Command | What it proves |
 | --- | --- | --- |
 | Static and contract | `make check` | formatting, staticcheck, vet, TypeScript, OpenAPI and generated client consistency |
-| Unit and race | `make test` | four protocol conversions, stream session, four checkpoints, audit chain, policy and detectors |
+| Unit and race | `make test` | four protocol conversions, stream session and review, four checkpoints, delivered-only audit projection, audit chain, policy and detectors |
 | Database integration | `make integration` (requires a test database) | transactions, cascades, quota, retention, audit-chain verification and tamper location |
-| Lab | `make lab-acceptance` | protocol matrix, agent CLIs, policy, diagnosis, security, faults, browser, load and audit verification against a real upstream |
+| Lab | `make lab-acceptance` | protocol matrix, auxiliary endpoints, agent CLIs, policy, diagnosis, security, stream review, audit projection, browser, load and audit verification against a real upstream |
 
 `make verify` runs the first two layers. `make security` additionally writes dependency inventories, SBOMs and vulnerability reports, and fails on a symbol-reachable vulnerability.
 
@@ -69,9 +69,9 @@ The diagnosis suite sends an injection phrase, an e-mail address and an exfiltra
 
 ## Security and faults
 
-The security suite uses separate projects and checks invalid keys, cross-project isolation, rate and token quotas, member and administrator permissions, raw-event access and the operation log.
+The security suite uses separate projects and checks invalid keys, cross-project isolation, rate and token quotas, member and administrator permissions, administrator-only stream review settings, raw-event access and the operation log.
 
-The fault suite uses a local deterministic upstream and checks failover before content, behavior after content, truncated streams, tool holds, header forwarding, route output limits, rejection cases, and both multi-choice pass-through and rejection.
+The fault suite uses a local deterministic upstream and checks failover before content, behavior after content, truncated streams, tool holds, stream review, header forwarding, route output limits, rejection cases, and both multi-choice pass-through and rejection. The stream review case enables a bounded window on a temporary project, proves that a matching response rule blocks before the first byte, and checks the stored blocked response.
 
 ## Console and load
 

@@ -24,8 +24,9 @@ One English term per concept, with the Chinese term used in `README_zh.md` and `
 | finding | 发现 | One deterministic observation with a code, severity, evidence and optional three-axis labels. |
 | flow | 关系 | An edge from external content to a later side-effecting tool call inside a call. |
 | decision | 决策 | One online policy or decision-model result stored with the call. |
-| checkpoint | 检查点 | A point where policy runs: request, tool call, tool result or non-streaming response. |
+| checkpoint | 检查点 | A point where policy runs: request, tool call, tool result or response (a full non-streaming response, or the reviewed leading window of a stream). |
 | tool hold | 工具缓冲 | Holding a complete tool call until its verdict is ready. |
+| stream review | 流式预审 | Buffering a bounded leading window of a streaming response and running the response checkpoint before the first byte. |
 | loss | 损失 | A field or semantic the target format cannot carry, recorded with a code and class. |
 | repair | 修复 | A request invariant restored before conversion, recorded in the ledger. |
 | redaction | 脱敏 | Replacing sensitive values before egress and restoring them in the response. |

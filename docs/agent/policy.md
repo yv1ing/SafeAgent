@@ -37,9 +37,15 @@ A new project is seeded with version 1 containing an empty rule list, so every p
 | `request` | after the request is decoded and redacted, before routing | principal, trace, request findings; empty tool/target/args |
 | `tool_result` | when the request adds tool results, before routing and quota | principal, trace, findings, plus `results` (the new results in request order); empty tool/target/args |
 | `tool_call` | after a tool call is complete, before its frames are released | everything, including the pending tool call and its sink |
-| `response` | before a non-streaming response body is written | principal, trace, findings, plus `response` (status, finish, shown text, counts); empty tool/target/args |
+| `response` | before a non-streaming response body is written, or before the first byte of a streaming response when stream review is enabled | principal, trace, findings, plus `response` (status, finish, shown text, counts); empty tool/target/args |
 
-Streaming response text has no phase. A tool result that arrives in a request is checked at `tool_result`; a provider-executed server tool result is held at `tool_call` after the provider has already run it.
+A tool result that arrives in a request is checked at `tool_result`; a provider-executed server tool result is held at `tool_call` after the provider has already run it.
+
+Streaming responses have a `response` phase only when the project enables stream review. The preview carries `status = "in_progress"`, an empty `finish`, and the leading shown text. A blocking rule prevents the response from being committed; after the window is released, later text has no online phase.
+
+### Stream review settings
+
+A project stores `stream_review_bytes` (0 disables review, at most 64 KiB) and `stream_review_timeout_ms` (at most 5000 ms, default 300). The window is reviewed when it fills, when the next frame arrives after the timeout, or when a short stream ends. Both settings are administrator-only and are applied at admission, so a change does not affect a running call.
 
 ## Typed fields
 
@@ -67,7 +73,7 @@ The principal comes from the authenticated agent key. Client-supplied metadata i
 - Every matching record rule produces one stored decision.
 - If any block rule matches, the phase blocks; only the highest-priority block is stored as the blocking decision, while record decisions still appear in the call view.
 - A `request` or `tool_result` block returns a protocol-shaped error before the upstream is called. A `tool_call` block prevents the call from reaching the client; before the stream commits it returns an HTTP error, and after the stream commits the error is in-band.
-- A `response` block withholds the generated JSON, records a non-retrievable response summary, settles the reported usage and returns a protocol error.
+- A `response` block withholds the generated JSON, records a non-retrievable response summary, settles the reported usage and returns a protocol error. For a stream review block, the buffered preview is stored as a blocked response, nothing is committed to the client, and the rejection uses the protocol error shape.
 - Rules are ordered by `priority` descending, then `id`; order only decides which block is reported.
 
 ## Lifecycle

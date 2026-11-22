@@ -33,10 +33,11 @@ type Options struct {
 
 type Console struct {
 	Services
-	options    Options
-	endpoints  []endpoint
-	loginLimit *limit.Bucket
-	ruleLimit  *limit.Bucket
+	options       Options
+	endpoints     []endpoint
+	loginLimit    *limit.Bucket
+	ruleLimit     *limit.Bucket
+	analysisLimit *limit.Bucket
 }
 
 type handler func(ctx *gin.Context, identity *Identity) (any, error)
@@ -53,10 +54,11 @@ type endpoint struct {
 
 func New(services Services, options Options) *Console {
 	console := &Console{
-		Services:   services,
-		options:    options,
-		loginLimit: limit.NewBucket(10, time.Minute),
-		ruleLimit:  limit.NewBucket(30, time.Minute),
+		Services:      services,
+		options:       options,
+		loginLimit:    limit.NewBucket(10, time.Minute),
+		ruleLimit:     limit.NewBucket(30, time.Minute),
+		analysisLimit: limit.NewBucket(30, time.Minute),
 	}
 	console.register()
 	return console

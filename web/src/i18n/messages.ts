@@ -105,6 +105,7 @@ export const en = {
     invalid_label: 'The label is too long or contains control characters.',
     invalid_retention_days: 'Retention must be between 1 and 3650 days.',
     invalid_limit: 'A limit is negative or above its maximum.',
+    invalid_stream_review: 'The stream review window is outside its permitted range.',
     invalid_policy: 'The policy document is invalid.',
     invalid_decision_model: 'The decision model configuration is invalid.',
     invalid_format: 'The protocol format is not supported.',
@@ -369,7 +370,6 @@ export const en = {
     reanalyze: 'Analyze again',
     reanalyzed: 'A new analysis was stored.',
     modelState: 'Model',
-    modelUnsafe: 'Unsafe',
     confidence: 'confidence',
     modelSeverity: 'Severity',
     coverage: 'Coverage',
@@ -625,7 +625,7 @@ export const en = {
     quotaUsage: 'Daily quota used',
     openProject: 'Open project',
     general: 'General',
-    generalHint: 'Name, retention and limits for this project.',
+    generalHint: 'Name, retention, limits and stream review for this project.',
     limitsAdminOnly:
       'Only administrators can change retention and limits. Renaming the project is permitted.',
     settingsDescription: 'Manage this project and how long its traffic is retained.',
@@ -641,6 +641,12 @@ export const en = {
     defaultMaxOutput: 'Default output limit',
     defaultMaxOutputHint:
       'Applied when the upstream requires an output limit and the request has none. 0 uses the gateway default.',
+    streamReviewBytes: 'Stream review window (bytes)',
+    streamReviewHint:
+      'Leading streaming text reviewed before the first byte. 0 disables stream review.',
+    streamReviewTimeout: 'Stream review timeout (ms)',
+    streamReviewTimeoutHint:
+      'Delay after text starts buffering; the next chunk after it reviews the partial window. The window is also reviewed when it fills or the stream ends.',
     deleteTitle: 'Delete project {name}?',
     deleteHint: 'Its keys, routes, rules and audit records are removed for good.',
     emptyTitle: 'No projects.',

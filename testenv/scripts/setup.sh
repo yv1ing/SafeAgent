@@ -79,9 +79,37 @@ for _ in $(seq 1 60); do
 done
 docker compose exec -T database pg_isready -U safeagent -d safeagent >/dev/null
 
+tables=$(docker compose exec -T database psql -U safeagent -d safeagent -tAc \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" | tr -d '[:space:]')
+administrators=0
+users_table=$(docker compose exec -T database psql -U safeagent -d safeagent -tAc \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users'" | tr -d '[:space:]')
+if [ "$users_table" = "1" ]; then
+  administrators=$(docker compose exec -T database psql -U safeagent -d safeagent -tAc \
+    "SELECT count(*) FROM users WHERE administrator AND NOT disabled" | tr -d '[:space:]')
+fi
+if [ "$administrators" != "0" ]; then
+  echo "the database already has an administrator; rerun with FRESH=1 to rebuild the lab" >&2
+  exit 1
+fi
+
+instance_key_file="$runtime/instance.key"
+if [ ! -f "$instance_key_file" ] && [ "$tables" != "0" ]; then
+  echo "the database is not empty but $instance_key_file is missing; rerun with FRESH=1" >&2
+  exit 1
+fi
+if [ ! -f "$instance_key_file" ]; then
+  openssl rand -base64 32 > "$instance_key_file"
+fi
+if [ "$(base64 -d "$instance_key_file" 2>/dev/null | wc -c)" -ne 32 ]; then
+  echo "$instance_key_file must contain 32 bytes encoded as standard base64" >&2
+  exit 1
+fi
+instance_key=$(cat "$instance_key_file")
 cat > "$runtime/config.toml" <<EOF
 listen = "0.0.0.0:8080"
 database_url = "postgres://safeagent:safeagent@127.0.0.1:55432/safeagent?sslmode=disable"
+instance_key = "$instance_key"
 secure_cookies = false
 public_origin = ""
 max_request_bytes = 8388608
@@ -101,7 +129,11 @@ initial_line=$(sed -n 's/^Initial administrator: //p' "$runtime/gateway.log" | h
 initial_user=${initial_line%% /*}
 initial=${initial_line#* / }
 if [ -z "$initial_line" ] || [ "$initial_user" = "$initial" ]; then
-  echo "the database already has an administrator; rerun with FRESH=1 to rebuild the lab" >&2
+  if [ -f "$runtime/gateway.pid" ]; then
+    kill "$(cat "$runtime/gateway.pid")" 2>/dev/null || true
+    rm -f "$runtime/gateway.pid"
+  fi
+  echo "the gateway did not print an initial administrator; rerun with FRESH=1 to rebuild the lab" >&2
   exit 1
 fi
 

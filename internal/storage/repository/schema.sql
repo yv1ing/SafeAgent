@@ -1,7 +1,8 @@
 -- SafeAgent schema baseline. This file is the single source of DDL truth; entities are only CRUD
 -- mappings. There is no migration path: a build whose fingerprint differs refuses to start and the
 -- operator recreates the database, which is acceptable because the only durable value is the audit
--- trail and this project deliberately keeps no compatibility mechanism.
+-- trail and this project deliberately keeps no compatibility mechanism. The instance key is
+-- supplied by configuration and is never stored here.
 
 CREATE TABLE IF NOT EXISTS users (
     id text PRIMARY KEY,
@@ -31,11 +32,16 @@ CREATE TABLE IF NOT EXISTS projects (
     concurrency integer NOT NULL DEFAULT 0,
     daily_token_quota bigint NOT NULL DEFAULT 0,
     default_max_output_tokens integer NOT NULL DEFAULT 0,
+    stream_review_bytes integer NOT NULL DEFAULT 0,
+    stream_review_timeout_ms integer NOT NULL DEFAULT 300,
     rules_version bigint NOT NULL DEFAULT 0,
     active_policy_version bigint NOT NULL DEFAULT 0,
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT projects_retention CHECK (retention_days BETWEEN 1 AND 3650)
+    CONSTRAINT projects_retention CHECK (retention_days BETWEEN 1 AND 3650),
+    CONSTRAINT projects_stream_review CHECK (
+        stream_review_bytes BETWEEN 0 AND 65536 AND stream_review_timeout_ms BETWEEN 0 AND 5000
+    )
 );
 
 CREATE TABLE IF NOT EXISTS project_members (
@@ -452,6 +458,5 @@ CREATE TABLE IF NOT EXISTS quota_usage (
 
 CREATE TABLE IF NOT EXISTS system_state (
     id integer PRIMARY KEY,
-    schema_fingerprint text NOT NULL,
-    hmac_secret bytea NOT NULL
+    schema_fingerprint text NOT NULL
 );

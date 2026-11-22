@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
@@ -17,19 +18,45 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
+// blockReviewedStream seals a stream whose leading review blocked before the response was committed.
+// The buffered preview is stored as a blocked response, but the client receives only the protocol
+// error shape because no byte of the body was written.
+func (state *call) blockReviewedStream(session *stream.Session, upstream *upstreamCall, failure *model.Error) (attemptResult, *model.Error) {
+	session.Close()
+	response := session.Journal().Response(state.kind)
+	state.decorate(response)
+	ledger := state.ledger(session.Journal())
+	return attemptEnded, state.recordBlockedResponse(response, ledger, failure, upstream)
+}
+
+// recordBlockedResponse stores a blocked response and settles reported usage without making the
+// response retrievable.
+func (state *call) recordBlockedResponse(response *model.Response, ledger model.Ledger, failure *model.Error, upstream *upstreamCall) *model.Error {
+	state.recordResponse(response, ledger, responseMeta{Blocked: true})
+	state.applyLossHeaders(ledger.Losses)
+	if !state.settle("blocked", failure, response.Usage, upstream.endpoint.model) {
+		failure = internal("audit_unavailable", "The response could not be recorded.")
+	}
+	state.reply(failure)
+	return failure
+}
+
 func (state *call) completeStream(session *stream.Session, upstream *upstreamCall) (attemptResult, *model.Error) {
 	journal := session.Journal()
-	response := journal.Response(state.kind)
-	state.decorate(response)
-	if response.Failure != nil {
+	if journal.Failure() != nil {
 		if !session.Committed() {
 			session.Close()
 			return attemptFailed, transient("upstream_reported_failure", "The upstream reported a failed response.")
 		}
+		session.PruneUndelivered()
+		response := journal.Response(state.kind)
+		state.decorate(response)
 		session.StageFailure(response.Failure)
 		state.finishStream(session, upstream, "failed", response, response.Failure)
 		return attemptEnded, response.Failure
 	}
+	response := journal.Response(state.kind)
+	state.decorate(response)
 	if len(response.Items) == 0 && response.Finish.Kind != model.FinishContentFilter && !session.Committed() {
 		session.Close()
 		return attemptFailed, transient("empty_response", "The upstream returned no content.")
@@ -42,7 +69,13 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 	state.recordResponse(response, ledger, responseMeta{Committed: true, Identify: true, Stored: state.responseStore()})
 	if !state.settle("completed", nil, response.Usage, upstream.endpoint.model) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
-		session.Close()
+		if session.Committed() {
+			session.StageFailure(failure)
+			session.WriteStaged()
+		} else {
+			session.Close()
+			state.reply(failure)
+		}
 		return attemptEnded, failure
 	}
 	session.WriteStaged()
@@ -50,6 +83,7 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 }
 
 func (state *call) failStream(session *stream.Session, upstream *upstreamCall, stateName string, failure *model.Error) {
+	session.PruneUndelivered()
 	response := session.Journal().Response(state.kind)
 	state.decorate(response)
 	response.Failure = failure
@@ -105,13 +139,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	}
 	if refusal := state.evaluateCollectedResponse(response); refusal != nil {
 		ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
-		state.recordResponse(response, ledger, responseMeta{Blocked: true})
-		state.applyLossHeaders(ledger.Losses)
-		if !state.settle("blocked", refusal, response.Usage, upstream.endpoint.model) {
-			refusal = internal("audit_unavailable", "The response could not be recorded.")
-		}
-		state.reply(refusal)
-		return attemptEnded, refusal
+		return attemptEnded, state.recordBlockedResponse(response, ledger, refusal, upstream)
 	}
 	if upstream.response != nil {
 		state.normalizeCustomTools(response)
@@ -141,6 +169,31 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	return attemptCompleted, nil
 }
 
+// reviewStream evaluates the leading window of a streaming response before anything reaches the
+// client. It uses the same content detector and response-phase rules as a non-streaming response;
+// the preview's status is in_progress because its finish is not known yet.
+func (state *call) reviewStream(input stream.ReviewInput) *model.Error {
+	shown, _ := state.redactor()(input.Text, "response.preview")
+	shown = truncatePolicyText(shown, maxPolicyResultBytes)
+	trace := state.baseTrace()
+	preview := &model.Response{
+		Meta:   model.ResponseMeta{ID: state.recorder.Call().ID, Model: state.request.Model},
+		Status: "in_progress",
+		Items: []model.Item{{
+			Kind: model.ItemMessage, Role: model.RoleAssistant,
+			Parts: []model.Part{{Kind: model.PartText, Text: input.Text}},
+		}},
+	}
+	observe.AppendResponse(trace, preview, state.observeOptions())
+	failure := state.evaluateResponse(trace, policy.Response{
+		Status: "in_progress", Text: shown, ItemCount: input.Items, ToolCalls: input.ToolCalls,
+	})
+	if failure != nil {
+		state.reviewBlocked = true
+	}
+	return failure
+}
+
 func (state *call) evaluateCollectedResponse(response *model.Response) *model.Error {
 	redactor := state.redactor()
 	text := ""
@@ -159,7 +212,7 @@ func (state *call) evaluateCollectedResponse(response *model.Response) *model.Er
 		}
 	}
 	if len(text) > maxPolicyResultBytes {
-		text = text[:maxPolicyResultBytes]
+		text = truncatePolicyText(text, maxPolicyResultBytes)
 	}
 	trace := state.baseTrace()
 	observe.AppendResponse(trace, response, state.observeOptions())
@@ -182,6 +235,29 @@ func (state *call) gateResponse(response *model.Response) *model.Error {
 		}
 	}
 	return nil
+}
+
+// truncatePolicyText clips at a rune boundary so a policy rule never sees invalid UTF-8.
+func truncatePolicyText(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		_, size := utf8.DecodeRuneInString(text)
+		return text[:size]
+	}
+	if cut < limit {
+		_, size := utf8.DecodeRuneInString(text[cut:])
+		return text[:cut+size]
+	}
+	return text[:cut]
 }
 
 func (state *call) decorate(response *model.Response) {

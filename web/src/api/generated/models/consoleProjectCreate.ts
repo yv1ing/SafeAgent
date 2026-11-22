@@ -21,4 +21,14 @@ export interface ConsoleProjectCreate {
   requests_per_minute?: number | null;
   /** @nullable */
   retention_days?: number | null;
+  /**
+   * Leading streaming text bytes reviewed before the first byte; 0 disables review
+   * @nullable
+   */
+  stream_review_bytes?: number | null;
+  /**
+   * Delay before a partially filled review window is checked on the next frame
+   * @nullable
+   */
+  stream_review_timeout_ms?: number | null;
 }

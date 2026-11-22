@@ -26,8 +26,8 @@ make lab-auxiliary  # models, counting, Responses lifecycle and WebSocket
 make lab-agents     # four agent CLIs against every configured route
 make lab-policy     # request, tool-result and tool-call enforcement
 make lab-analysis   # diagnosis, redaction, timeline and audit-integrity acceptance
-make lab-security   # authentication, quotas, isolation and console permissions
-make lab-faults     # failover, truncation, tool holds, headers and default limits
+make lab-security   # authentication, quotas, isolation, console permissions and stream review settings
+make lab-faults     # failover, truncation, tool holds, stream review, audit projection, auxiliary mapping and limits
 make lab-browser    # desktop console CRUD and mobile page checks
 make lab-audit      # verify every stored call audit chain on the lab database
 make lab-load       # quick four-protocol performance smoke
@@ -35,16 +35,17 @@ make lab-acceptance # every lab suite in order
 make security       # SBOM + govulncheck + npm audit
 ```
 
-`cmd/safeagent` also provides `schema`, `openapi` and `verify-audit` subcommands. `schema` prints the baseline DDL, `openapi` writes the contract to the requested output path, and `verify-audit` reads the stored schema state and HMAC secret and checks call event chains without creating anything. Global flags precede the command: `safeagent -config config.toml verify-audit -call <id>`. `make lab-integration` runs the repository tests against a separate database in the lab.
+`cmd/safeagent` also provides `schema`, `openapi` and `verify-audit` subcommands. `schema` prints the baseline DDL, `openapi` writes the contract to the requested output path, and `verify-audit` reads the stored schema state, uses the configured instance key and checks call event chains without creating anything. Global flags precede the command: `safeagent -config config.toml verify-audit -call <id>`. `make lab-integration` runs the repository tests against a separate database in the lab.
 
 ## Configuration
 
-`config.example.toml` lists every key. All keys except `database_url` have defaults.
+`config.example.toml` lists every key. `database_url` and `instance_key` are required; every other key has a default.
 
 | Key | Meaning |
 | --- | --- |
 | `listen` | HTTP listen address |
 | `database_url` | PostgreSQL connection string; required |
+| `instance_key` | 32-byte standard-base64 instance key; required |
 | `secure_cookies` | mark the session cookie Secure; keep true outside loopback HTTP |
 | `public_origin` | console origin behind a reverse proxy, for example `https://safeagent.example.com` |
 | `max_request_bytes` | client request body cap |
@@ -58,7 +59,7 @@ make security       # SBOM + govulncheck + npm audit
 | `tool_hold_bytes` | frames queued while a tool call waits for its verdict (1 MiB default) |
 | `analysis_concurrency` | in-process diagnosis worker count |
 
-Streaming response text is stored and checked for concealed Unicode asynchronously. A non-streaming response also passes the response checkpoint before it is written. Changing `schema.sql` changes the fingerprint. An existing database must be recreated; there is no migration path.
+Streaming response text is stored and checked for concealed Unicode asynchronously. A non-streaming response passes the response checkpoint before it is written; a project can also enable a bounded leading-window review for streaming responses. Changing `schema.sql` changes the fingerprint. An existing database must be recreated; there is no migration path.
 
 ## Tests
 
@@ -68,14 +69,15 @@ Streaming response text is stored and checked for concealed Unicode asynchronous
 | `internal/analysis/builtin` | role split, schema checks, trailing JSON, flow relations, secret flow, redacted evidence |
 | `internal/analysis/decision` | answer interpretation, both adapters against fake servers, private endpoint rejection, malformed answer rejection |
 | `internal/observe` | origin and trust, sink inference, two views, stored-event replay, history expansion |
-| `internal/pipeline` | admission, redaction, four checkpoints, tool hold, veto, streaming, failover, quotas, session linking, auxiliary endpoints, audit |
+| `internal/pipeline` | admission, redaction, four checkpoints, stream review, tool hold, veto, streaming, failover, quotas, session linking, auxiliary model mapping, audit |
 | `internal/service/diagnosis` | authorization-state exclusions and decision-state construction; veto behavior is covered by pipeline tests, and idempotency by repository integration tests |
-| `internal/service/console` | permission rules, name bounds, password policy, administrator-only policy editing, channel formats, model kinds and route graph validation |
+| `internal/service/console` | permission rules, name bounds, password policy, administrator-only policy editing, stream review bounds, channel formats, model kinds and route graph validation |
+| `internal/platform/config` | instance-key requirement and standard-base64 decoding from the configuration file |
 | `internal/transport/console` | channel endpoint and model views, forwarded headers, format defaults, project summary rendering and error labels |
 | `internal/llm/model` | assembler invariants, journal reconstruction, signatures, losses, repairs |
 | `internal/llm/codec` | 4×4 stream and JSON conversion, loss ledger, clean EOF, truncation, media, citations, headers, defaults |
 | `internal/llm/provider` | built-in URL, format, auth, compatibility and discovery snapshots |
-| `internal/llm/stream` | commit boundary, tool hold/release/reject, overflow, restoration, raw forwarding |
+| `internal/llm/stream` | commit boundary, stream review, tool hold/release/reject, overflow, delivered-only journal pruning, restoration, raw forwarding |
 | `internal/app` | direct and transitive dependency boundaries |
 | `internal/storage/auditevent` | canonical JSON, NUL sanitization, signing, chain verification, decoding and timeline |
 | `internal/storage/repository` | schema documentation consistency, audit chain verification and tamper detection; integration tests require `SAFEAGENT_TEST_DATABASE` and are run by the operator |
@@ -149,7 +151,9 @@ Before delivery run `make security` and review:
 - decision model endpoints reject private and carrier-NAT addresses unless explicitly allowed, and the dialer checks the address it connects to;
 - channel keys and the decision-model key are sealed; extra headers are not sealed and must not be used for credentials;
 - redaction placeholders are HMAC-derived and bound to the call namespace;
-- request, response, stream, tool hold, worker and detector limits are in place;
+- request, response, stream, tool hold, stream review, worker and detector limits are in place;
+- re-analysis and analysis batches share a per-user console rate limit;
+- the instance key is loaded from the configuration file and never stored in the database;
 - evidence never quotes a redacted value.
 
 Raw audit data is plaintext by design. Access is controlled by role-based visibility and operation logging.

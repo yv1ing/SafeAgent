@@ -26,7 +26,7 @@
 Each event carries `prev_hash` and `hash`. The chain is per call; the first event has an empty `prev_hash`.
 
 ```text
-auditKey = HMAC-SHA256(instanceSecret, "SafeAgent/audit-chain/key/v1")
+auditKey = HMAC-SHA256(instanceKey, "SafeAgent/audit-chain/key/v1")
 
 material = canonicalJSON({
   alg: "HMAC-SHA256", v: 1,
@@ -39,7 +39,7 @@ material = canonicalJSON({
 hash = lowercaseHex(HMAC-SHA256(auditKey, material))
 ```
 
-`canonicalJSON` sorts object keys, preserves array order, writes compact UTF-8 without HTML escaping and normalizes numbers. `\u0000` is replaced with the replacement character before signing because PostgreSQL `jsonb` cannot store a NUL escape. The recorder signs the same bytes it stores.
+`canonicalJSON` sorts object keys, preserves array order, writes compact UTF-8 without HTML escaping and normalizes numbers. `\u0000` is replaced with the replacement character before signing because PostgreSQL `jsonb` cannot store a NUL escape. The recorder signs the same bytes it stores. The instance key is supplied by the configuration file; it is never stored in the database.
 
 At seal, the call row receives `audit_head` (the last hash) and `audit_events` (the event count) in the same transaction as the terminal event. The anchor detects a deleted tail or a replaced call row even when the remaining prefix verifies.
 
@@ -63,7 +63,7 @@ build/bin/safeagent -config config.toml verify-audit -project <id> -since 24h
 build/bin/safeagent -config config.toml verify-audit -call <call-id> -json
 ```
 
-The command only reads the schema state and the instance secret; it never creates or migrates a schema. The console shows the same status on the call detail page.
+The command only reads the schema state and uses the configured instance key; it never creates or migrates a schema. The console shows the same status on the call detail page.
 
 ## Ordering
 

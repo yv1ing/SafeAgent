@@ -21,7 +21,7 @@ make deps
 
 ## 配置与启动
 
-复制示例配置，并填写 `database_url`：
+复制示例配置，并填写 `database_url` 和 `instance_key`：
 
 ```sh
 cp config.example.toml config.toml
@@ -30,10 +30,11 @@ cp config.example.toml config.toml
 ```toml
 listen = "127.0.0.1:8080"
 database_url = "postgres://safeagent:change-me@localhost:5432/safeagent?sslmode=disable"
+instance_key = "<openssl rand -base64 32 的输出>"
 secure_cookies = false
 ```
 
-其余配置项均有默认值。以下两项需要按部署方式调整：
+实例密钥为必填项，用于认证审计链并加密上游凭据；数据库不会保存该密钥。请妥善保存：丢失后，已保存的渠道密钥和现有审计链将无法读取。其余配置项均有默认值。以下两项需要按部署方式调整：
 
 - `secure_cookies`：仅在本机明文 HTTP 访问控制台时设为 `false`；其他部署使用 HTTPS 并设为 `true`，否则浏览器会丢弃 Secure Cookie。
 - `sslmode`：`disable` 仅适用于本地数据库；远程数据库应启用 TLS。
@@ -63,7 +64,7 @@ Initial administrator: admin / <password>
 
 创建项目时填写名称即可，其他默认值可稍后调整。新项目默认启用常用脱敏检测器，并带有一份可见的空策略文档。
 
-进入项目后，侧边栏会切换为该项目的页面。管理员可在设置中修改名称、保留期和使用限额。
+进入项目后，侧边栏会切换为该项目的页面。管理员可在设置中修改名称、保留期、使用限额和可选的流式预审窗口。
 
 | 角色     | 可管理                                                                                           |
 | -------- | ------------------------------------------------------------------------------------------------ |
@@ -92,7 +93,7 @@ Initial administrator: admin / <password>
 
 如果默认设置不适合当前项目，可以调整脱敏和策略。数据脱敏页面可以用示例文本测试规则效果；策略页面维护一张有序规则表，保存时校验并立即生效，历史版本可以恢复。只有管理员可以编辑或恢复策略。
 
-新项目默认没有策略规则，请求会正常转发并在后台诊断。如需网关拦截流量，应显式添加阻断规则。项目设置中还可以配置可选的决策模型；规则放行有副作用的工具调用后，模型会再做一次否决判断。
+新项目默认没有策略规则，请求会正常转发并在后台诊断。如需网关拦截流量，应显式添加阻断规则。项目设置中还可以配置可选的决策模型；规则放行有副作用的工具调用后，模型会再做一次否决判断。同一页面还可以开启流式预审窗口：开启后会在首字节前检查流式文本的首段，填 0 表示保持直接流式输出。
 
 ## 连接 Agent
 
@@ -133,6 +134,7 @@ docker run -d --name safeagent -p 127.0.0.1:8080:8080 \
 ```toml
 listen = "0.0.0.0:8080"
 database_url = "postgres://safeagent:change-me@db-host:5432/safeagent?sslmode=require"
+instance_key = "<openssl rand -base64 32 的输出>"
 secure_cookies = true
 ```
 
@@ -143,6 +145,7 @@ secure_cookies = true
 | 提示或现象                                          | 处理方式                                                                                                                                                |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `database_url is required`                          | 在配置文件中填写该项，或确认进程读取的是已编辑的文件。                                                                                                  |
+| `instance_key is required`                          | 在配置文件中填写 32 字节 base64 的 `instance_key`。                                                                                                     |
 | 启动时报未知配置键                                  | 某个键拼写有误，按错误信息中的名称改正。                                                                                                                |
 | `the database schema does not match this build`     | 数据库来自另一个构建。重建数据库，系统不提供迁移。                                                                                                      |
 | `the database has tables but no schema fingerprint` | 数据库由其他工具创建，或上次启动只完成了一部分。请重建数据库；缺失状态无法可靠推断。                                                                    |

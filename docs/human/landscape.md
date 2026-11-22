@@ -74,7 +74,7 @@ SafeAgent borrows the taxonomy and the idea that a trajectory is the unit of ana
 | Primary goal | multi-provider gateway and platform | subscription quota, billing and relay | tool-call access control | trajectory-level diagnosis | agent behavior security gateway |
 | Conversion model | unified OpenAI-shaped IR | pairwise + Responses hub | not applicable | not applicable | item/part canonical model + capabilities |
 | Streaming | event conversion + raw pass-through | hand-written pairwise state machines | not applicable | not applicable | commit boundary + tool hold + raw pass-through |
-| Tool boundary | optional Claude Code reviewer | no tool-level gate | client hook + server policy | trajectory verdict | request, tool-result, tool-call and non-streaming response checkpoints |
+| Tool boundary | optional Claude Code reviewer | no tool-level gate | client hook + server policy | trajectory verdict | request, tool-result, tool-call and response checkpoints, plus an optional streaming review window |
 | Policy | gateway config + input regex | gateway config + input moderation | attribute rules / LLM / manual | fine-tuned guard model | typed rules, four phases, model veto only |
 | Audit and evidence | request/attempt lineage | append-only admin audit + usage logs | rule matches and audit metadata | step/sentence attribution | signed event chain + timeline + source-to-sink flows |
 | Deployment | Go service + database/cache options | Go + PostgreSQL + Redis | client SDK + server | model inference service | one Go process + PostgreSQL |

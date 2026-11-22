@@ -75,8 +75,9 @@ await check('model list', async () => {
   }
   const name = gemini.payload.models[0]?.name;
   if (!name) throw new Error('no models');
-  const single = await request('GET', `/v1/models/${name.replace('models/', '')}`);
-  if (single.status !== 200) throw new Error(`single model ${single.status}`);
+  const single = await request('GET', `/v1beta/models/${name.replace(/^models\//, '')}`);
+  if (single.status !== 200 || single.payload?.name !== name)
+    throw new Error(`single model ${single.status}`);
   pass('model list');
 });
 
@@ -193,7 +194,11 @@ await check('embeddings passthrough', async () => {
   }
   const result = await request('POST', '/v1/embeddings', { model: name, input: 'hello' });
   if (result.status === 422) {
-    skip('embeddings passthrough', 'no channel declares embeddings');
+    const reason =
+      result.payload?.error?.code === 'model_kind_mismatch'
+        ? 'the Chat route targets a generation model'
+        : 'no channel declares embeddings';
+    skip('embeddings passthrough', reason);
     return;
   }
   if (result.status !== 200 || !Array.isArray(result.payload?.data)) {

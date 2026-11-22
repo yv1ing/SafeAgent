@@ -19,6 +19,8 @@ type ProjectView struct {
 	Concurrency            int    `json:"concurrency" required:"true" description:"0 means unlimited"`
 	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
 	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      int    `json:"stream_review_bytes" required:"true" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  int    `json:"stream_review_timeout_ms" required:"true" description:"Delay before a partially filled review window is checked on the next frame"`
 	ActivePolicyVersion    int64  `json:"active_policy_version" required:"true"`
 	Version                int64  `json:"version" required:"true"`
 	CreatedAt              string `json:"created_at" required:"true"`
@@ -38,6 +40,8 @@ type ProjectCreate struct {
 	Concurrency            *int   `json:"concurrency,omitempty"`
 	DailyTokenQuota        *int64 `json:"daily_token_quota,omitempty"`
 	DefaultMaxOutputTokens *int   `json:"default_max_output_tokens,omitempty" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      *int   `json:"stream_review_bytes,omitempty" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  *int   `json:"stream_review_timeout_ms,omitempty" description:"Delay before a partially filled review window is checked on the next frame"`
 }
 
 type ProjectUpdate struct {
@@ -47,6 +51,8 @@ type ProjectUpdate struct {
 	Concurrency            int    `json:"concurrency" required:"true"`
 	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true"`
 	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      int    `json:"stream_review_bytes" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  int    `json:"stream_review_timeout_ms" description:"Delay before a partially filled review window is checked on the next frame"`
 	Version                int64  `json:"version" required:"true"`
 }
 
@@ -64,6 +70,8 @@ func projectView(value *entity.Project) ProjectView {
 		Concurrency:            value.Concurrency,
 		DailyTokenQuota:        value.DailyTokenQuota,
 		DefaultMaxOutputTokens: value.DefaultMaxOutputTokens,
+		StreamReviewBytes:      value.StreamReviewBytes,
+		StreamReviewTimeoutMS:  value.StreamReviewTimeoutMS,
 		ActivePolicyVersion:    value.ActivePolicyVersion,
 		Version:                value.Version,
 		CreatedAt:              stamp(value.CreatedAt),
@@ -145,6 +153,7 @@ func (console *Console) registerProjects() {
 		created, err := console.Project.Create(ctx.Request.Context(), identity.actor(), service.ProjectCreateInput{
 			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
 			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
+			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS,
 		})
 		if err != nil {
 			return nil, err
@@ -165,7 +174,8 @@ func (console *Console) registerProjects() {
 		}
 		updated, err := console.Project.Update(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), service.ProjectInput{
 			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
-			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, Version: input.Version,
+			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
+			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, Version: input.Version,
 		})
 		if err != nil {
 			return nil, err

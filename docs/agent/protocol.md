@@ -32,12 +32,15 @@ The four formats (`openai_chat`, `openai_responses`, `anthropic_messages`, `goog
 
 ## Stream session
 
-Each call creates its own `stream.Session`, which tracks four behaviors:
+Each call creates its own `stream.Session`, which tracks five behaviors:
 
 1. **Commit boundary.** No HTTP status or SSE header is written before the first forwardable content. A failure before that point can still fail over to another channel or key. Once a frame is written, the response is committed.
-2. **Holding.** Text and reasoning deltas are forwarded immediately. A complete tool item is queued until the gate returns; queued frames are then released or discarded. If a tool item is the first content, the response remains uncommitted while it is held. Holding is bounded by `ToolHoldBytes`; exceeding it is a resource error (`tool_call_too_large`), not a policy verdict.
-3. **Termination.** The session stages terminal frames, merges losses and lets the pipeline seal the call before writing them. A failed committed stream writes a protocol-native error frame. An uncommitted failure returns an HTTP error and can fail over.
-4. **Cancellation.** When the client disconnects, the session stops writing and the pipeline cancels upstream. A committed stream's already-sent content is stored as a partial response.
+2. **Stream review.** When a project enables it, the session holds the leading text until `ReviewBytes` bytes fill the window, until the next frame arrives after `ReviewTimeout`, or until a short stream ends. The pipeline runs the response checkpoint on that preview; a block returns a protocol error before the first byte. After the window commits, later text is not reviewed.
+3. **Holding.** Text and reasoning deltas are forwarded immediately unless the stream review window is open. A complete tool item is queued until the gate returns; queued frames are then released or discarded. If a tool item is the first content, the response remains uncommitted while it is held. Holding is bounded by `ToolHoldBytes`; exceeding it is a resource error (`tool_call_too_large`), not a policy verdict.
+4. **Termination.** The session stages canonical terminal frames, merges losses and lets the pipeline seal the call before writing them. A raw pass-through keeps the provider's terminal frame and writes it as received, so that stream has already terminated when settlement runs. A failed committed stream writes a protocol-native error frame. An uncommitted failure returns an HTTP error and can fail over.
+5. **Cancellation.** When the client disconnects, the session stops writing and the pipeline cancels upstream. A committed stream's already-sent content is stored as a partial response.
+
+The journal records what the session actually delivered. When a committed stream fails, items whose frames never left the hold or review queue are removed before the partial response is stored; a held sibling tool call therefore cannot appear in the audit response.
 
 Keepalive frames are protocol-native: an SSE comment for Chat and Responses, `event: ping` for Messages, nothing for Gemini. They start only after the response is committed.
 
@@ -55,7 +58,7 @@ A same-format request may be forwarded as raw bytes only when all of the followi
 - for Messages, an output limit is present;
 - no reasoning item is missing.
 
-Only `model`, `stream` and Chat `include_usage` are patched. Responses responses are also encoded canonically; other same-format responses are forwarded raw while every part is text, refusal or reasoning text/summary. A tool, media, native item or incompatible ID switches to the canonical encoder.
+Only `model`, `stream` and Chat `include_usage` are patched. Responses responses are also encoded canonically; other same-format responses are forwarded raw while every part is text, refusal or reasoning text/summary. A tool, media, native item or incompatible ID switches to the canonical encoder. Stream review buffers the raw frames until its window is released; it does not require the canonical encoder.
 
 Every generation conversion loss is written to the call's audit record. A streaming response sets `X-SafeAgent-Losses` (unique request-side codes) and `X-SafeAgent-Loss-Count` before its first byte; response-side losses stay in the audit record. A non-streaming response is encoded before its headers are sent, so its headers carry the complete conversion ledger. Auxiliary endpoints report their own conversion losses only where their wire shape exposes them.
 
@@ -100,9 +103,9 @@ Parent resolution order: `previous_response_id`, then the latest tool result, th
 
 ## Checkpoints and auxiliary endpoints
 
-Online policy runs at four points: request admission, added tool result, completed tool call and non-streaming response. Request and tool-result blocks run before the upstream; a tool-call block runs before the call is released to the client; the response checkpoint runs before a JSON response is written. Streaming response text has no online checkpoint.
+Online policy runs at four points: request admission, added tool result, completed tool call and response. Request and tool-result blocks run before the upstream; a tool-call block runs before the call is released to the client; the response checkpoint runs before a JSON response is written, and before the first byte when a project enables stream review. Streaming text after the review window has no online checkpoint.
 
-The gateway serves model listing and retrieval in OpenAI, Anthropic and Gemini shapes, native token counting (`/v1/messages/count_tokens`, `/v1/responses/input_tokens`, `/v1beta/models/{model}:countTokens`), Responses retrieve/input_items/cancel/delete, and same-format embeddings and moderations passthrough. Counting falls back to a local estimate and sets `X-SafeAgent-Token-Estimate: true`; embeddings and moderations return `auxiliary_unsupported` when no channel declares them. Every generation, counting, model, passthrough and Responses lifecycle call is authenticated, rate-limited and audited; a begin or seal failure refuses the operation.
+The gateway serves model listing and retrieval in OpenAI, Anthropic and Gemini shapes, native token counting (`/v1/messages/count_tokens`, `/v1/responses/input_tokens`, `/v1beta/models/{model}:countTokens`), Responses retrieve/input_items/cancel/delete, and same-format embeddings and moderations passthrough. The public model selects the route; the forwarded body carries the selected target's upstream model name. The gateway never converts the wire format for these auxiliary calls. Counting falls back to a local estimate and sets `X-SafeAgent-Token-Estimate: true`; embeddings and moderations return `auxiliary_unsupported` when no channel declares them. Every generation, counting, model, passthrough and Responses lifecycle call is authenticated, rate-limited and audited; a begin or seal failure refuses the operation.
 
 ## Tests
 

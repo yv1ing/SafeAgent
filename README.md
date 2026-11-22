@@ -32,6 +32,7 @@ Chat Completions, Responses, Anthropic Messages and Gemini convert in both direc
 - Generation conversions record dropped or rewritten fields in the loss ledger.
 - Same-format Chat, Messages and Gemini traffic that needs no rewrite passes through as-is; Responses always takes the canonical path because the gateway owns request state.
 - The provider catalog maintains endpoints, authentication, capability profiles and model discovery.
+- A project can review a bounded leading window of a streaming response before the first byte; the default is direct streaming.
 
 ### Sensitive data boundary
 
@@ -39,14 +40,14 @@ Before a request leaves the gateway, detectors identify and replace sensitive da
 
 - Reversible redaction spans requests and responses; policy decisions run on the redacted view.
 - Built-in detectors cover common personal data and credentials; projects can add custom rules.
-- Upstream keys and decision-model credentials are sealed with the instance key.
+- Upstream keys and decision-model credentials are sealed with the instance key supplied at startup.
 
 ### Behavior tracing and audit
 
-Every call is rebuilt as one protocol-neutral trace that records where content came from, its trust level and where a tool can send data. Policy runs at four checkpoints (request, tool result, tool call and non-streaming response), with the timeline, session chain and audit chain kept with it.
+Every call is rebuilt as one protocol-neutral trace that records where content came from, its trust level and where a tool can send data. Policy runs at four checkpoints (request, tool result, tool call and response); a streaming response can be reviewed over a bounded leading window. The timeline, session chain and audit chain are kept with the call.
 
 - Trace: content origin, trust level and tool destination.
-- Checkpoints: request, tool result, tool call and non-streaming response; rules block or record.
+- Checkpoints: request, tool result, tool call and response; a streaming response can be reviewed over a bounded leading window.
 - Timeline: admission, upstream attempts, first token, tool calls, policy decisions and termination in order.
 - Session chain: calls from the same task are linked automatically; the console shows the call tree.
 - Audit chain: events are signed one by one, with integrity checks and tamper location.
@@ -91,7 +92,7 @@ A call follows this path:
 1. The request is decoded into one internal model, and sensitive values are replaced before the boundary.
 2. The system rebuilds the call as a trace: who supplied the content, whether it is trusted, and where a tool can send data.
 3. The request checkpoint runs detectors and project rules; added tool results are checked again before they reach the upstream.
-4. The model streams back; text and reasoning are forwarded at once, and a complete tool call waits.
+4. The model streams back; text and reasoning are forwarded at once unless the project's stream review window is open, and a complete tool call waits.
 5. An allowed tool call is released; otherwise it is dropped and the client receives a protocol-level error.
 6. Events, online decisions and the diagnosis job are written to the same record; the worker rebuilds the trajectory and stores findings and evidence.
 
@@ -113,7 +114,8 @@ Requirements:
 
 ```sh
 make deps
-cp config.example.toml config.toml   # set database_url
+cp config.example.toml config.toml   # set database_url and instance_key
+# instance_key: openssl rand -base64 32
 make build
 build/bin/safeagent -config config.toml serve
 ```
@@ -132,11 +134,11 @@ The first start creates the schema and prints the initial administrator account 
 ## Deployment and boundaries
 
 - One Go process serves the console, the gateway and a health check. No message broker, Redis instance or separate background process is required.
-- Upstream keys and the decision-model key are sealed with the instance key.
+- The instance key is supplied by the configuration file and is never stored in the database. Upstream keys and the decision-model key are sealed with it.
 - Raw audit payloads are stored as received, and access is role-based.
 - The schema is a fresh baseline with no migration path; a schema change requires recreating the database.
 - Coverage depends on where the gateway is deployed. Images, audio and other binary payloads are not inspected or rewritten.
-- Streaming response text cannot be recalled once it reaches the client; only a non-streaming response can be blocked before it is written.
+- A project can block a streaming response before the first byte by enabling a bounded stream review window. Text after that window cannot be recalled; only a non-streaming response is checked in full before it is written.
 
 ## Verification
 

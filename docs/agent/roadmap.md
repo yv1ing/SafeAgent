@@ -1,16 +1,6 @@
 # Roadmap
 
-The current release covers four wire formats, online request/tool/tool-result and non-streaming response checkpoints, an event timeline, an explicit session link and a signed audit chain. The items below are the known limits that matter for agent safety; they are ordered by how much they change an operator's ability to see and stop an action.
-
-## P0: close the streaming output gap
-
-**Problem.** A streaming response is forwarded as it arrives, so a response-phase rule cannot block it. The asynchronous analysis can flag it, but the client already received the text.
-
-**Direction.** Add a per-project streaming review mode with a bounded pre-commit window. A small leading window is buffered and checked; a match blocks the response before the first byte. The default remains direct streaming. The window size, timeout and action are explicit, and the mode is never silently enabled.
-
-**Touchpoints.** `internal/llm/stream` (commit boundary and hold queue), `internal/pipeline/response.go` (response checkpoint), `internal/analysis/policy` (response phase), project settings and console.
-
-**Acceptance.** A blocked window returns a protocol-shaped error with no partial body; an allowed window preserves first-token latency within the existing performance gate; the mode is covered by the protocol matrix in stream mode.
+The current release covers four wire formats, online request/tool/tool-result checkpoints, non-streaming response inspection, an optional bounded streaming review window, an event timeline, an explicit session link and a signed audit chain. The items below are the known limits that matter for agent safety; they are ordered by how much they change an operator's ability to see and stop an action.
 
 ## P0: semantic and cross-call relations
 
@@ -46,6 +36,7 @@ The current release covers four wire formats, online request/tool/tool-result an
 
 - Human approval/review is intentionally not implemented. The policy actions remain `block` and `record`; adding a queue requires an operator-facing workflow and a durable pending state.
 - Image, audio and other binary payloads are not inspected or redacted.
+- Stream review covers only the configured leading window. Text after that window reaches the client before asynchronous diagnosis.
 - A provider-executed server tool has already run before the gateway sees its result; the gateway can withhold the result but cannot undo the execution.
 - The decision model is optional, provider-dependent and returns calibrated answers without a rationale.
 - The gateway sees only traffic that passes through it.

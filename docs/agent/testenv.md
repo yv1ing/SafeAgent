@@ -69,7 +69,8 @@ The protocol matrix, policy, analysis and agent suites size themselves from `SAF
 | --- | --- |
 | `runtime/env` | base URL, project, available formats, public route names (`SAFEAGENT_<FORMAT>_ROUTE`), agent keys, administrator password, lab uid/gid |
 | `runtime/state.json` | base URL, project, channels (id, model name and model id), routes, agent keys and the administrator password |
-| `runtime/config.toml` | generated gateway configuration |
+| `runtime/config.toml` | generated gateway configuration, including the lab instance key |
+| `runtime/instance.key` | generated 32-byte instance key reused by the lab |
 | `runtime/pi-models.json` | Pi provider and the available public routes |
 | `runtime/gateway.log` | gateway stdout and stderr |
 | `runtime/acceptance/` | one-command log and the protocol report |
@@ -122,9 +123,9 @@ Run the suites in order. The policy suite leaves blocked calls that the browser 
 | 5 | `make lab-agents` | four CLIs × configured routes, plus one native multi-step task per CLI | every run writes the expected answer | `runtime/logs/*.log`, `runtime/logs/*.answer`, `agent-versions.txt` |
 | 6 | `make lab-policy` | request, tool-result and tool-call blocks through every client and route | a pre-upstream block returns 403; a tool-phase block returns 403 before commit or 200 with the block reason after commit; policy restored to empty. The response phase and the exact after-commit error shape are covered by pipeline unit tests. | terminal output, `runtime/policy/*.json` |
 | 7 | `make lab-analysis` | injection, exfiltration, coverage and redaction hits through every client and route | every call completes with both findings, complete coverage, `unsafe` and a redaction hit | `runtime/analysis-response-*.json` |
-| 8 | `make lab-security` | invalid keys, cross-project isolation, rate and token limits, member/admin permissions, raw-event access | every check passes | terminal output |
-| 9 | `make lab-faults` | failover before content, truncated stream, held tool call, header forwarding, route output limit, multi-choice pass-through and rejection, and background rejection | every check passes | terminal output |
-| 10 | `make lab-browser` | all pages at desktop and mobile widths, plus desktop create, edit, delete, revoke or disable flows for projects, channels, routes, keys, policy, redaction rules, users and members | exit 0, `report.json` has no failures | `runtime/screenshots` |
+| 8 | `make lab-security` | invalid keys, cross-project isolation, rate and token limits, member/admin permissions, raw-event access, administrator-only stream review settings | every check passes | terminal output |
+| 9 | `make lab-faults` | failover before content, truncated stream, held tool call, stream review, header forwarding, route output limit, multi-choice pass-through and rejection, and background rejection | every check passes | terminal output |
+| 10 | `make lab-browser` | all pages at desktop and mobile widths, plus desktop create, edit, delete, revoke or disable flows for projects (including stream review settings), channels, routes, keys, policy, redaction rules, users and members | exit 0, `report.json` has no failures | `runtime/screenshots` |
 | 11 | `make lab-load` | native routes and cross-format sample | every native comparison and cross-format sample passes | `runtime/load/<timestamp>` |
 | 12 | `make lab-audit` | every stored call chain and its call anchor | exit 0 | terminal output |
 
@@ -153,7 +154,7 @@ The analysis suite sends an injection phrase, an e-mail address and an exfiltrat
 
 ### Security
 
-The security suite uses separate projects so it does not disturb the main audit trail, then deletes those projects and removes its temporary member and rate-limited key. It checks invalid keys for every client protocol, a key cannot use another project's route, a one-request-per-minute key is limited on the second call, a one-token daily quota is rejected before the upstream, a non-member cannot read project calls, a member can read them, members cannot manage channels or the global log, administrators see raw values while members see the redacted view, and raw access is written to the operation log.
+The security suite uses separate projects so it does not disturb the main audit trail, then deletes those projects and removes its temporary member and rate-limited key. It checks invalid keys for every client protocol, a key cannot use another project's route, a one-request-per-minute key is limited on the second call, a one-token daily quota is rejected before the upstream, a non-member cannot read project calls, a member can read them, members cannot manage channels or the global log or change stream review settings, administrators see raw values while members see the redacted view, and raw access is written to the operation log.
 
 ### Faults
 
@@ -165,6 +166,9 @@ The local fault upstream starts only for this suite and serves deterministic Cha
 - allowlisted and channel-configured headers reach the upstream while a cookie does not;
 - a route output limit reaches a Messages upstream when the client omits one;
 - a streaming Chat `n>1` request on a same-format target passes through with both candidates and a terminal frame;
+- a response rule over a project with stream review blocks the first byte and records a blocked response;
+- a committed stream with a blocked tool call excludes the held sibling from the stored response and tool-call events;
+- an embeddings passthrough reaches the auxiliary endpoint with the route's upstream model name and records the channel model;
 - non-streaming Chat `n>1` is rejected before the upstream, and Responses `background=true` is rejected before the upstream. The protocol matrix covers Gemini `candidateCount` when a Gemini channel is configured.
 
 ### Console
@@ -194,6 +198,7 @@ The native comparison covers request decoding, redaction, observation, online po
 | Symptom | Check |
 | --- | --- |
 | The database already has an administrator | The named volume survived a previous run. Use `FRESH=1 make lab-setup`; it destroys the lab database. |
+| `verify-audit` reports a broken chain after the runtime directory was removed | `runtime/instance.key` must match the database that holds the sealed credentials and audit chain. Recreate the lab with `FRESH=1 make lab-setup`. |
 | No channel or route was created | The format has no URL, so setup skipped it. The matrix and agent suite then omit that route. |
 | Setup stops on a format with a URL | Its key or model is missing. Supply both, or remove the URL to skip that format. |
 | The gateway rejects the upstream with a private-address error | Docker returned a fake-IP address for the provider host. Confirm that lab channels still have `allow_private_network=true`. |
@@ -209,7 +214,7 @@ The native comparison covers request decoding, redaction, observation, online po
 
 ## Security boundary
 
-`testenv/.env` holds provider keys and `testenv/runtime` holds the administrator password and agent keys. Both are ignored. The gateway listens on all interfaces so containers can reach it; do not expose port 8080 beyond the development host. The lab's private-network exception and fixed database password are test-only. Individual fault runs create uniquely named global test channels and models and delete them afterwards; the lab database is disposable and `make lab-down` removes it anyway.
+`testenv/.env` holds provider keys and `testenv/runtime` holds the administrator password, agent keys and the instance key. Both are ignored. The gateway listens on all interfaces so containers can reach it; do not expose port 8080 beyond the development host. The lab's private-network exception and fixed database password are test-only. Individual fault runs create uniquely named global test channels and models and delete them afterwards; the lab database is disposable and `make lab-down` removes it anyway.
 
 Reports contain endpoint URLs, model names, error samples and token counts. They do not contain provider keys or agent keys. Review error samples before sharing a report outside the lab.
 

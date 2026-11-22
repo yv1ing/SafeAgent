@@ -105,6 +105,7 @@ func (pipeline *Pipeline) CountTokens(ctx context.Context, input Request) (int64
 		if !found || endpoint.endpoint.CountTokensPath == "" || !endpoint.endpoint.Capability.NativeCount || len(candidate.Keys) == 0 {
 			continue
 		}
+		recordAuxiliaryTarget(recorder, candidate)
 		if counted, ok := pipeline.forwardCount(ctx, request, endpoint, candidate); ok {
 			if failure := pipeline.endAuxiliary(ctx, recorder, "completed", ""); failure != nil {
 				return 0, false, failure
@@ -441,7 +442,13 @@ func (pipeline *Pipeline) Passthrough(ctx context.Context, input Request, kind p
 		if !ok || len(candidate.Keys) == 0 {
 			continue
 		}
-		payload, failure := pipeline.forwardAuxiliary(ctx, body, endpoint, auxiliary, baseURL, candidate)
+		recordAuxiliaryTarget(recorder, candidate)
+		forwarded, err := rewriteAuxiliaryModel(body, candidate.Target.UpstreamModel)
+		if err != nil {
+			_ = pipeline.endAuxiliary(ctx, recorder, "failed", "invalid_request_body")
+			return nil, internal("invalid_request_body", "The auxiliary request could not be prepared.")
+		}
+		payload, failure := pipeline.forwardAuxiliary(ctx, forwarded, endpoint, auxiliary, baseURL, candidate)
 		if failure != nil {
 			_ = pipeline.endAuxiliary(ctx, recorder, "failed", failure.Code)
 			return nil, failure
@@ -469,6 +476,25 @@ func auxiliaryOf(endpoint endpoint, kind provider.AuxiliaryKind) (provider.Auxil
 		}
 	}
 	return provider.AuxiliarySpec{}, "", false
+}
+
+// recordAuxiliaryTarget attributes a routed auxiliary call to the channel model that served it.
+func recordAuxiliaryTarget(recorder *Recorder, candidate routing.Candidate) {
+	record := recorder.Call()
+	record.ChannelID = candidate.Target.ChannelID
+	record.ModelID = candidate.Target.ModelID
+	record.UpstreamModel = candidate.Target.UpstreamModel
+	record.EndpointFormat = candidate.Target.Format
+}
+
+// rewriteAuxiliaryModel applies the route's upstream model name to a same-format passthrough body.
+// The public model selected the route; the upstream receives the name its provider knows.
+func rewriteAuxiliaryModel(body []byte, upstreamModel string) ([]byte, error) {
+	root, err := applyUpstreamModel(body, upstreamModel)
+	if err != nil {
+		return nil, err
+	}
+	return model.Marshal(root), nil
 }
 
 func coderOf(pipeline *Pipeline, format model.Format) codec.Codec {

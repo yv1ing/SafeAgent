@@ -54,7 +54,7 @@ func run() error {
 			// A syntactically valid placeholder prevents the driver from panicking.
 			dsn = "postgres://localhost/safeagent"
 		}
-		database := repository.Open(dsn)
+		database := repository.Open(dsn, nil)
 		defer database.Close()
 		baseline, err := database.Baseline()
 		if err != nil {
@@ -62,7 +62,11 @@ func run() error {
 		}
 		return write(*output, []byte(baseline))
 	case "serve":
-		database := repository.Open(configuration.DatabaseURL)
+		key, err := configuration.Key()
+		if err != nil {
+			return err
+		}
+		database := repository.Open(configuration.DatabaseURL, key)
 		defer database.Close()
 		frontend, err := web.Assets()
 		if err != nil {
@@ -70,13 +74,17 @@ func run() error {
 		}
 		return app.Run(ctx, configuration, database, frontend)
 	case "verify-audit":
-		return verifyAudit(ctx, configuration.DatabaseURL, flag.Args()[1:])
+		key, err := configuration.Key()
+		if err != nil {
+			return err
+		}
+		return verifyAudit(ctx, configuration.DatabaseURL, key, flag.Args()[1:])
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}
 }
 
-func verifyAudit(ctx context.Context, databaseURL string, args []string) error {
+func verifyAudit(ctx context.Context, databaseURL string, instanceKey []byte, args []string) error {
 	flags := flag.NewFlagSet("verify-audit", flag.ContinueOnError)
 	callID := flags.String("call", "", "verify one call id")
 	projectID := flags.String("project", "", "verify one project")
@@ -97,9 +105,9 @@ func verifyAudit(ctx context.Context, databaseURL string, args []string) error {
 		}
 		scope.Since = since
 	}
-	database := repository.Open(databaseURL)
+	database := repository.Open(databaseURL, instanceKey)
 	defer database.Close()
-	if err := database.LoadAuditSecret(ctx); err != nil {
+	if err := database.VerifySchema(ctx); err != nil {
 		return err
 	}
 	reports, err := database.VerifyAudit(ctx, scope)

@@ -14,5 +14,9 @@ export interface ConsoleUpdateProjectInput {
   name: string;
   requests_per_minute: number;
   retention_days: number;
+  /** Leading streaming text bytes reviewed before the first byte; 0 disables review */
+  stream_review_bytes?: number;
+  /** Delay before a partially filled review window is checked on the next frame */
+  stream_review_timeout_ms?: number;
   version: number;
 }

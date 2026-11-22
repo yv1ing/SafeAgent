@@ -35,6 +35,8 @@ function draftOf(project: ConsoleProjectView): ProjectDraft {
     concurrency: project.concurrency,
     daily_token_quota: project.daily_token_quota,
     default_max_output_tokens: project.default_max_output_tokens ?? 0,
+    stream_review_bytes: project.stream_review_bytes,
+    stream_review_timeout_ms: project.stream_review_timeout_ms,
   };
 }
 

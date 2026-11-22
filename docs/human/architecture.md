@@ -2,7 +2,7 @@
 
 [中文](architecture_zh.md)
 
-SafeAgent sits between agents and model providers. It collapses four wire protocols into one processing path and applies project policy at four points: request admission, tool-result forwarding, tool-call release and non-streaming response write. It also keeps a verifiable audit record, so an operator can reconstruct a call without relying on the agent's own account.
+SafeAgent sits between agents and model providers. It collapses four wire protocols into one processing path and applies project policy at four points: request admission, tool-result forwarding, tool-call release and response write. A streaming response can also be reviewed over a bounded leading window. It also keeps a verifiable audit record, so an operator can reconstruct a call without relying on the agent's own account.
 
 ## Trust boundary
 
@@ -68,7 +68,7 @@ sequenceDiagram
         Provider-->>Gateway: stream or complete response
         Gateway->>Gateway: tool-call checkpoint
         Gateway-->>Agent: release text and restore placeholders
-        Gateway->>Gateway: non-streaming response checkpoint
+        Gateway->>Gateway: response checkpoint
         Gateway-->>Agent: release or protocol-shaped refusal
     end
     Gateway->>Database: signed events, decisions and analysis job
@@ -84,11 +84,11 @@ When the call ends, events, online decisions and the analysis job are written in
 
 ## Streaming
 
-Text and reasoning are forwarded as they arrive; a complete tool call waits for its verdict and is then released or discarded. No header is written before the first forwardable content, so a failure before that point can fail over, while a failure after it becomes a protocol error. Terminal frames wait for audit settlement, and a cancel records what the client already received as a partial response.
+Text and reasoning are forwarded as they arrive; a complete tool call waits for its verdict and is then released or discarded. When a project enables stream review, the leading text waits for the response checkpoint instead, and a block prevents the first byte. No header is written before the first forwardable content, so a failure before that point can fail over, while a failure after it becomes a protocol error. Canonical terminal frames wait for audit settlement; a raw pass-through keeps the provider's terminal frame. A cancel records what the client already received as a partial response.
 
 Keepalive follows the protocol: an SSE comment for Chat and Responses, `event: ping` for Messages, nothing for Gemini. It starts only after the response is committed.
 
-The four behaviors and their edge cases are described in [protocol conversion](protocol-conversion.md).
+The five behaviors and their edge cases are described in [protocol conversion](protocol-conversion.md).
 
 ## Four checkpoints
 
@@ -97,9 +97,9 @@ The four behaviors and their edge cases are described in [protocol conversion](p
 | Request | after decode and redaction, before routing and quota | the whole request; the upstream is not called |
 | Tool result | after the request adds tool results, before routing and quota | the whole request; the model never sees the blocked output |
 | Tool call | when arguments are complete and frames are still held | the side effect before a client executes the tool; a committed stream ends with a protocol error |
-| Response | before a non-streaming body is written | the body is replaced by a protocol error; reported usage is still settled |
+| Response | before a non-streaming body is written, or before the first byte of a reviewed stream | the body or the buffered preview is replaced by a protocol error; reported usage is still settled |
 
-Streaming response text has no online checkpoint: a token that reached the client cannot be recalled, so it is diagnosed after the call. Provider-executed server tools have already run when the gateway sees the result; the gateway can withhold the result but cannot undo the execution.
+A project can enable a bounded stream review window. The gateway buffers the leading text, runs the response checkpoint, and either commits the stream or blocks it before the first byte. Text after that window has no online checkpoint: a token that reached the client cannot be recalled, so it is diagnosed after the call. Provider-executed server tools have already run when the gateway sees the result; the gateway can withhold the result but cannot undo the execution.
 
 ## Audit and diagnosis
 

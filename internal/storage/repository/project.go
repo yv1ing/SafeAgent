@@ -59,8 +59,9 @@ func (store *Store) CreateProject(ctx context.Context, project *entity.Project, 
 
 func (store *Store) UpdateProject(ctx context.Context, id string, project entity.Project, version int64) (*entity.Project, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Project)(nil)).
-		Set("name = ?, retention_days = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, version = version + 1",
-			project.Name, project.RetentionDays, project.RequestsPerMinute, project.Concurrency, project.DailyTokenQuota, project.DefaultMaxOutputTokens).
+		Set("name = ?, retention_days = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, stream_review_bytes = ?, stream_review_timeout_ms = ?, version = version + 1",
+			project.Name, project.RetentionDays, project.RequestsPerMinute, project.Concurrency, project.DailyTokenQuota,
+			project.DefaultMaxOutputTokens, project.StreamReviewBytes, project.StreamReviewTimeoutMS).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
 		return nil, err

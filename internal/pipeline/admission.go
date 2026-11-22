@@ -63,6 +63,9 @@ type call struct {
 	explicitSession string
 	sessionConflict *model.Error
 	unsealed        bool
+	reviewBytes     int
+	reviewTimeout   time.Duration
+	reviewBlocked   bool
 	toolKinds       map[string]model.ToolKind
 	failureLedger   model.Ledger
 	findings        []analysis.Finding
@@ -137,7 +140,8 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 		ctx: ctx, pipeline: pipeline, kind: input.Kind, coder: coder, peer: peer, salt: salt, writer: writer,
 		request: request, identity: identity, started: started, release: func() {}, clientHeader: input.Header,
 		body: input.Body, stream: request.Stream, unsealed: len(unsealLosses) > 0 || requestHasSignature(request),
-		explicitSession: explicitSession,
+		explicitSession: explicitSession, reviewBytes: identity.Project.StreamReviewBytes,
+		reviewTimeout: time.Duration(identity.Project.StreamReviewTimeoutMS) * time.Millisecond,
 	}
 	compiled, version, err := pipeline.compiledPolicy(ctx, identity.Project.ID)
 	if err != nil {
@@ -401,7 +405,7 @@ func (state *call) newToolResults() []policy.ToolResult {
 			}
 		}
 		if len(text) > maxPolicyResultBytes {
-			text = text[:maxPolicyResultBytes]
+			text = truncatePolicyText(text, maxPolicyResultBytes)
 		}
 		results = append(results, policy.ToolResult{
 			CallID: item.CallID, Name: item.Name, IsError: item.IsError, Text: text, Trust: "untrusted",

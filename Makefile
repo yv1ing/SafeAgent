@@ -29,8 +29,8 @@ help:
 		'  lab-auxiliary Run model, counting, Responses lifecycle and WebSocket checks' \
 		'  lab-policy   Check request and tool-call enforcement across client protocols' \
 		'  lab-analysis Check asynchronous diagnosis and reversible redaction' \
-		'  lab-security Check authentication, quotas, isolation and console permissions' \
-		'  lab-faults   Check failover, truncation, tool holds, headers and default limits' \
+		'  lab-security Check authentication, quotas, isolation, console permissions and stream review settings' \
+		'  lab-faults   Check failover, truncation, tool holds, stream review, audit projection, auxiliary mapping and limits' \
 		'  lab-browser  Run the Playwright console acceptance suite' \
 		'  lab-integration Run repository integration tests on the lab database' \
 		'  lab-audit    Verify every stored call audit chain on the lab database' \
@@ -126,7 +126,7 @@ lab-browser:
 lab-integration:
 	testenv/scripts/integration.sh
 
-lab-audit:
+lab-audit: build
 	build/bin/safeagent -config testenv/runtime/config.toml verify-audit
 
 lab-load:

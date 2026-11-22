@@ -29,7 +29,7 @@ flowchart LR
     PostgreSQL --> Console["operator console"]
 ```
 
-The request path is synchronous through admission. Provider text streams back; a complete tool call is held for its checkpoint, and tool results added by a request are checked before forwarding. The worker is a separate loop over the `analysis_jobs` table in the same process; it never applies online policy.
+The request path is synchronous through admission. Provider text streams back; a complete tool call is held for its checkpoint, and tool results added by a request are checked before forwarding. A project may also enable a bounded leading-window review before the first streaming byte; the default is direct streaming. The worker is a separate loop over the `analysis_jobs` table in the same process; it never applies online policy.
 
 ## Reading order
 
@@ -106,7 +106,7 @@ Supporting packages are grouped by role. `platform` contains utilities that know
 ## Operating model
 
 - One process. The diagnosis worker runs in the same binary and claims jobs from PostgreSQL.
-- PostgreSQL is the only durable store. Audit events are the source of truth; every event is HMAC-chained and a call carries its own chain head.
+- PostgreSQL is the only durable store. Audit events are the source of truth; every event is HMAC-chained and a call carries its own chain head. The instance key is supplied by the configuration file and is never stored in the database.
 - A call is recorded once it is admitted. Authentication and decode failures before admission are returned but not persisted.
 - The schema is a fresh baseline. Startup compares the stored fingerprint and refuses a mismatch or a table set without a fingerprint, so a schema change requires recreating the database.
 - The decision model is optional. Without it, diagnosis is fully deterministic.

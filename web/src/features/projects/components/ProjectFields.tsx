@@ -9,6 +9,8 @@ export interface ProjectDraft {
   concurrency: number;
   daily_token_quota: number;
   default_max_output_tokens: number;
+  stream_review_bytes: number;
+  stream_review_timeout_ms: number;
 }
 
 export function ProjectFields({
@@ -62,6 +64,28 @@ export function ProjectFields({
             value={draft.default_max_output_tokens}
             disabled={limitsReadOnly}
             onValueChange={(default_max_output_tokens) => set({ default_max_output_tokens })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.streamReviewBytes} hint={t.projects.streamReviewHint}>
+        {(id) => (
+          <IntegerInput
+            id={id}
+            min={0}
+            value={draft.stream_review_bytes}
+            disabled={limitsReadOnly}
+            onValueChange={(stream_review_bytes) => set({ stream_review_bytes })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.streamReviewTimeout} hint={t.projects.streamReviewTimeoutHint}>
+        {(id) => (
+          <IntegerInput
+            id={id}
+            min={0}
+            value={draft.stream_review_timeout_ms}
+            disabled={limitsReadOnly}
+            onValueChange={(stream_review_timeout_ms) => set({ stream_review_timeout_ms })}
           />
         )}
       </Field>

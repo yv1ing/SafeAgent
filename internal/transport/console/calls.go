@@ -631,6 +631,9 @@ func (console *Console) registerCalls() {
 		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
 			return nil, err
 		}
+		if !console.analysisLimit.Allow("analysis:" + identity.User.ID) {
+			return nil, errRateLimited
+		}
 		record, err := console.Analysis.AnalyzeCall(ctx.Request.Context(), ctx.Param("project_id"), ctx.Param("call_id"), "")
 		if err != nil {
 			return nil, analysisError(err)

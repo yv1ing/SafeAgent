@@ -28,6 +28,10 @@ func TestCountTokensForwardsToTheUpstream(t *testing.T) {
 	if path := rig.upstream.Requests()[0].Path; !strings.HasSuffix(path, "/count_tokens") {
 		t.Fatalf("the native counting endpoint must be used: %s", path)
 	}
+	call := rig.store.Calls[0]
+	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.EndpointFormat != "anthropic_messages" {
+		t.Fatalf("the counting call must name its channel model: %+v", call)
+	}
 }
 
 func TestCountTokensFallsBackToAnEstimate(t *testing.T) {
@@ -63,8 +67,15 @@ func TestEmbeddingsPassThroughAndAreAudited(t *testing.T) {
 	if strings.Contains(sent.Body, "me@example.com") {
 		t.Fatalf("the auxiliary request must be redacted: %s", sent.Body)
 	}
+	if !strings.Contains(sent.Body, `"model":"gpt-5-upstream"`) {
+		t.Fatalf("the route must name the upstream model: %s", sent.Body)
+	}
 	if call := rig.store.Calls[0]; call.Kind != "embeddings" || call.State != "completed" {
 		t.Fatalf("the auxiliary call must be audited: %+v", call)
+	}
+	call := rig.store.Calls[0]
+	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.EndpointFormat != "openai_chat" {
+		t.Fatalf("the auxiliary call must name its channel model: %+v", call)
 	}
 }
 

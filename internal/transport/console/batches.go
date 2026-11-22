@@ -61,6 +61,9 @@ func (console *Console) registerBatches() {
 		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
 			return nil, err
 		}
+		if !console.analysisLimit.Allow("analysis:" + identity.User.ID) {
+			return nil, errRateLimited
+		}
 		var input analysisBatchInput
 		if err := decode(ctx, &input); err != nil {
 			return nil, err

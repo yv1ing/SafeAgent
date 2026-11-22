@@ -22,27 +22,6 @@ type AuditReport struct {
 	Report    auditevent.ChainReport `json:"report"`
 }
 
-// LoadAuditSecret loads the instance secret without creating or modifying the schema. A stale
-// fingerprint is an error, so an offline verification never runs against another build's data.
-func (store *Store) LoadAuditSecret(ctx context.Context) error {
-	state, err := store.loadState(ctx)
-	if err != nil {
-		return err
-	}
-	if len(state.HMACSecret) != 32 {
-		return errMissingAuditKey
-	}
-	var incompatible int
-	if err := store.DB.NewRaw(`SELECT count(*) FROM events WHERE schema_version <> ?`, auditevent.SchemaVersion).Scan(ctx, &incompatible); err != nil {
-		return err
-	}
-	if incompatible > 0 {
-		return errStaleEvents
-	}
-	store.Secret = state.HMACSecret
-	return nil
-}
-
 func (store *Store) VerifyCallAudit(ctx context.Context, projectID, callID string) (auditevent.ChainReport, error) {
 	if len(store.Secret) != 32 {
 		return auditevent.ChainReport{Status: auditevent.StatusUnavailable, Error: "audit key unavailable"}, nil

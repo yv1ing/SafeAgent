@@ -28,7 +28,7 @@ func TestPrepareCreatesSchemaAndRejectsMismatch(t *testing.T) {
 		t.Fatalf("prepare: %v", err)
 	}
 	if len(database.Secret) != 32 {
-		t.Fatalf("HMAC secret was not loaded")
+		t.Fatalf("the instance key was not supplied")
 	}
 	if err := database.Prepare(ctx); err != nil {
 		t.Fatalf("second prepare: %v", err)
@@ -38,6 +38,17 @@ func TestPrepareCreatesSchemaAndRejectsMismatch(t *testing.T) {
 	}
 	if err := database.Prepare(ctx); err == nil {
 		t.Fatalf("a mismatched schema fingerprint must stop startup")
+	}
+}
+
+func TestPrepareRefusesTablesWithoutFingerprint(t *testing.T) {
+	database := prepared(t)
+	ctx := context.Background()
+	if _, err := database.DB.ExecContext(ctx, `DELETE FROM system_state`); err != nil {
+		t.Fatalf("delete fingerprint: %v", err)
+	}
+	if err := database.Prepare(ctx); err == nil || !strings.Contains(err.Error(), "no schema fingerprint") {
+		t.Fatalf("a table set without an anchored fingerprint must be refused: %v", err)
 	}
 }
 
@@ -458,12 +469,14 @@ func TestProjectAndChannelUpdatesPersistGatewayDefaults(t *testing.T) {
 	}
 	project.Name = "p2"
 	project.DefaultMaxOutputTokens = 4321
+	project.StreamReviewBytes = 4096
+	project.StreamReviewTimeoutMS = 500
 	updatedProject, err := database.UpdateProject(ctx, project.ID, *project, project.Version)
 	if err != nil {
 		t.Fatalf("update project: %v", err)
 	}
-	if updatedProject.DefaultMaxOutputTokens != 4321 {
-		t.Fatalf("project output limit = %d", updatedProject.DefaultMaxOutputTokens)
+	if updatedProject.DefaultMaxOutputTokens != 4321 || updatedProject.StreamReviewBytes != 4096 || updatedProject.StreamReviewTimeoutMS != 500 {
+		t.Fatalf("project defaults = %+v", updatedProject)
 	}
 
 	model := &entity.Model{ProviderID: "openai", UpstreamName: "gpt-5", Kind: entity.ModelGeneration, Formats: []string{"openai_chat"}, Currency: "USD", Enabled: true}

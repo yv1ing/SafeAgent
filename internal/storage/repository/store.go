@@ -17,12 +17,17 @@ type Store struct {
 	events *EventWriter
 }
 
-func Open(dsn string) *Store {
+// Open connects to one database. instanceKey is the operator-supplied 32-byte instance key; it is
+// kept in memory only and never written to the database.
+func Open(dsn string, instanceKey []byte) *Store {
+	if instanceKey != nil && len(instanceKey) != 32 {
+		panic("repository: the instance key must be 32 bytes")
+	}
 	connection := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	connection.SetMaxOpenConns(32)
 	connection.SetMaxIdleConns(8)
 	connection.SetConnMaxLifetime(30 * time.Minute)
-	store := &Store{DB: bun.NewDB(connection, pgdialect.New())}
+	store := &Store{DB: bun.NewDB(connection, pgdialect.New()), Secret: instanceKey}
 	store.events = newEventWriter(store)
 	return store
 }

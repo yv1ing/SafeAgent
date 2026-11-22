@@ -1,6 +1,6 @@
 # Analysis
 
-The analysis layer has two halves. The gateway runs a deterministic pass before forwarding a request, before releasing a tool call, before accepting a request's tool results and before writing a non-streaming response. The asynchronous worker diagnoses the finished call. Both use the same detectors and the same observation model. Only the asynchronous half runs the five-question diagnosis; the online half may ask the decision model one authorization question.
+The analysis layer has two halves. The gateway runs a deterministic pass before forwarding a request, before releasing a tool call, before accepting a request's tool results and before writing a response: in full for a non-streaming response, or over the reviewed leading window of a streaming response. The asynchronous worker diagnoses the finished call. Both use the same detectors and the same observation model. Only the asynchronous half runs the five-question diagnosis; the online half may ask the decision model one authorization question.
 
 ```mermaid
 flowchart LR
@@ -16,7 +16,7 @@ flowchart LR
     ToolGate -->|allowed and side-effecting| Veto["decision model veto"]
     ToolGate -->|blocked| Client
     Veto -->|allowed| Client
-    Provider --> Response["non-streaming response"]
+    Provider --> Response["JSON response or reviewed stream window"]
     Response --> ResponseGate["response checkpoint<br/>content + rules"]
     ResponseGate -->|blocked| Client
     Provider --> Seal["seal: events + decisions + job"]
@@ -84,9 +84,11 @@ The gateway has four checkpoints.
 3. **Tool result**: when the request adds one or more tool results, run `content` over the trace and evaluate phase `tool_result`. The `results` CEL list carries the redacted text of each new result. A block rejects the request before routing or quota reservation.
 4. **Response**: for a non-streaming client response, after the tool gate and before writing, run `content` over the request plus response and evaluate phase `response`. The `response` CEL object carries status, finish, shown text and counts. A block seals the call as blocked, charges the reported usage, and returns a protocol-shaped error.
 
+**Stream review** (optional): when a project sets `stream_review_bytes` above zero, the gateway buffers the leading streaming text until the window fills, until the next frame arrives after `stream_review_timeout_ms`, or until a short stream ends. It then runs `content` and phase `response` before committing the response. The preview's `response.status` is `in_progress`, `response.finish` is empty, and the text is the shown view. A block prevents the first byte, records the preview as a blocked response, and returns a protocol-shaped error. After the window commits, later text is not checked online.
+
 Only online decisions are stored. No online analysis row exists. A rule error blocks only when the project has a blocking rule for that phase; a project that only records keeps going and stores a `guard_unavailable` decision. The decision model can only add a block; its failure never blocks.
 
-Streaming response prose is not checked online. Once a token has reached the client it cannot be recalled. The asynchronous pass stores the response and flags concealed Unicode in it; injection phrases and exfiltration links are searched only outside assistant prose.
+Streaming text after the review window is not checked online. Once a token has reached the client it cannot be recalled. The asynchronous pass stores the response and flags concealed Unicode in it; injection phrases and exfiltration links are searched only outside assistant prose.
 
 ## Asynchronous analysis
 
@@ -104,7 +106,7 @@ A new save of the policy does not appear in the analysis versions: analysis is d
 
 `POST /console/api/projects/{project_id}/calls/{call_id}/analyses` runs the diagnosis again. A new detector set or decision model creates a new row; the unique identity keeps retries idempotent. `Diff` aligns two analyses by fingerprint and refuses to compare different inputs or detector/catalogue versions.
 
-A batch (`analysis_batches`) groups a bounded set of calls and records progress; it never merges their findings into one synthetic call. The batch and its jobs are written in one transaction, the scope is capped by call count and event bytes, and running calls are excluded.
+A batch (`analysis_batches`) groups a bounded set of calls and records progress; it never merges their findings into one synthetic call. The batch and its jobs are written in one transaction, the scope is capped by call count and event bytes, and running calls are excluded. Re-analysis and batch creation share a per-user console limit of 30 requests per minute and return `429 rate_limited` beyond it.
 
 ## Decision model
 
@@ -150,6 +152,8 @@ Unless a high-severity finding is present, an incomplete pass yields `unknown`.
 | decision model budget exhausted | record `decision_model_unavailable`, continue | `budget_exhausted`, unknown |
 | tool hold byte limit reached | 413 `tool_call_too_large`, no failover | not used |
 | seal failure | `audit_failed`; call marked failed | repair may enqueue on the next start |
+
+The optional stream review uses the same response checkpoint and failure rules. A review block is recorded as a blocked response, but no body byte is written.
 
 ## Related
 

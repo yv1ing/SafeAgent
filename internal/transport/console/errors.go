@@ -91,6 +91,7 @@ var errorMessages = map[string]string{
 	"invalid_label":            "The label is too long or contains control characters.",
 	"invalid_retention_days":   "The retention period must be between 1 and 3650 days.",
 	"invalid_limit":            "A limit is negative or exceeds its maximum.",
+	"invalid_stream_review":    "The stream review window is outside its permitted range.",
 	"invalid_policy":           "The policy document is invalid.",
 	"invalid_decision_model":   "The decision model configuration is invalid.",
 	"invalid_format":           "The protocol format is not supported.",

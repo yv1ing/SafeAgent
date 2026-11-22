@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
@@ -37,22 +39,38 @@ type Restorers interface {
 // failure drops the call and terminates the stream.
 type Gate func(item model.Item) *model.Error
 
+// ReviewInput is the leading streaming content held before the first byte is written.
+type ReviewInput struct {
+	Text      string
+	Items     int
+	ToolCalls int
+}
+
+// Review judges the leading window of a streaming response. A non-nil failure prevents the response
+// from being committed, so the client receives a protocol error instead of a partial body.
+type Review func(input ReviewInput) *model.Error
+
 type Options struct {
-	Encoder        codec.StreamEncoder
-	Writer         Writer
-	Journal        *model.Journal
-	Restorers      Restorers
-	Gate           Gate
-	ToolKinds      map[string]model.ToolKind
-	Format         model.Format
-	IncludeUsage   bool
-	ResponseID     string
-	ResponseModel  string
-	Raw            bool
-	Keepalive      time.Duration
-	HoldLimit      int
-	PreCommitBytes int
-	OnFirstToken   func()
+	Encoder       codec.StreamEncoder
+	Writer        Writer
+	Journal       *model.Journal
+	Restorers     Restorers
+	Gate          Gate
+	Review        Review
+	ReviewBytes   int
+	ReviewTimeout time.Duration
+	ToolKinds     map[string]model.ToolKind
+	Format        model.Format
+	IncludeUsage  bool
+	ResponseID    string
+	ResponseModel string
+	Raw           bool
+	Keepalive     time.Duration
+	HoldLimit     int
+	OnFirstToken  func()
+	// FailureEncoder builds a fresh encoder for a terminal error after StageComplete. The stream
+	// encoder is already stopped at that point, so a new one is needed to replace staged success.
+	FailureEncoder func() codec.StreamEncoder
 }
 
 type passthroughRestorers struct{}
@@ -81,8 +99,8 @@ type itemState struct {
 }
 
 type segment struct {
-	index  int
 	held   bool
+	items  map[int]bool
 	frames bytes.Buffer
 }
 
@@ -92,6 +110,13 @@ type Session struct {
 	journal        *model.Journal
 	restorers      Restorers
 	gate           Gate
+	review         Review
+	reviewBytes    int
+	reviewTimeout  time.Duration
+	reviewText     strings.Builder
+	reviewStarted  time.Time
+	reviewed       bool
+	toolItems      int
 	toolKinds      map[string]model.ToolKind
 	format         model.Format
 	includeUsage   bool
@@ -106,10 +131,12 @@ type Session struct {
 	queue          []*segment
 	queued         int
 	holdLimit      int
-	preCommit      int
 	keepalive      time.Duration
 	onFirstToken   func()
+	failureEncoder func() codec.StreamEncoder
 	buffer         bytes.Buffer
+	bufferedItems  map[int]bool
+	delivered      map[int]bool
 	committed      bool
 	terminalStaged bool
 	staged         []byte
@@ -130,16 +157,25 @@ func New(options Options) *Session {
 	if options.Restorers == nil {
 		options.Restorers = passthroughRestorers{}
 	}
+	if options.ReviewBytes > 0 && options.Review != nil {
+		if options.ReviewTimeout <= 0 {
+			options.ReviewTimeout = 300 * time.Millisecond
+		}
+	} else {
+		options.Review = nil
+		options.ReviewBytes = 0
+	}
 	session := &Session{
 		encoder: options.Encoder, writer: options.Writer, journal: options.Journal,
-		restorers: options.Restorers, gate: options.Gate, toolKinds: options.ToolKinds, format: options.Format, includeUsage: options.IncludeUsage,
+		restorers: options.Restorers, gate: options.Gate, review: options.Review,
+		reviewBytes: options.ReviewBytes, reviewTimeout: options.ReviewTimeout,
+		toolKinds: options.ToolKinds, format: options.Format, includeUsage: options.IncludeUsage,
 		responseID: options.ResponseID, responseModel: options.ResponseModel, raw: options.Raw,
-		items: map[int]*itemState{}, holdLimit: options.HoldLimit, preCommit: options.PreCommitBytes,
+		items: map[int]*itemState{}, holdLimit: options.HoldLimit,
+		bufferedItems: map[int]bool{}, delivered: map[int]bool{},
 		keepalive: options.Keepalive, onFirstToken: options.OnFirstToken,
-		stopKeepalive: make(chan struct{}),
-	}
-	if session.preCommit <= 0 {
-		session.preCommit = 256 << 10
+		failureEncoder: options.FailureEncoder,
+		stopKeepalive:  make(chan struct{}),
 	}
 	if session.holdLimit <= 0 {
 		session.holdLimit = 1 << 20
@@ -151,6 +187,111 @@ func New(options Options) *Session {
 func (session *Session) Committed() bool { return session.committed }
 
 func (session *Session) Journal() *model.Journal { return session.journal }
+
+// ReviewNow forces a pending leading-window review. It is called before a short stream commits so
+// the same rules apply whether the window filled or the response ended first.
+func (session *Session) ReviewNow() *model.Error { return session.reviewIfDue(true) }
+
+// PruneUndelivered removes journal items whose frames never reached the client. A committed stream
+// that fails may have held frames for a sibling tool call or content queued behind one; those items
+// are not part of the response the client actually received.
+func (session *Session) PruneUndelivered() {
+	for index := range session.items {
+		if !session.delivered[index] {
+			session.journal.Remove(index)
+		}
+	}
+}
+
+func (session *Session) mayCommit() bool {
+	return session.review == nil || session.reviewed || session.reviewText.Len() == 0
+}
+
+func (session *Session) reviewSettled() bool {
+	return session.review == nil || session.reviewed
+}
+
+func (session *Session) reviewPending() bool {
+	return session.review != nil && !session.reviewed && session.reviewText.Len() > 0
+}
+
+func (session *Session) reviewIfDue(force bool) *model.Error {
+	if !session.reviewPending() {
+		return nil
+	}
+	if !force && session.reviewText.Len() < session.reviewBytes &&
+		time.Since(session.reviewStarted) < session.reviewTimeout {
+		return nil
+	}
+	input := ReviewInput{
+		Text:      session.reviewText.String(),
+		Items:     len(session.journal.Items()),
+		ToolCalls: session.toolItems,
+	}
+	session.reviewed = true
+	if failure := session.review(input); failure != nil {
+		return failure
+	}
+	session.firstToken()
+	session.commit()
+	return nil
+}
+
+func (session *Session) accumulateReview(text string) {
+	if session.review == nil || session.reviewed || text == "" {
+		return
+	}
+	remaining := session.reviewBytes - session.reviewText.Len()
+	if remaining <= 0 {
+		return
+	}
+	text = truncateReview(text, remaining)
+	if text == "" {
+		return
+	}
+	if session.reviewStarted.IsZero() {
+		session.reviewStarted = time.Now()
+	}
+	session.reviewText.WriteString(text)
+}
+
+// truncateReview clips to a contiguous rune-boundary prefix. When the limit falls inside a rune,
+// the whole rune is kept so later deltas append directly after it.
+func truncateReview(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		_, size := utf8.DecodeRuneInString(text)
+		return text[:size]
+	}
+	if cut < limit {
+		_, size := utf8.DecodeRuneInString(text[cut:])
+		return text[:cut+size]
+	}
+	return text[:cut]
+}
+
+func (session *Session) markDelivered(index int) {
+	if index >= 0 {
+		session.delivered[index] = true
+	}
+}
+
+func indicesOf(items map[int]bool) []int {
+	indices := make([]int, 0, len(items))
+	for index := range items {
+		indices = append(indices, index)
+	}
+	return indices
+}
 
 // Handle applies one upstream frame. frame is the raw SSE frame when raw pass-through may apply;
 // events are the decoded shadow events for the same frame.
@@ -168,7 +309,7 @@ func (session *Session) Handle(events []model.Event, frame *codec.Frame) *model.
 				if err != nil {
 					return internalFailure()
 				}
-				return session.pass(encoded, false)
+				return session.pass(encoded, nil)
 			}
 			session.switchCanonical()
 			return nil
@@ -270,29 +411,44 @@ func (session *Session) forwardRaw(events []model.Event, frame *codec.Frame) *mo
 	}
 	terminal := false
 	content := false
+	indices := map[int]bool{}
 	for _, event := range events {
 		if event.Kind == model.EventMessageStop {
 			terminal = true
 		}
 		if event.Kind == model.EventPartDelta && event.Delta != "" {
 			content = true
+			session.accumulateReview(event.Delta)
+		}
+		if event.ItemIndex >= 0 {
+			indices[event.ItemIndex] = true
 		}
 	}
 	if terminal && !session.journal.Content() {
 		return nil
+	}
+	if terminal {
+		if failure := session.ReviewNow(); failure != nil {
+			return failure
+		}
 	}
 	encoded, err := frame.Encode()
 	if err != nil {
 		return internalFailure()
 	}
 	if content {
-		session.firstToken()
+		if session.reviewSettled() {
+			session.firstToken()
+		}
 	}
-	if failure := session.pass(encoded, content); failure != nil {
+	if failure := session.pass(encoded, indicesOf(indices)); failure != nil {
 		return failure
 	}
-	if content {
+	if content && session.mayCommit() {
 		session.commit()
+	}
+	if failure := session.reviewIfDue(false); failure != nil {
+		return failure
 	}
 	if terminal {
 		session.rawClosed = true
@@ -325,6 +481,9 @@ func (session *Session) emit(event model.Event) *model.Error {
 		}
 		state := &itemState{item: stripItemContent(*event.Item), parts: map[int]*partState{}}
 		state.tool = state.item.Kind == model.ItemToolCall || state.item.Kind == model.ItemServerToolCall
+		if state.tool {
+			session.toolItems++
+		}
 		if state.item.ToolCall != nil {
 			state.wireKind = state.item.ToolCall.Kind
 			if session.toolKinds[state.item.ToolCall.Name] == model.ToolCustom && (session.format == model.Chat || session.format == model.Responses) {
@@ -375,6 +534,9 @@ func (session *Session) emit(event model.Event) *model.Error {
 				return nil
 			}
 		}
+		if part.part.Kind != model.PartToolArguments {
+			session.accumulateReview(restored)
+		}
 		part.build.WriteString(restored)
 		event.Delta = restored
 		session.journal.Apply(event)
@@ -406,6 +568,8 @@ func (session *Session) emit(event model.Event) *model.Error {
 		}
 		if part.build.Len() > 0 {
 			part.part = model.WithStreamedContent(part.part, part.build.String())
+		} else if part.part.Kind != model.PartToolArguments {
+			session.accumulateReview(session.restoreText(part.part.Text))
 		}
 		event.Part = &part.part
 		session.journal.Apply(event)
@@ -546,8 +710,11 @@ func (session *Session) restoreText(text string) string {
 }
 
 func (session *Session) encode(event model.Event, index int) *model.Error {
+	if failure := session.reviewIfDue(false); failure != nil {
+		return failure
+	}
 	held := session.willHold(index)
-	if event.IsContent() && !held {
+	if event.IsContent() && !held && session.reviewSettled() {
 		session.firstToken()
 	}
 	frames, losses, err := session.encoder.Encode(event)
@@ -556,13 +723,18 @@ func (session *Session) encode(event model.Event, index int) *model.Error {
 		return internalFailure()
 	}
 	if event.IsContent() && !held {
-		if failure := session.passFrames(frames, index, false, true); failure != nil {
+		if failure := session.passFrames(frames, index, false); failure != nil {
 			return failure
 		}
-		session.commit()
+		if failure := session.reviewIfDue(false); failure != nil {
+			return failure
+		}
+		if session.mayCommit() {
+			session.commit()
+		}
 		return nil
 	}
-	return session.passFrames(frames, index, held, false)
+	return session.passFrames(frames, index, held)
 }
 
 func (session *Session) willHold(index int) bool {
@@ -573,7 +745,7 @@ func (session *Session) willHold(index int) bool {
 	return state != nil && state.tool && !state.judged
 }
 
-func (session *Session) passFrames(frames []codec.Frame, index int, held, content bool) *model.Error {
+func (session *Session) passFrames(frames []codec.Frame, index int, held bool) *model.Error {
 	for _, frame := range frames {
 		encoded, err := frame.Encode()
 		if err != nil {
@@ -585,7 +757,7 @@ func (session *Session) passFrames(frames []codec.Frame, index int, held, conten
 			}
 			continue
 		}
-		if failure := session.pass(encoded, content); failure != nil {
+		if failure := session.pass(encoded, []int{index}); failure != nil {
 			return failure
 		}
 	}
@@ -596,7 +768,7 @@ func (session *Session) enqueue(index int, held bool, encoded []byte) *model.Err
 	var target *segment
 	if held {
 		for _, segment := range session.queue {
-			if segment.held && segment.index == index {
+			if segment.held && segment.items[index] {
 				target = segment
 				break
 			}
@@ -605,8 +777,11 @@ func (session *Session) enqueue(index int, held bool, encoded []byte) *model.Err
 		target = session.queue[len(session.queue)-1]
 	}
 	if target == nil {
-		target = &segment{index: index, held: held}
+		target = &segment{held: held, items: map[int]bool{}}
 		session.queue = append(session.queue, target)
+	}
+	if index >= 0 {
+		target.items[index] = true
 	}
 	if held || session.heldQueued() {
 		if session.holdLimit > 0 && session.queued+len(encoded) > session.holdLimit {
@@ -630,7 +805,7 @@ func (session *Session) heldQueued() bool {
 // release drops every queued frame of a judged item and flushes what no longer waits on a verdict.
 func (session *Session) release(index int) *model.Error {
 	for _, segment := range session.queue {
-		if segment.held && segment.index == index {
+		if segment.held && segment.items[index] {
 			segment.held = false
 		}
 	}
@@ -641,7 +816,7 @@ func (session *Session) release(index int) *model.Error {
 func (session *Session) discard(index int) {
 	kept := make([]*segment, 0, len(session.queue))
 	for _, segment := range session.queue {
-		if segment.held && segment.index == index {
+		if segment.held && segment.items[index] {
 			if session.queued >= segment.frames.Len() {
 				session.queued -= segment.frames.Len()
 			}
@@ -656,38 +831,45 @@ func (session *Session) drain() *model.Error {
 	for len(session.queue) > 0 {
 		head := session.queue[0]
 		if head.held {
-			return nil
+			break
 		}
 		session.queue = session.queue[1:]
 		if session.queued >= head.frames.Len() {
 			session.queued -= head.frames.Len()
 		}
-		if failure := session.pass(head.frames.Bytes(), true); failure != nil {
+		if failure := session.pass(head.frames.Bytes(), indicesOf(head.items)); failure != nil {
 			return failure
 		}
-		session.commit()
+		if session.mayCommit() {
+			session.commit()
+		}
 	}
-	return nil
+	return session.reviewIfDue(false)
 }
 
-func (session *Session) pass(encoded []byte, mayCommit bool) *model.Error {
+func (session *Session) pass(encoded []byte, items []int) *model.Error {
 	if !session.committed {
 		session.buffer.Write(encoded)
-		if mayCommit && session.buffer.Len() >= session.preCommit {
-			session.commit()
+		for _, index := range items {
+			if index >= 0 {
+				session.bufferedItems[index] = true
+			}
 		}
 		return nil
 	}
-	return session.send(encoded)
+	return session.send(encoded, items)
 }
 
-func (session *Session) send(encoded []byte) *model.Error {
+func (session *Session) send(encoded []byte, items []int) *model.Error {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if _, err := session.writer.Write(encoded); err != nil {
 		return cancelledFailure()
 	}
 	session.writer.Flush()
+	for _, index := range items {
+		session.markDelivered(index)
+	}
 	return nil
 }
 
@@ -698,15 +880,27 @@ func (session *Session) commit() {
 		return
 	}
 	session.committed = true
+	if session.review != nil && !session.reviewed && session.reviewText.Len() == 0 {
+		session.reviewed = true
+	}
 	header := session.writer.Header()
 	header.Set("Content-Type", "text/event-stream")
 	header.Set("Cache-Control", "no-cache")
 	header.Set("X-Accel-Buffering", "no")
 	session.writer.WriteHeader(http.StatusOK)
+	written := true
 	if session.buffer.Len() > 0 {
-		_, _ = session.writer.Write(session.buffer.Bytes())
+		if _, err := session.writer.Write(session.buffer.Bytes()); err != nil {
+			written = false
+		}
 		session.buffer.Reset()
 	}
+	if written {
+		for index := range session.bufferedItems {
+			session.markDelivered(index)
+		}
+	}
+	session.bufferedItems = map[int]bool{}
 	session.writer.Flush()
 }
 
@@ -787,13 +981,25 @@ func finishOf(journal *model.Journal) *model.Finish {
 	return &finish
 }
 
-// StageFailure encodes a protocol-native error frame for an already committed stream.
+// StageFailure encodes a protocol-native error frame for an already committed stream. It replaces a
+// staged success when settlement fails after StageComplete.
 func (session *Session) StageFailure(failure *model.Error) {
-	if session.terminalStaged || session.rawClosed || !session.committed {
+	if session.rawClosed || !session.committed {
 		return
 	}
+	encoder := session.encoder
+	if session.terminalStaged {
+		if session.failureEncoder == nil {
+			return
+		}
+		encoder = session.failureEncoder()
+		if encoder == nil {
+			return
+		}
+	}
 	session.terminalStaged = true
-	frames, losses, err := session.encoder.Fail(failure)
+	session.staged = nil
+	frames, losses, err := encoder.Fail(failure)
 	session.journal.Apply(model.Event{Losses: losses})
 	if err != nil {
 		return
@@ -815,14 +1021,14 @@ func (session *Session) WriteStaged() {
 		if !session.committed {
 			session.commit()
 		}
-		_ = session.send(session.staged)
+		_ = session.send(session.staged, nil)
 		session.staged = nil
 	}
 	if len(session.stagedFailure) > 0 {
 		if !session.committed {
 			session.commit()
 		}
-		_ = session.send(session.stagedFailure)
+		_ = session.send(session.stagedFailure, nil)
 		session.stagedFailure = nil
 	}
 }

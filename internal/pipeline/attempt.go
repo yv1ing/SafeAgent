@@ -119,8 +119,6 @@ func (state *call) judge(admission routing.Admission, failure *model.Error) {
 
 type attemptResult int
 
-const preCommitBytes = 256 << 10
-
 const (
 	attemptFailed attemptResult = iota
 	attemptEnded
@@ -196,23 +194,31 @@ func (state *call) retryWithoutField(ctx context.Context, candidate routing.Cand
 
 func (state *call) streamResponse(ctx context.Context, upstream *upstreamCall, candidate routing.Candidate) (attemptResult, *model.Error) {
 	meta := model.ResponseMeta{ID: model.ResponseID(state.kind, state.recorder.Call().ID, ""), Model: state.request.Model}
-	session := stream.New(stream.Options{
-		Encoder:        state.coder.NewStreamEncoder(meta, state.clientPeer()),
-		Writer:         state.writer,
-		Journal:        model.NewJournal(),
-		Restorers:      scopeRestorers{scope: state.scope},
-		Gate:           state.toolGate,
-		ToolKinds:      state.toolKinds,
-		Format:         state.kind,
-		IncludeUsage:   state.request.StreamOptions != nil && state.request.StreamOptions.IncludeUsage,
-		ResponseID:     meta.ID,
-		ResponseModel:  meta.Model,
-		Raw:            upstream.endpoint.format == state.kind && state.kind != model.Responses && !state.historyExpanded && state.rawResponseSafe(),
-		Keepalive:      state.pipeline.settings.Keepalive,
-		HoldLimit:      state.pipeline.settings.ToolHoldBytes,
-		PreCommitBytes: preCommitBytes,
-		OnFirstToken:   state.recordFirstToken,
-	})
+	options := stream.Options{
+		Encoder:       state.coder.NewStreamEncoder(meta, state.clientPeer()),
+		Writer:        state.writer,
+		Journal:       model.NewJournal(),
+		Restorers:     scopeRestorers{scope: state.scope},
+		Gate:          state.toolGate,
+		ToolKinds:     state.toolKinds,
+		Format:        state.kind,
+		IncludeUsage:  state.request.StreamOptions != nil && state.request.StreamOptions.IncludeUsage,
+		ResponseID:    meta.ID,
+		ResponseModel: meta.Model,
+		Raw:           upstream.endpoint.format == state.kind && state.kind != model.Responses && !state.historyExpanded && state.rawResponseSafe(),
+		Keepalive:     state.pipeline.settings.Keepalive,
+		HoldLimit:     state.pipeline.settings.ToolHoldBytes,
+		OnFirstToken:  state.recordFirstToken,
+		FailureEncoder: func() codec.StreamEncoder {
+			return state.coder.NewStreamEncoder(meta, state.clientPeer())
+		},
+	}
+	if state.reviewBytes > 0 {
+		options.Review = state.reviewStream
+		options.ReviewBytes = state.reviewBytes
+		options.ReviewTimeout = state.reviewTimeout
+	}
+	session := stream.New(options)
 	if upstream.response != nil {
 		state.failureLedger.Losses = append(state.failureLedger.Losses, upstream.losses...)
 		for _, event := range stream.Events(upstream.response) {
@@ -226,6 +232,11 @@ func (state *call) streamResponse(ctx context.Context, upstream *upstreamCall, c
 				failure = timedOut()
 			}
 			return state.endSessionFailure(session, upstream, failure)
+		}
+	}
+	if session.Journal().Failure() == nil {
+		if failure := session.ReviewNow(); failure != nil {
+			return state.blockReviewedStream(session, upstream, failure)
 		}
 	}
 	return state.completeStream(session, upstream)
@@ -281,16 +292,21 @@ func (state *call) consume(ctx context.Context, upstream *upstreamCall, session 
 
 func (state *call) endSessionFailure(session *stream.Session, upstream *upstreamCall, failure *model.Error) (attemptResult, *model.Error) {
 	if !session.Committed() {
-		session.Close()
 		switch {
 		case failure.Class == model.ClassPolicy:
+			if state.reviewBlocked && session.Journal().Content() {
+				return state.blockReviewedStream(session, upstream, failure)
+			}
+			session.Close()
 			state.recordBlocked(auditevent.Decision{Action: "block", Blocked: true, Reason: failure.Code})
 			state.finish(failure, "blocked")
 			return attemptEnded, failure
 		case failure.Class == model.ClassCancelled:
+			session.Close()
 			state.finish(failure, "cancelled")
 			return attemptEnded, failure
 		}
+		session.Close()
 		return attemptFailed, failure
 	}
 	if failure.Class == model.ClassPolicy {

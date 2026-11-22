@@ -37,8 +37,8 @@ Individual suites:
 | `make lab-agents` | four agent CLIs against every configured route, plus a multi-step task on each native route |
 | `make lab-policy` | request, tool-result and tool-call blocks through every client and route |
 | `make lab-analysis` | asynchronous diagnosis, redaction hits, timeline and audit integrity through every client and route |
-| `make lab-security` | invalid keys, project isolation, rate and token limits, console roles and raw-event access |
-| `make lab-faults` | failover, truncation, tool holds, header forwarding and default limits |
+| `make lab-security` | invalid keys, project isolation, rate and token limits, console roles, stream review permissions and raw-event access |
+| `make lab-faults` | failover, truncation, tool holds, stream review, audit projection, auxiliary model mapping, header forwarding and default limits |
 | `make lab-browser` | every console page at desktop and mobile widths, plus desktop CRUD flows |
 | `make lab-integration` | repository tests on a separate database in the lab |
 | `make lab-audit` | verify every stored call audit chain on the lab database |
@@ -50,7 +50,7 @@ Individual suites:
 
 The suites write to `testenv/runtime`: `acceptance/matrix.json`, agent logs and answers, screenshots and `report.json`, and `load/<timestamp>/`. Review it before sharing; it may contain generated keys or model output.
 
-`testenv/.env` holds provider keys, and `testenv/runtime` holds the administrator password and agent keys. Do not expose port 8080 beyond the development host. The fixed database password and the private-network exception are test-only and must not be copied into a deployment.
+`testenv/.env` holds provider keys, and `testenv/runtime` holds the administrator password, agent keys and the instance key. Do not expose port 8080 beyond the development host. The fixed database password and the private-network exception are test-only and must not be copied into a deployment.
 
 ## Related
 

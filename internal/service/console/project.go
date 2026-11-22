@@ -13,12 +13,15 @@ import (
 )
 
 const (
-	DefaultRetentionDays     = 30
-	DefaultRequestsPerMinute = 120
-	DefaultConcurrency       = 8
-	MaximumRetentionDays     = 3650
-	MaximumRequestsPerMinute = 1_000_000
-	MaximumConcurrency       = 100_000
+	DefaultRetentionDays         = 30
+	DefaultRequestsPerMinute     = 120
+	DefaultConcurrency           = 8
+	DefaultStreamReviewTimeoutMS = 300
+	MaximumRetentionDays         = 3650
+	MaximumRequestsPerMinute     = 1_000_000
+	MaximumConcurrency           = 100_000
+	MaximumStreamReviewBytes     = 64 << 10
+	MaximumStreamReviewTimeoutMS = 5_000
 )
 
 type ProjectService struct {
@@ -36,6 +39,8 @@ type ProjectInput struct {
 	Concurrency            int
 	DailyTokenQuota        int64
 	DefaultMaxOutputTokens int
+	StreamReviewBytes      int
+	StreamReviewTimeoutMS  int
 	Version                int64
 }
 
@@ -47,12 +52,14 @@ type ProjectCreateInput struct {
 	Concurrency            *int
 	DailyTokenQuota        *int64
 	DefaultMaxOutputTokens *int
+	StreamReviewBytes      *int
+	StreamReviewTimeoutMS  *int
 }
 
 func (input ProjectCreateInput) resolve() ProjectInput {
 	resolved := ProjectInput{
 		Name: input.Name, RetentionDays: DefaultRetentionDays, RequestsPerMinute: DefaultRequestsPerMinute,
-		Concurrency: DefaultConcurrency,
+		Concurrency: DefaultConcurrency, StreamReviewTimeoutMS: DefaultStreamReviewTimeoutMS,
 	}
 	if input.RetentionDays != nil {
 		resolved.RetentionDays = *input.RetentionDays
@@ -68,6 +75,12 @@ func (input ProjectCreateInput) resolve() ProjectInput {
 	}
 	if input.DefaultMaxOutputTokens != nil {
 		resolved.DefaultMaxOutputTokens = *input.DefaultMaxOutputTokens
+	}
+	if input.StreamReviewBytes != nil {
+		resolved.StreamReviewBytes = *input.StreamReviewBytes
+	}
+	if input.StreamReviewTimeoutMS != nil {
+		resolved.StreamReviewTimeoutMS = *input.StreamReviewTimeoutMS
 	}
 	return resolved
 }
@@ -85,11 +98,23 @@ func (input ProjectInput) normalize() (ProjectInput, error) {
 		input.Concurrency < 0 || input.Concurrency > MaximumConcurrency || input.DailyTokenQuota < 0 || input.DefaultMaxOutputTokens < 0 || input.DefaultMaxOutputTokens > MaximumOutputTokens {
 		return input, Invalid("invalid_limit")
 	}
+	if input.StreamReviewBytes < 0 || input.StreamReviewBytes > MaximumStreamReviewBytes ||
+		input.StreamReviewTimeoutMS < 0 || input.StreamReviewTimeoutMS > MaximumStreamReviewTimeoutMS {
+		return input, Invalid("invalid_stream_review")
+	}
+	if input.StreamReviewTimeoutMS == 0 {
+		input.StreamReviewTimeoutMS = DefaultStreamReviewTimeoutMS
+	}
 	return input, nil
 }
 
 func (input ProjectInput) entity() entity.Project {
-	return entity.Project{Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency, DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens}
+	return entity.Project{
+		Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute,
+		Concurrency: input.Concurrency, DailyTokenQuota: input.DailyTokenQuota,
+		DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, StreamReviewBytes: input.StreamReviewBytes,
+		StreamReviewTimeoutMS: input.StreamReviewTimeoutMS,
+	}
 }
 
 // changesAdministratorFields reports whether input alters anything only administrators may set.
@@ -98,7 +123,9 @@ func (input ProjectInput) changesAdministratorFields(existing *entity.Project) b
 		input.RequestsPerMinute != existing.RequestsPerMinute ||
 		input.Concurrency != existing.Concurrency ||
 		input.DailyTokenQuota != existing.DailyTokenQuota ||
-		input.DefaultMaxOutputTokens != existing.DefaultMaxOutputTokens
+		input.DefaultMaxOutputTokens != existing.DefaultMaxOutputTokens ||
+		input.StreamReviewBytes != existing.StreamReviewBytes ||
+		input.StreamReviewTimeoutMS != existing.StreamReviewTimeoutMS
 }
 
 func (service *ProjectService) List(ctx context.Context, actor Actor) ([]entity.Project, error) {

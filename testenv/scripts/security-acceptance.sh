@@ -153,6 +153,10 @@ fi
 admin_post "/projects/$SAFEAGENT_PROJECT/members" "{\"user_id\":\"$user_id\"}" >/dev/null
 check "a project member can read project calls" \
   "$(curl -sS -o /dev/null -w '%{http_code}' -b "$user_jar" "$api/projects/$SAFEAGENT_PROJECT/calls?limit=1")" "200"
+project_json=$(admin_get "/projects/$SAFEAGENT_PROJECT")
+project_update=$(jq -c '{name,retention_days,requests_per_minute,concurrency,daily_token_quota,default_max_output_tokens,stream_review_bytes:1,stream_review_timeout_ms:300,version}' <<<"$project_json")
+check "a project member cannot change stream review" \
+  "$(curl -sS -o /dev/null -w '%{http_code}' -b "$user_jar" -X PUT "$api/projects/$SAFEAGENT_PROJECT" "${marker[@]}" -d "$project_update")" "403"
 check "a project member cannot create a channel" \
   "$(curl -sS -o /dev/null -w '%{http_code}' -b "$user_jar" -X POST "$api/channels" "${marker[@]}" -d '{}')" "403"
 check "a project member cannot read the global operation log" \

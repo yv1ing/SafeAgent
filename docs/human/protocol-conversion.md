@@ -40,14 +40,17 @@ A new OpenAI-compatible provider usually needs one endpoint declaration; a codec
 
 ## Stream session
 
-The hard part of streaming conversion is deciding when bytes may reach the client. The session has four behaviors:
+The hard part of streaming conversion is deciding when bytes may reach the client. The session has five behaviors:
 
 1. **Commit boundary.** No HTTP header is written before the first forwardable content. A failure before that point can fail over; after it, only a protocol error is possible.
-2. **Tool hold.** Text and reasoning stream through; a complete tool item is queued until the policy verdict, then released or discarded as a whole. Holding has a limit, and exceeding it is a resource error.
-3. **Termination.** Terminal frames are staged until losses and audit are settled. A clean EOF may synthesize termination; a truncated stream must fail.
-4. **Cancellation.** Stop writing, cancel upstream, and store what the client already received as a partial response.
+2. **Stream review.** When a project enables it, the leading text waits for the response checkpoint before the commit boundary is crossed. The window is reviewed when it fills, when the next frame arrives after the configured timeout, or when a short stream ends. A block prevents the first byte; after the window commits, later text is not reviewed.
+3. **Tool hold.** Text and reasoning stream through; a complete tool item is queued until the policy verdict, then released or discarded as a whole. Holding has a limit, and exceeding it is a resource error.
+4. **Termination.** Terminal frames on the re-encoded path are staged until losses and audit are settled; raw pass-through keeps the provider's terminal frame. A clean EOF may synthesize termination; a truncated stream must fail.
+5. **Cancellation.** Stop writing, cancel upstream, and store what the client already received as a partial response.
 
-When a Chat, Messages or Gemini request is same-format and needs no rewrite, it can be forwarded as raw bytes with only the model name, the streaming flag and Chat usage selection patched. A response can be forwarded raw while it contains only text, refusal or reasoning text. A tool, media or native item switches back to the canonical encoder. The text hot path avoids re-encoding, while complex paths still get termination and audit from one set of logic.
+The journal records what the client actually received. When a committed stream fails, items still held or queued are removed before the partial response is stored, so a withheld sibling tool call cannot appear in the audit response.
+
+When a Chat, Messages or Gemini request is same-format and needs no rewrite, it can be forwarded as raw bytes with only the model name, the streaming flag and Chat usage selection patched. A response can be forwarded raw while it contains only text, refusal or reasoning text. A tool, media or native item switches back to the canonical encoder. The text hot path avoids re-encoding, while complex paths still get termination and audit from one set of logic. Stream review buffers the raw frames until its window is released; it does not force conversion.
 
 ## Loss ledger
 
@@ -91,7 +94,7 @@ Agent clients also list models, retrieve one model, count tokens, manage Respons
 | model list and retrieval | served from the project's routes in the client's protocol shape |
 | token counting | native endpoint when available; otherwise a local estimate marked as such |
 | Responses lifecycle | retrieve, input_items, cancel and delete share authentication, rate limiting and audit |
-| embeddings and moderations | same-format forwarding when the selected model is of that kind and the channel format declares the capability |
+| embeddings and moderations | same-format forwarding when the selected model is of that kind and the channel format declares the capability; the route's upstream model name is applied to the body |
 | undeclared capability | a protocol-shaped unsupported error |
 
 Responses lifecycle endpoints go through the same authentication, rate limiting and audit as generation. A failed audit refuses the operation, so every action keeps its record.

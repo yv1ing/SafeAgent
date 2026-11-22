@@ -46,9 +46,9 @@ flowchart LR
 - **Request**: checks the task, instructions, declared tools and every message, and can refuse the whole request.
 - **Tool result**: when the request adds tool results, checks their content before forwarding, and can refuse the whole request so the model never sees the blocked output.
 - **Tool call**: checks the call when arguments are complete and frames are still held, and can stop a client-side side effect; a committed stream ends with a protocol error.
-- **Response**: checks a non-streaming response before writing it, and can refuse the body while upstream usage is still settled.
+- **Response**: checks a non-streaming response before writing it, and can refuse the body while upstream usage is still settled. When a project enables stream review, the same checkpoint checks a bounded leading window of a streaming response before its first byte.
 
-Streaming response text has no online checkpoint. A token that reached the client cannot be recalled and is diagnosed after the call.
+Text after the reviewed streaming window has no online checkpoint. A token that reached the client cannot be recalled and is diagnosed after the call.
 
 ## Policy and verdict
 
@@ -98,10 +98,10 @@ The detailed trade-offs and references are in [the landscape](landscape.md).
 - Tool sinks are inferred from names and arguments; a misleading tool name can misclassify a call.
 - Images, audio and other binary payloads are not redacted or inspected.
 - A provider-executed server tool has already run; the gateway can withhold its result only.
-- Streaming responses have no online output check; non-streaming responses can be blocked.
+- Stream review covers only its configured leading window; text after the window has no online output check. Non-streaming responses are checked in full.
 - The gateway observes only traffic that passes through it.
 
-The next steps are in the [roadmap](../agent/roadmap.md): streaming response review, semantic and cross-call relations, multi-agent trajectories and repeatable evaluation.
+The next steps are in the [roadmap](../agent/roadmap.md): semantic and cross-call relations, multi-agent trajectories and repeatable evaluation.
 
 ## Related
 

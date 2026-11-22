@@ -132,11 +132,10 @@ func patchRawBody(body []byte, kind model.Format, upstreamModel string, stream, 
 	if kind == model.Gemini {
 		return body, nil
 	}
-	root, err := model.DecodeObject(body)
+	root, err := applyUpstreamModel(body, upstreamModel)
 	if err != nil {
 		return nil, err
 	}
-	root["model"] = upstreamModel
 	root["stream"] = stream
 	if kind == model.Chat {
 		if stream && includeUsage {
@@ -151,6 +150,16 @@ func patchRawBody(body []byte, kind model.Format, upstreamModel string, stream, 
 		}
 	}
 	return model.Marshal(root), nil
+}
+
+// applyUpstreamModel decodes a JSON request body and names the route's upstream model.
+func applyUpstreamModel(body []byte, upstreamModel string) (map[string]any, error) {
+	root, err := model.DecodeObject(body)
+	if err != nil {
+		return nil, err
+	}
+	root["model"] = upstreamModel
+	return root, nil
 }
 
 func mergeHeaders(target, source http.Header) {

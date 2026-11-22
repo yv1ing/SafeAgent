@@ -179,11 +179,18 @@ if (projectId) {
     await waitForPage();
     await page.getByLabel('Name').fill(renamed);
     await page.getByLabel('Default output limit').fill('1234');
+    await page.getByLabel('Stream review window (bytes)').fill('4096');
+    await page.getByLabel('Stream review timeout (ms)').fill('500');
     await page.getByRole('button', { name: 'Save', exact: true }).first().click();
     await page.waitForTimeout(700);
     const loaded = await api(`/projects/${projectId}`);
     requireValue(loaded.name === renamed, 'the project name was not saved');
     requireValue(loaded.default_max_output_tokens === 1234, 'the project limit was not saved');
+    requireValue(loaded.stream_review_bytes === 4096, 'the stream review window was not saved');
+    requireValue(
+      loaded.stream_review_timeout_ms === 500,
+      'the stream review timeout was not saved',
+    );
   });
 
   const channelOptions = await api(`/projects/${projectId}/channel-options`).catch(() => []);

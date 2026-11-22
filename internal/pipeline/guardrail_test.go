@@ -3,7 +3,9 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -75,7 +77,7 @@ func TestToolResultPolicyBlocksBeforeUpstream(t *testing.T) {
 		t.Fatalf("call=%+v reserved=%v", call, rig.store.Reserved)
 	}
 	kinds := eventKinds(rig.store.EventsOf(call.ID))
-	if !contains(kinds, auditevent.KindToolResult) || !contains(kinds, auditevent.KindDecision) {
+	if !slices.Contains(kinds, auditevent.KindToolResult) || !slices.Contains(kinds, auditevent.KindDecision) {
 		t.Fatalf("events=%v", kinds)
 	}
 	decisions := decisionsOf(rig, call)
@@ -122,7 +124,7 @@ func TestAuxiliaryLifecycleIsAudited(t *testing.T) {
 	if auxiliary.Kind != "responses_retrieve" || auxiliary.State != "completed" {
 		t.Fatalf("auxiliary call=%+v", auxiliary)
 	}
-	if kinds := eventKinds(rig.store.EventsOf(auxiliary.ID)); !contains(kinds, auditevent.KindRequest) {
+	if kinds := eventKinds(rig.store.EventsOf(auxiliary.ID)); !slices.Contains(kinds, auditevent.KindRequest) {
 		t.Fatalf("events=%v", kinds)
 	}
 	if failure := rig.pipeline.DeleteResponse(context.Background(), key, responseID); failure != nil {
@@ -134,13 +136,109 @@ func TestAuxiliaryLifecycleIsAudited(t *testing.T) {
 	}
 }
 
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
+func TestStreamReviewBlocksBeforeTheFirstByte(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: testkit.ChatText("bad content")}
+	})
+	rig.store.Proj.StreamReviewBytes = 4
+	rig.store.Proj.StreamReviewTimeoutMS = 1000
+	setPolicy(rig, blockPolicy(policy.PhaseResponse, `response.text.contains("bad")`))
+	writer := rig.send(pipeline.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`)})
+	if writer.Code != http.StatusForbidden || strings.Contains(writer.Body.String(), "bad content") {
+		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
+	}
+	call := rig.store.Calls[0]
+	if call.State != "blocked" || call.ErrorCode != "response_blocked" {
+		t.Fatalf("call=%+v", call)
+	}
+	if call.FirstTokenMilliseconds != 0 {
+		t.Fatalf("a blocked first byte must not record a first token: %+v", call)
+	}
+	response := firstEvent(t, rig.store.EventsOf(call.ID), auditevent.KindResponse)
+	var stored auditevent.Response
+	if err := json.Unmarshal(response, &stored); err != nil || !stored.Blocked {
+		t.Fatalf("response=%s err=%v", response, err)
+	}
+}
+
+func TestStreamReviewBlocksAShortResponse(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: testkit.ChatText("short bad")}
+	})
+	rig.store.Proj.StreamReviewBytes = 1024
+	rig.store.Proj.StreamReviewTimeoutMS = 1000
+	setPolicy(rig, blockPolicy(policy.PhaseResponse, `response.text.contains("bad")`))
+	writer := rig.send(pipeline.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello alice@example.com"}]}`)})
+	if writer.Code != http.StatusForbidden || strings.Contains(writer.Body.String(), "short bad") {
+		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
+	}
+	if call := rig.store.Calls[0]; call.State != "blocked" || call.ErrorCode != "response_blocked" || call.FirstTokenMilliseconds != 0 {
+		t.Fatalf("call=%+v", call)
+	}
+}
+
+func TestStreamReviewAllowsAndStreams(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: testkit.ChatText("safe content")}
+	})
+	rig.store.Proj.StreamReviewBytes = 4
+	rig.store.Proj.StreamReviewTimeoutMS = 1000
+	setPolicy(rig, recordPolicy(policy.PhaseResponse, "true"))
+	writer := rig.send(pipeline.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`)})
+	if writer.Code != http.StatusOK || !strings.Contains(writer.Body.String(), "safe content") {
+		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
+	}
+	call := rig.store.Calls[0]
+	if call.State != "completed" || call.FirstTokenMilliseconds == 0 {
+		t.Fatalf("call=%+v", call)
+	}
+	decisions := decisionsOf(rig, call)
+	if len(decisions) != 1 || decisions[0].Phase != policy.PhaseResponse || decisions[0].Action != policy.ActionRecord {
+		t.Fatalf("decisions=%+v", decisions)
+	}
+}
+
+func TestCommittedStreamReportsSealFailure(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: testkit.ChatText("visible")}
+	})
+	rig.store.SealError = io.ErrUnexpectedEOF
+	writer := rig.send(pipeline.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello alice@example.com"}]}`)})
+	if writer.Code != http.StatusOK || !strings.Contains(writer.Body.String(), "visible") {
+		t.Fatalf("status=%d body=%s", writer.Code, writer.Body.String())
+	}
+	if !strings.Contains(writer.Body.String(), "could not be recorded") {
+		t.Fatalf("the client must receive a terminal error frame: %s", writer.Body.String())
+	}
+}
+
+func TestBlockedParallelToolCallIsNotStoredAsDelivered(t *testing.T) {
+	rig := newRig(t, func(testkit.Received) testkit.Reply {
+		return testkit.Reply{Frames: []testkit.Frame{
+			{Data: `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"thinking"}}]}`},
+			{Data: `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"one","arguments":"{}"}},{"index":1,"id":"call_2","type":"function","function":{"name":"two","arguments":"{}"}}]}}]}`},
+			{Data: `{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}`},
+			{Data: "[DONE]"},
+		}}
+	})
+	setPolicy(rig, blockPolicy(policy.PhaseToolCall, `tool.name == "one"`))
+	writer := rig.send(pipeline.Request{Kind: "openai_chat", Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`)})
+	if writer.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
+	}
+	call := rig.store.Calls[0]
+	if call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+		t.Fatalf("call=%+v", call)
+	}
+	response := firstEvent(t, rig.store.EventsOf(call.ID), auditevent.KindResponse)
+	if strings.Contains(string(response), "call_2") || strings.Contains(string(response), "two") {
+		t.Fatalf("the held sibling must not enter the audit response: %s", response)
+	}
+	for _, event := range rig.store.EventsOf(call.ID) {
+		if event.Kind == auditevent.KindToolCall && strings.Contains(string(event.Payload), "call_2") {
+			t.Fatalf("the held sibling must not have a tool-call event: %s", event.Payload)
 		}
 	}
-	return false
 }
 
 func TestResponsePolicyBlocksJSONUpstream(t *testing.T) {
