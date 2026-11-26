@@ -27,16 +27,16 @@ func (store *Store) Statistics(ctx context.Context, projectID, window, group str
 	err := store.DB.NewRaw(`SELECT
 			count(*) AS calls,
 			count(*) FILTER (WHERE state = 'failed') AS failures,
-			count(*) FILTER (WHERE state = 'blocked') AS blocked,
+			count(*) FILTER (WHERE outcome = 'blocked') AS blocked,
 			coalesce(sum(input_tokens), 0) AS input_tokens,
 			coalesce(sum(output_tokens), 0) AS output_tokens,
-			coalesce(sum(redaction_hits), 0) AS redaction_hits,
+			coalesce(sum(redaction_values), 0) AS redaction_values,
 			count(*) FILTER (WHERE max_severity = 'high') AS high_severity,
 			coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY first_token_milliseconds) FILTER (WHERE first_token_milliseconds > 0), 0)::bigint AS first_token_p50,
 			coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_milliseconds) FILTER (WHERE first_token_milliseconds > 0), 0)::bigint AS first_token_p95,
 			coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_milliseconds) FILTER (WHERE duration_milliseconds > 0), 0)::bigint AS duration_p50,
 			coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_milliseconds) FILTER (WHERE duration_milliseconds > 0), 0)::bigint AS duration_p95
-		FROM calls WHERE project_id = ? AND created_at >= ?`, projectID, since).
+		FROM calls WHERE project_id = ? AND created_at >= ? AND lane = 'main'`, projectID, since).
 		Scan(ctx, &result.Totals)
 	if err != nil {
 		return result, err
@@ -50,13 +50,14 @@ func (store *Store) Statistics(ctx context.Context, projectID, window, group str
 			count(*) FILTER (WHERE state = 'failed') AS failures,
 			coalesce(sum(input_tokens), 0) AS input_tokens,
 			coalesce(sum(output_tokens), 0) AS output_tokens
-		FROM calls WHERE project_id = ? AND created_at >= ?
+		FROM calls WHERE project_id = ? AND created_at >= ? AND lane = 'main'
 		GROUP BY 1, 2 ORDER BY calls DESC, name LIMIT 50`, projectID, since).Scan(ctx, &result.Groups); err != nil {
 		return result, err
 	}
 	rows := []costRow{}
 	if err := store.DB.NewRaw(`SELECT `+column+` AS name, currency, sum(cost_micros) AS cost_micros
-		FROM calls WHERE project_id = ? AND created_at >= ? AND cost_micros IS NOT NULL AND currency <> ''
+		FROM calls WHERE project_id = ? AND created_at >= ? AND lane IN ('main','side')
+			AND cost_micros IS NOT NULL AND currency <> ''
 		GROUP BY 1, 2 ORDER BY 1, 2`, projectID, since).Scan(ctx, &rows); err != nil {
 		return result, err
 	}
@@ -71,7 +72,8 @@ func (store *Store) Statistics(ctx context.Context, projectID, window, group str
 		}
 	}
 	if err := store.DB.NewRaw(`SELECT currency, sum(cost_micros) AS cost_micros
-		FROM calls WHERE project_id = ? AND created_at >= ? AND cost_micros IS NOT NULL AND currency <> ''
+		FROM calls WHERE project_id = ? AND created_at >= ? AND lane IN ('main','side')
+			AND cost_micros IS NOT NULL AND currency <> ''
 		GROUP BY 1 ORDER BY 1`, projectID, since).Scan(ctx, &result.Costs); err != nil {
 		return result, err
 	}
@@ -90,13 +92,13 @@ func (store *Store) ProjectSummaries(ctx context.Context, projectIDs []string) (
 		SELECT
 			project_id,
 			count(*) AS calls_24h,
-			count(*) FILTER (WHERE state = 'blocked') AS blocked_24h,
+			count(*) FILTER (WHERE outcome = 'blocked') AS blocked_24h,
 			count(*) FILTER (WHERE state = 'failed') AS failed_24h,
 			COALESCE(EXTRACT(EPOCH FROM max(created_at)) * 1000, 0)::bigint AS last_activity_at,
 			COALESCE(sum(input_tokens), 0) AS input_tokens_24h,
 			COALESCE(sum(output_tokens), 0) AS output_tokens_24h
 		FROM calls
-		WHERE project_id IN (?) AND created_at >= ?
+		WHERE project_id IN (?) AND created_at >= ? AND lane = 'main'
 		GROUP BY project_id
 	`, bun.In(projectIDs), since).Scan(ctx, &rows); err != nil {
 		return nil, err

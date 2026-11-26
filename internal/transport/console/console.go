@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
+	control "github.com/yv1ing/SafeAgent/internal/service/control"
+	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
 )
 
 // unlogged lists changes that are not worth an operation log entry: the rule tester changes nothing.
@@ -22,9 +24,23 @@ const (
 	sessionLifetime = 7 * 24 * time.Hour
 )
 
-// Services is the application-service container shared with the transport. The alias keeps the
-// router's field access unchanged while the service layer owns the construction.
-type Services = service.Services
+// Services is the set of use cases this transport exposes. The composition root builds it; the
+// transport never constructs a service, so the wiring stays in one place.
+type Services struct {
+	Account    *service.AccountService
+	Project    *service.ProjectService
+	Control    *control.Service
+	Key        *service.KeyService
+	Rule       *service.RuleService
+	Calls      *service.CallService
+	Stats      *service.StatsService
+	Operations *service.OperationService
+	Analysis   *diagnosis.Service
+	Policy     *service.PolicyService
+	Monitor    *service.MonitorService
+	Trajectory *service.TrajectoryService
+	Redaction  *service.RedactionService
+}
 
 type Options struct {
 	SecureCookies bool
@@ -69,13 +85,17 @@ func (console *Console) register() {
 	console.registerUsers()
 	console.registerProjects()
 	console.registerMembers()
+	console.registerProviders()
 	console.registerModels()
 	console.registerChannels()
 	console.registerKeys()
 	console.registerModelRoutes()
+	console.registerConfiguration()
 	console.registerRules()
 	console.registerCalls()
 	console.registerConversations()
+	console.registerTrajectory()
+	console.registerRedactions()
 	console.registerStats()
 	console.registerOperations()
 	console.registerPolicies()

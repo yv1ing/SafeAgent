@@ -4,20 +4,22 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/observation"
-	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
-	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
 // call carries everything one client call needs from admission to its terminal state.
@@ -31,7 +33,7 @@ type call struct {
 	writer        Writer
 	request       *model.Request
 	identity      *Identity
-	targets       []routing.Target
+	lane          classify.Lane
 	endpoints     map[string]endpoint
 	available     channels
 	candidates    []routing.Candidate
@@ -44,12 +46,15 @@ type call struct {
 	started       time.Time
 	stickyKey     string
 	release       func()
-	hits          []redact.Hit
-	redacted      int
-	attempts      int
-	parent        *entity.Call
-	parentSource  string
-	offset        int
+	callHits      []auditevent.Hit
+	// redactedOccurrences counts every redaction applied to the forwarded request, including the
+	// ones relocated to ancestor items. Raw pass-through is only safe when it is zero.
+	redactedOccurrences int
+	origins             []observation.Locator
+	attempts            int
+	parent              *entity.Call
+	parentSource        string
+	offset              int
 	// client is the request as the client sent it; analysis and fingerprints are taken from it,
 	// never from the redacted copy that goes upstream.
 	client          *model.Request
@@ -62,7 +67,7 @@ type call struct {
 	sessionSource   string
 	explicitSession string
 	sessionConflict *model.Error
-	unsealed        bool
+	hasSignatures   bool
 	reviewBytes     int
 	reviewTimeout   time.Duration
 	reviewBlocked   bool
@@ -89,8 +94,8 @@ func requestHasSignature(request *model.Request) bool {
 	return false
 }
 
-// admit authenticates, decodes, redacts, analyzes, routes, rate-limits and records the call. A
-// non-nil state with a refusal means the call was already recorded as rejected.
+// admit authenticates, decodes, classifies, redacts, analyzes, routes, rate-limits and records the
+// call. A non-nil state with a refusal means the call was already recorded as rejected.
 func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Writer) (*call, *model.Error) {
 	started := time.Now()
 	identity, denied := pipeline.Authenticate(ctx, BearerToken(input.Header, input.QueryKey))
@@ -136,12 +141,18 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	if request.Stream {
 		transport = "sse"
 	}
+	operation := input.Operation
+	if !operation.Valid() {
+		operation = classify.Generation
+	}
+	classification := classify.Classify(operation, requestHints(input.Header, request))
 	state := &call{
 		ctx: ctx, pipeline: pipeline, kind: input.Kind, coder: coder, peer: peer, salt: salt, writer: writer,
 		request: request, identity: identity, started: started, release: func() {}, clientHeader: input.Header,
-		body: input.Body, stream: request.Stream, unsealed: len(unsealLosses) > 0 || requestHasSignature(request),
+		body: input.Body, stream: request.Stream, hasSignatures: len(unsealLosses) > 0 || requestHasSignature(request),
 		explicitSession: explicitSession, reviewBytes: identity.Project.StreamReviewBytes,
 		reviewTimeout: time.Duration(identity.Project.StreamReviewTimeoutMS) * time.Millisecond,
+		lane:          classification.Lane,
 	}
 	compiled, version, err := pipeline.compiledPolicy(ctx, identity.Project.ID)
 	if err != nil {
@@ -151,11 +162,13 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	state.compiled, state.policyVersion = compiled, version
 	record := &entity.Call{
 		ID: callID, ProjectID: identity.Project.ID, AgentKeyID: identity.AgentKey.ID,
-		ClientFormat: string(input.Kind), Kind: string(input.Kind), ClientTransport: transport,
-		PublicModel: request.Model, State: "running", Stream: request.Stream,
-		AnalysisState: "pending", CreatedAt: started,
+		ClientFormat: string(input.Kind), Operation: classification.Operation,
+		Purpose: classification.Purpose, PurposeSource: classification.PurposeSource, Lane: classification.Lane,
+		ClientTransport: transport, PublicModel: request.Model, State: "running", Stream: request.Stream,
+		AnalysisState: analysisStateOf(classification.Lane), CreatedAt: started, UpdatedAt: started,
 	}
 	state.recorder = NewRecorder(pipeline.repository, pipeline.logger, pipeline.secret, record)
+	state.origins = nil
 
 	release, err := pipeline.limiter.Acquire(
 		limit.Scoped{Scope: "project:" + identity.Project.ID, Limit: limit.Limit{RequestsPerMinute: identity.Project.RequestsPerMinute, Concurrency: identity.Project.Concurrency}},
@@ -170,19 +183,22 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	// stored again.
 	offset := 0
 	var parent *entity.Call
-	if request.PreviousResponseID != "" {
+	if classification.Lane.Conversational() && request.PreviousResponseID != "" {
+		var origins []observation.Locator
 		var refusal *model.Error
-		if parent, offset, refusal = pipeline.attachHistory(ctx, identity.AgentKey.ID, request); refusal != nil {
+		if parent, offset, origins, refusal = pipeline.attachHistory(ctx, identity.AgentKey.ID, request); refusal != nil {
 			release()
 			return nil, refusal
 		}
 		state.historyExpanded = true
 		state.parentSource = "previous_response"
+		state.origins = origins
 	}
-	if parent == nil {
-		if linked, prefix, source := pipeline.link(ctx, identity, request); linked != nil {
+	if parent == nil && classification.Lane.Conversational() {
+		if linked, origins, prefix, source := pipeline.link(ctx, identity, request); linked != nil {
 			if explicitSession == "" || linked.SessionID == explicitSession {
 				parent, offset, state.parentSource = linked, prefix, source
+				state.origins = origins
 			}
 		}
 	}
@@ -190,7 +206,7 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 		if state.parentSource == "previous_response" {
 			state.sessionConflict = failure("invalid_request", model.ClassInvalid, "session_conflict", "The previous response belongs to a different session.", http.StatusConflict)
 		} else {
-			parent, offset, state.parentSource = nil, 0, ""
+			parent, offset, state.parentSource, state.origins = nil, 0, "", nil
 		}
 	}
 	state.parent, state.offset = parent, offset
@@ -204,25 +220,94 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 	return state, nil
 }
 
+// analysisStateOf is the initial diagnosis projection of a lane. Only a main call is queued for
+// analysis; side calls are counted in traffic but never diagnosed.
+func analysisStateOf(lane classify.Lane) string {
+	if lane.Analyzed() {
+		return "pending"
+	}
+	return "skipped"
+}
+
+// requestHints gathers the request facts the classifier may read. The prompt is the leading
+// system or user text, lowercased and bounded so the inference stays cheap.
+func requestHints(header http.Header, request *model.Request) classify.Hints {
+	return classify.Hints{
+		Header:          header,
+		ToolCount:       len(request.Tools),
+		MaxOutputTokens: request.MaxOutputTokens,
+		Prompt:          promptHint(request),
+	}
+}
+
+const promptHintBytes = 512
+
+func promptHint(request *model.Request) string {
+	text := request.Instructions
+	if text == "" {
+		text = request.User
+	}
+	if text == "" {
+		text = firstConversationText(request.Items)
+	}
+	return strings.ToLower(truncateBytes(text, promptHintBytes))
+}
+
+// truncateBytes clips a hint at a UTF-8 boundary so lower-casing cannot see an invalid sequence.
+func truncateBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+func firstConversationText(items []model.Item) string {
+	for _, item := range items {
+		if item.Kind != model.ItemMessage {
+			continue
+		}
+		if item.Role != model.RoleSystem && item.Role != model.RoleDeveloper && item.Role != model.RoleUser {
+			continue
+		}
+		for _, part := range item.Parts {
+			if part.Text != "" {
+				return part.Text
+			}
+		}
+	}
+	return ""
+}
+
 func (state *call) open() *model.Error {
 	record := state.recorder.Call()
 	record.MessageOffset = state.offset
-	if state.parent != nil {
-		record.ParentCallID = state.parent.ID
-		record.SessionID = state.parent.SessionID
+	if state.lane.Conversational() {
+		if state.parent != nil {
+			record.ParentCallID = state.parent.ID
+			record.SessionID = state.parent.SessionID
+		}
+		if state.explicitSession != "" {
+			record.SessionID = state.explicitSession
+			state.sessionSource = "explicit"
+		} else if state.parent != nil {
+			state.sessionSource = state.parentSource
+		}
+		if record.SessionID == "" {
+			record.SessionID = record.ID
+			state.sessionSource = "call_id"
+		}
+		state.stickyKey = record.SessionID
+	} else {
+		record.SessionID = ""
+		record.ParentCallID = ""
+		state.sessionSource = ""
+		state.stickyKey = ""
 	}
-	if state.explicitSession != "" {
-		record.SessionID = state.explicitSession
-		state.sessionSource = "explicit"
-	} else if state.parent != nil {
-		state.sessionSource = state.parentSource
-	}
-	if record.SessionID == "" {
-		record.SessionID = record.ID
-		state.sessionSource = "call_id"
-	}
-	state.stickyKey = record.SessionID
-	if state.kind == model.Responses {
+	if state.kind == model.Responses && state.lane.Conversational() {
 		record.ResponseID = model.ResponseID(state.kind, record.ID, "")
 	}
 	if err := state.recorder.Open(state.ctx); err != nil {
@@ -256,10 +341,14 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 	state.redactionRules = rules
 	result, err := state.scope.ApplyRequest(request)
 	if result != nil {
-		state.hits = result.Hits
-		state.redacted = result.Values()
+		state.callHits = state.storedHits(result)
+		state.redactedOccurrences = len(result.Hits)
+		applyRedactionSummary(state.recorder.Call(), state.callHits)
+	} else {
+		state.callHits = nil
+		state.redactedOccurrences = 0
+		applyRedactionSummary(state.recorder.Call(), nil)
 	}
-	state.recorder.Call().RedactionHits = state.redacted
 	if err != nil {
 		state.recordRequest(original, nil)
 		state.recordRedactionBlock("redaction_immutable", "Sensitive content appears in a position that cannot be rewritten safely.")
@@ -289,24 +378,20 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 		}
 	}
 
-	targets, endpoints, available, routeKind, err := pipeline.resolve(state.ctx, identity.Project.ID, request.Model, state.kind)
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
-		pipeline.logger.Error("routes could not be read", "error", err)
-		return internal("store_failure", "The model routes could not be loaded.")
+	plan, failure := pipeline.routeFor(state.ctx, identity.Project.ID, request.Model, state.lane, state.clientHeader, state.kind, entity.ModelGeneration)
+	if plan.resolution.Route.ID != "" {
+		pipeline.recordRouting(state.recorder, plan, request.Model)
+		state.endpoints, state.available = plan.endpoints, plan.available
 	}
-	if err != nil || len(targets) == 0 {
-		return failure("invalid_request", model.ClassInvalid, "model_not_found", "The model is not configured for this project.", http.StatusNotFound)
+	if failure != nil {
+		return failure
 	}
-	if routeKind != string(entity.ModelGeneration) {
-		return failure("invalid_request", model.ClassInvalid, "model_kind_mismatch", "The model is not a generation model.", http.StatusUnprocessableEntity)
-	}
-	if request.ChoiceCount > 1 && (!state.stream || len(state.hits) > 0 || state.historyExpanded || !state.hasSameFormat(targets)) {
+	if request.ChoiceCount > 1 && (!state.stream || state.redactedOccurrences > 0 || state.historyExpanded || !state.hasSameFormat(plan.targets)) {
 		return model.UnsupportedFeature("unsupported_multi_choice", "Multiple candidates are available only through a same-format channel without redaction or history expansion.")
 	}
-	state.targets, state.endpoints, state.available = targets, endpoints, available
-	state.candidates = pipeline.selector.Plan(targets, available.keys, state.stickyKey, string(state.kind))
+	state.candidates = pipeline.selector.Plan(plan.targets, plan.available.keys, state.stickyKey, string(state.kind))
 	if len(state.candidates) == 0 {
-		return failure("upstream_failure", model.ClassNoChannel, "no_available_channel", "No channel is available for this model.", http.StatusServiceUnavailable)
+		return unavailableChannel()
 	}
 
 	state.estimate = estimateTokens(request)
@@ -315,7 +400,7 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 		return internal("quota_unavailable", "The token quota is unavailable.")
 	}
 	if !allowed {
-		return failure("rate_limited", model.ClassRateLimit, "daily_quota_exceeded", "The daily token quota has been exhausted.", http.StatusTooManyRequests)
+		return quotaExceeded()
 	}
 	state.day = day
 	state.reserved = true
@@ -335,42 +420,39 @@ func (state *call) hasSameFormat(targets []routing.Target) bool {
 
 // observeOptions builds the adapter configuration shared by every online evaluation. The redactor
 // uses the same scope as the request walker, so placeholders in the shown view match what the
-// upstream received.
-func (state *call) observeOptions() observe.Options {
+// upstream received. The call id is the identity of every item this call adds; Origins carries the
+// call and ordinal of the history prefix an expanded request already holds.
+func (state *call) observeOptions() adapter.Options {
 	principal := observation.Principal{
 		ProjectID: state.identity.Project.ID, AgentKeyID: state.identity.AgentKey.ID,
 		TrustLevel: state.identity.AgentKey.TrustLevel, Role: state.identity.AgentKey.Role,
 	}
-	return observe.Options{
+	return adapter.Options{
 		TraceID:   state.recorder.Call().ID,
+		CallID:    state.recorder.Call().ID,
+		Origins:   state.origins,
 		Principal: principal,
-		Redactor:  state.redactor(),
+		Redactor:  adapter.ScopeRedactor(state.scope),
 	}
 }
 
-func (state *call) redactor() observe.Redactor {
-	return func(text, path string) (string, []observation.Span) {
-		if state.scope == nil {
-			return text, nil
+// redactor is the online side of the one redaction-to-observation bridge. A nil scope keeps the
+// views identical, matching a project without redaction rules.
+func (state *call) redactor() adapter.Redactor {
+	redactor := adapter.ScopeRedactor(state.scope)
+	if redactor == nil {
+		return func(text, _ string) observation.Value {
+			return observation.NewValue(text, text, nil, nil)
 		}
-		shown, result := state.scope.Replace(text, path)
-		if result == nil {
-			return shown, nil
-		}
-		if result.Blocked {
-			return "[blocked]", []observation.Span{{Start: 0, End: len(text), Label: "blocked"}}
-		}
-		spans := make([]observation.Span, 0, len(result.Hits))
-		for _, hit := range result.Hits {
-			spans = append(spans, observation.Span{Start: hit.Start, End: hit.End, Label: hit.Label, Secret: hit.Secret})
-		}
-		return shown, spans
 	}
+	return redactor
 }
 
-// baseTrace is the client request as an observation; online phases append their items to it.
+// baseTrace is the client request as an observation; online phases append their items to it. The
+// adapter, the identities and the shown ranges are the same ones the replay path builds, so an
+// online verdict and a stored finding describe the same node.
 func (state *call) baseTrace() *observation.Trace {
-	trace := observe.Request(state.client, state.observeOptions())
+	trace := adapter.Request(state.client, state.observeOptions())
 	if trace.PreviousCallID == "" && state.parent != nil {
 		trace.PreviousCallID = state.parent.ID
 	}
@@ -423,7 +505,7 @@ func (state *call) recordRequest(original *model.Request, losses []model.Loss) {
 	offset := min(state.offset, len(original.Items))
 	record := auditevent.Request{
 		Items: original.Items[offset:], Params: params, Tools: original.Tools,
-		Hits: nonNil(state.hits), Ledger: model.Ledger{Losses: losses}, SessionSource: state.sessionSource,
+		Hits: nonNil(state.callHits), Ledger: model.Ledger{Losses: losses}, SessionSource: state.sessionSource,
 		Principal: &auditevent.Principal{AgentKeyID: state.identity.AgentKey.ID, Role: state.identity.AgentKey.Role, TrustLevel: state.identity.AgentKey.TrustLevel},
 	}
 	state.recorder.Event(auditevent.KindRequest, record)

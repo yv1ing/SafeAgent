@@ -1,67 +1,40 @@
-import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
-import { useListProviders } from '../../../api/generated/providers/providers';
-import type { ConsoleChannelInput } from '../../../api/generated/models';
+import type { ConsoleChannelInput, ConsoleProviderView } from '../../../api/generated/models';
 import { Field } from '../../../components/form/Field';
-import { Button } from '../../../components/ui/button';
+import { Badge } from '../../../components/ui/badge';
 import { Input, IntegerInput } from '../../../components/ui/input';
 import { Select } from '../../../components/ui/select';
 import { Switch } from '../../../components/ui/switch';
 import { useLocale } from '../../../i18n';
-
-const options = (values: string[]) => values.map((value) => ({ value, label: value }));
+import {
+  catalogNeedsHost,
+  endpointHosts,
+  parseEndpointCatalog,
+  providerFormats,
+} from '../../providers/endpoints';
 
 export function ChannelFields({
   draft,
+  providers,
+  editing = false,
+  basic = false,
   onChange,
-  basic,
 }: {
   draft: ConsoleChannelInput;
-  onChange: (draft: ConsoleChannelInput) => void;
+  providers: ConsoleProviderView[];
+  editing?: boolean;
   basic?: boolean;
+  onChange: (draft: ConsoleChannelInput) => void;
 }) {
   const { t } = useLocale();
-  const providers = useListProviders();
-  const catalog = providers.data ?? [];
-  const selected = catalog.find((provider) => provider.id === draft.provider_id);
-  const formats = selected?.formats ?? [];
-  const endpoints = draft.endpoints ?? [];
+  const provider = providers.find((entry) => entry.id === draft.provider_id);
+  const catalog = parseEndpointCatalog(provider?.endpoints);
+  const formats = catalog ? providerFormats(catalog) : (provider?.formats ?? []);
+  const needsHost = catalog ? catalogNeedsHost(catalog) : false;
+  const hosts = catalog ? endpointHosts(catalog) : [];
   const set = (patch: Partial<ConsoleChannelInput>) => onChange({ ...draft, ...patch });
-  const selectProvider = (providerID: string) => {
-    const provider = catalog.find((entry) => entry.id === providerID);
-    const format = provider?.formats?.[0];
-    set({
-      provider_id: providerID,
-      endpoints: format ? [{ format, base_url: '', path: '' }] : [],
-      model_ids: [],
-    });
-  };
-  const updateEndpoint = (
-    index: number,
-    patch: Partial<ConsoleChannelInput['endpoints'][number]>,
-  ) =>
-    set({
-      endpoints: endpoints.map((endpoint, position) =>
-        position === index ? { ...endpoint, ...patch } : endpoint,
-      ),
-    });
-  const moveEndpoint = (index: number, direction: -1 | 1) => {
-    const next = [...endpoints];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    set({ endpoints: next });
-  };
-  const removeEndpoint = (index: number) =>
-    set({ endpoints: endpoints.filter((_, position) => position !== index) });
-  const addEndpoint = () => {
-    const format = formats.find(
-      (candidate) => !endpoints.some((endpoint) => endpoint.format === candidate),
-    );
-    if (format) set({ endpoints: [...endpoints, { format, base_url: '', path: '' }] });
-  };
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Field label={t.common.name}>
+      <Field label={t.channels.name}>
         {(id) => (
           <Input
             id={id}
@@ -75,98 +48,41 @@ export function ChannelFields({
         {(id) => (
           <Select
             id={id}
-            value={draft.provider_id ?? ''}
-            disabled={!basic}
-            options={catalog.map((provider) => ({
-              value: provider.id,
-              label: provider.label ?? provider.id,
+            value={draft.provider_id}
+            disabled={editing}
+            options={providers.map((entry) => ({
+              value: entry.id,
+              label: `${entry.label} · ${t.providers.sources[entry.source]}`,
             }))}
-            onValueChange={selectProvider}
+            onValueChange={(providerId) => set({ provider_id: providerId })}
           />
         )}
       </Field>
-      <fieldset className="md:col-span-2">
-        <legend className="mb-1.5 text-xs font-medium text-muted">{t.channels.formats}</legend>
-        <div className="grid grid-cols-12 gap-2 text-xs text-faint" aria-hidden>
-          <span className="col-span-3">{t.channels.format}</span>
-          <span className="col-span-4">{t.channels.baseUrl}</span>
-          <span className="col-span-3">{t.channels.path}</span>
-          <span className="col-span-2" />
-        </div>
-        <div className="mt-1 flex flex-col gap-2">
-          {endpoints.map((endpoint, index) => (
-            <div key={`${endpoint.format}-${index}`} className="grid grid-cols-12 gap-2">
-              <Select
-                className="col-span-3 font-mono"
-                aria-label={t.channels.format}
-                value={endpoint.format}
-                options={options(
-                  formats.filter(
-                    (candidate) =>
-                      candidate === endpoint.format ||
-                      !endpoints.some(
-                        (other, position) => position !== index && other.format === candidate,
-                      ),
-                  ),
-                )}
-                onValueChange={(format) => updateEndpoint(index, { format })}
-              />
-              <Input
-                className="col-span-4 font-mono"
-                type="url"
-                aria-label={t.channels.baseUrl}
-                placeholder={selected?.hosts?.[endpoint.format] ?? 'https://api.example.com'}
-                required={selected?.custom}
-                value={endpoint.base_url ?? ''}
-                onChange={(event) => updateEndpoint(index, { base_url: event.target.value })}
-              />
-              <Input
-                className="col-span-3 font-mono"
-                aria-label={t.channels.path}
-                placeholder="/v1/..."
-                value={endpoint.path ?? ''}
-                onChange={(event) => updateEndpoint(index, { path: event.target.value })}
-              />
-              <div className="col-span-2 flex justify-end gap-0.5">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t.channels.moveUp}
-                  disabled={index === 0}
-                  onClick={() => moveEndpoint(index, -1)}
-                >
-                  <ArrowUp aria-hidden />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t.channels.moveDown}
-                  disabled={index === endpoints.length - 1}
-                  onClick={() => moveEndpoint(index, 1)}
-                >
-                  <ArrowDown aria-hidden />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t.channels.removeEndpoint}
-                  disabled={endpoints.length === 1}
-                  onClick={() => removeEndpoint(index)}
-                >
-                  <X aria-hidden />
-                </Button>
-              </div>
-            </div>
+      <Field
+        label={t.channels.baseUrl}
+        hint={needsHost ? t.channels.baseUrlRequired : t.channels.baseUrlOptional}
+        className="md:col-span-2"
+      >
+        {(id) => (
+          <Input
+            id={id}
+            type="url"
+            className="font-mono"
+            placeholder={hosts[0] ?? 'https://api.example.com'}
+            value={draft.base_url ?? ''}
+            onChange={(event) => set({ base_url: event.target.value })}
+          />
+        )}
+      </Field>
+      <div className="md:col-span-2">
+        <p className="mb-1.5 text-xs font-medium text-muted">{t.channels.formats}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {formats.map((format) => (
+            <Badge key={format}>{format}</Badge>
           ))}
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <p className="text-xs text-faint">{t.channels.formatsHint}</p>
-          <Button size="sm" onClick={addEndpoint} disabled={endpoints.length >= formats.length}>
-            <Plus aria-hidden />
-            {t.channels.addEndpoint}
-          </Button>
-        </div>
-      </fieldset>
+        <p className="mt-1 text-xs text-faint">{t.channels.formatsProviderHint}</p>
+      </div>
       {!basic && (
         <>
           <Field label={t.channels.timeout} hint={t.channels.timeoutHint}>
@@ -196,11 +112,7 @@ export function ChannelFields({
               />
             )}
           </Field>
-          <Field
-            label={t.channels.forwardHeaders}
-            hint={t.channels.forwardHeadersHint}
-            className="md:col-span-2"
-          >
+          <Field label={t.channels.forwardHeaders} hint={t.channels.forwardHeadersHint}>
             {(id) => (
               <Input
                 id={id}

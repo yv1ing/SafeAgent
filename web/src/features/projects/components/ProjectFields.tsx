@@ -1,6 +1,8 @@
+import type { ConsoleRouteView } from '../../../api/generated/models';
 import { useLocale } from '../../../i18n';
 import { Field } from '../../../components/form/Field';
 import { Input, IntegerInput } from '../../../components/ui/input';
+import { Select } from '../../../components/ui/select';
 
 export interface ProjectDraft {
   name: string;
@@ -11,16 +13,20 @@ export interface ProjectDraft {
   default_max_output_tokens: number;
   stream_review_bytes: number;
   stream_review_timeout_ms: number;
+  auxiliary_retention_days: number;
+  default_route_id: string;
 }
 
 export function ProjectFields({
   draft,
   onChange,
   limitsReadOnly = false,
+  routes = [],
 }: {
   draft: ProjectDraft;
   onChange: (draft: ProjectDraft) => void;
   limitsReadOnly?: boolean;
+  routes?: ConsoleRouteView[];
 }) {
   const { t } = useLocale();
   const set = (patch: Partial<ProjectDraft>) => onChange({ ...draft, ...patch });
@@ -44,6 +50,31 @@ export function ProjectFields({
             value={draft.retention_days}
             disabled={limitsReadOnly}
             onValueChange={(retention_days) => set({ retention_days })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.auxiliaryRetention} hint={t.projects.auxiliaryRetentionHint}>
+        {(id) => (
+          <IntegerInput
+            id={id}
+            min={0}
+            value={draft.auxiliary_retention_days}
+            disabled={limitsReadOnly}
+            onValueChange={(auxiliary_retention_days) => set({ auxiliary_retention_days })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.defaultRoute} hint={t.projects.defaultRouteHint}>
+        {(id) => (
+          <Select
+            id={id}
+            value={draft.default_route_id}
+            disabled={limitsReadOnly}
+            options={[
+              { value: '', label: t.projects.defaultRouteNone },
+              ...routes.map((route) => ({ value: route.id, label: route.name })),
+            ]}
+            onValueChange={(default_route_id) => set({ default_route_id })}
           />
         )}
       </Field>

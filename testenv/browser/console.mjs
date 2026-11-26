@@ -1,21 +1,156 @@
-// Browser acceptance for the operator console: every page renders without a client error or a
-// failed API call, and the primary CRUD paths persist through the API.
+// Browser acceptance for the operator console.
+//
+// One browser session drives the current console against a live lab gateway:
+//   - every page must render an <h1>, without a client error and without a failed API call;
+//   - desktop flows create and remove a project, a provider graph, keys, policies, redaction rules,
+//     users and members through the UI, and soft-delete/restore the graph again;
+//   - traffic-dependent checks (call filters, call detail, conversations, trajectory, risk rows) are
+//     skipped with a clear log line when the lab has no calls, so the suite runs with and without
+//     upstream credentials;
+//   - screenshots are written for every page and flow;
+//   - page errors, console errors and failed API responses are aggregated into the exit status.
+//
+// Required environment:
+//   SAFEAGENT_BASE_URL          gateway origin (default http://host.docker.internal:8080)
+//   SAFEAGENT_ADMIN_PASSWORD    administrator password
+//   SAFEAGENT_PROJECT           id of an existing lab project used for traffic checks and pages
+// Optional environment:
+//   SAFEAGENT_ADMIN_NEW_PASSWORD  new password used when the administrator must change the password
+//                                 at sign-in; the suite completes the change and continues
+//   SAFEAGENT_SCREENSHOTS         screenshot directory (default /screenshots)
+//
+// Every created name carries one timestamp stamp, so the run is deterministic and safe to repeat
+// against a lab that already holds data from an earlier run.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 
-const base = process.env.SAFEAGENT_BASE_URL ?? 'http://host.docker.internal:8080';
+const base = (process.env.SAFEAGENT_BASE_URL ?? 'http://host.docker.internal:8080').replace(
+  /\/+$/,
+  '',
+);
 const consoleBase = `${base}/console`;
 const password = process.env.SAFEAGENT_ADMIN_PASSWORD;
-const project = process.env.SAFEAGENT_PROJECT;
-const shots = '/screenshots';
-if (!password || !project) {
+const nextAdminPassword = process.env.SAFEAGENT_ADMIN_NEW_PASSWORD;
+const labProjectId = process.env.SAFEAGENT_PROJECT;
+const shots = process.env.SAFEAGENT_SCREENSHOTS ?? '/screenshots';
+if (!password || !labProjectId) {
   console.error('SAFEAGENT_ADMIN_PASSWORD and SAFEAGENT_PROJECT are required');
   process.exit(2);
 }
 fs.mkdirSync(shots, { recursive: true });
 
+// Console copy read from the English i18n dictionary. The suite runs in the English locale except
+// for the language-switch check, so every label here exists in web/src/i18n/messages.ts.
+const L = {
+  acknowledge: 'I understand the consequences.',
+  addAlias: 'Add alias',
+  addMember: 'Add member',
+  alias: 'Alias',
+  apiKey: 'API key',
+  auxiliaryRetention: 'Auxiliary retention (days)',
+  baseUrl: 'Base URL',
+  blocked: 'Blocked',
+  calls: 'Calls',
+  check: 'Check',
+  clearFilters: 'Clear filters',
+  closeInspector: 'Close inspector',
+  completed: 'Completed',
+  connect: 'Connect provider',
+  connectAndDiscover: 'Connect and discover',
+  connected: 'Connected',
+  create: 'Create',
+  createProjectRoute: 'Create a project route',
+  currentPassword: 'Current password',
+  customProvider: 'Custom provider',
+  dark: 'Dark',
+  defaultOutputLimit: 'Default output limit',
+  defaultRoute: 'Default route',
+  delete: 'Delete',
+  deletion: 'Deletion',
+  edit: 'Edit',
+  endpointCatalog: 'Endpoint catalog',
+  failures: 'Failures',
+  finishSetup: 'Finish setup',
+  flat: 'Flat',
+  graphView: 'Graph view',
+  highFindings: 'High-severity calls',
+  highSeverity: 'High',
+  label: 'Label',
+  language: 'Language',
+  lane: 'Lane',
+  last24Hours: 'Last 24 hours',
+  last7Days: 'Last 7 days',
+  light: 'Light',
+  loadFailed: 'The page could not be loaded.',
+  main: 'Main',
+  mainLaneNote: 'only count main-lane calls',
+  minimumSeverity: 'Minimum severity',
+  modelNames: 'Model names',
+  name: 'Name',
+  newKey: 'New key',
+  newPassword: 'New password',
+  newProject: 'New project',
+  newRule: 'New rule',
+  newUser: 'New user',
+  next: 'Next',
+  nextStep: 'Next step',
+  noAuditEvents: 'No audit events were recorded.',
+  noCalls: 'No calls recorded.',
+  noConversations: 'No conversations recorded.',
+  noData: 'No data in this window.',
+  noFindings: 'No findings in this window.',
+  noRedactedValues: 'No redacted values in this conversation.',
+  noRedactions: 'This call introduced no redacted values.',
+  noResults: 'No results match these filters.',
+  openNavigation: 'Open navigation',
+  operation: 'Operation',
+  outcome: 'Outcome',
+  password: 'Password',
+  pattern: 'Pattern',
+  policyActive: 'The policy is active.',
+  policyDocument: 'Policy document',
+  policyRestored: 'The earlier version is active again.',
+  policyValid: 'The document is valid.',
+  previousStep: 'Previous step',
+  project: 'Project',
+  purpose: 'Purpose',
+  raw: 'Raw',
+  redactedValues: 'Redacted values',
+  regularExpression: 'Regular expression',
+  remove: 'Remove',
+  requestsMainLane: 'Requests (main lane)',
+  restore: 'Restore',
+  riskSources: 'Risk sources',
+  ruleTest: 'Rule to test',
+  sampleText: 'Sample text',
+  save: 'Save',
+  saveAndActivate: 'Save and activate',
+  secretStored: 'Secret stored',
+  selectAll: 'Select all',
+  showAuxiliary: 'Show auxiliary calls',
+  showDeleted: 'Show deleted',
+  showInOriginal: 'Show in original',
+  shown: 'Shown',
+  signIn: 'Sign in',
+  state: 'State',
+  succeeded: 'Succeeded',
+  theme: 'Theme',
+  timeWindow: 'Time window',
+  transcriptText: 'Transcript text',
+  tree: 'Tree',
+  type: 'Type',
+  updatePassword: 'Update password',
+  user: 'User',
+  username: 'Username',
+  view: 'View',
+  changesSaved: 'Changes saved.',
+};
+
 const stamp = Date.now();
 const failures = [];
+let recording = false;
+const allowedResponses = [];
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
@@ -23,38 +158,67 @@ const context = await browser.newContext({
   locale: 'en-US',
 });
 const page = await context.newPage();
-let recording = false;
-page.on('pageerror', (error) => failures.push(`pageerror: ${error.message}`));
-page.on('console', (message) => {
-  if (recording && message.type() === 'error') failures.push(`console: ${message.text()}`);
-});
-page.on('response', (response) => {
-  if (!recording) return;
-  const url = response.url();
-  if (response.status() >= 400 && !url.includes('/favicon')) {
-    failures.push(`http ${response.status()}: ${url}`);
-  }
-});
+
+function watch(target, prefix = '') {
+  target.on('pageerror', (error) => failures.push(`${prefix}pageerror: ${error.message}`));
+  target.on('console', (message) => {
+    if (recording && message.type() === 'error') {
+      failures.push(`${prefix}console: ${message.text()}`);
+    }
+  });
+  target.on('response', (response) => {
+    if (!recording) return;
+    const status = response.status();
+    const url = response.url();
+    if (status < 400 || url.includes('/favicon')) return;
+    const index = allowedResponses.findIndex(
+      (entry) => entry.status === status && url.includes(entry.urlPart),
+    );
+    if (index >= 0) {
+      allowedResponses.splice(index, 1);
+      return;
+    }
+    failures.push(`${prefix}http ${status}: ${url}`);
+  });
+}
+
+watch(page);
 
 async function shot(name, fullPage = true) {
   await page.screenshot({ path: `${shots}/${name}.png`, fullPage });
 }
 
-async function waitForPage() {
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(700);
-  const errorBoundary = await page.getByText(/something went wrong|出了点问题|加载失败/i).count();
-  if (errorBoundary) failures.push(`error boundary on ${page.url()}`);
+async function bodyText() {
+  return page.locator('body').innerText();
 }
 
-async function api(path, method = 'GET', data) {
-  const response = await page.request.fetch(`${consoleBase}/api${path}`, {
-    method,
-    headers: { 'X-SafeAgent-Request': '1', Origin: base, 'Content-Type': 'application/json' },
-    data: data === undefined ? undefined : JSON.stringify(data),
-  });
-  if (!response.ok()) throw new Error(`${method} ${path} -> HTTP ${response.status()}`);
-  return response.status() === 204 ? null : response.json();
+function requireValue(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function waitForPage() {
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await page.waitForSelector('main h1', { timeout: 20_000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(150);
+  const text = await bodyText();
+  if (text.includes(L.loadFailed) || text.includes('页面加载失败')) {
+    throw new Error(`error boundary on ${page.url()}`);
+  }
+  if (text.trim().length < 40) throw new Error(`empty page at ${page.url()}`);
+  const heading = await page
+    .locator('main h1')
+    .first()
+    .textContent()
+    .catch(() => null);
+  if (!heading || !heading.trim()) throw new Error(`no h1 at ${page.url()}`);
+}
+
+async function goto(path) {
+  const response = await page.goto(consoleBase + path, { waitUntil: 'domcontentloaded' });
+  await waitForPage();
+  if (response && response.status() >= 400)
+    throw new Error(`HTTP ${response.status()} for ${path}`);
 }
 
 async function step(name, run) {
@@ -62,610 +226,1074 @@ async function step(name, run) {
     await run();
   } catch (error) {
     failures.push(`${name}: ${error.message}`);
+    await shot(`failure-${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`, false).catch(() => {});
   }
 }
 
-function requireValue(condition, message) {
-  if (!condition) throw new Error(message);
+function allowResponse(status, urlPart) {
+  allowedResponses.push({ status, urlPart });
+}
+
+async function api(path, method = 'GET', data, options = {}) {
+  const url = `${consoleBase}/api${path}`;
+  if (options.expectStatus) allowResponse(options.expectStatus, url);
+  const response = await page.request.fetch(url, {
+    method,
+    headers: {
+      'X-SafeAgent-Request': '1',
+      Origin: base,
+      'Content-Type': 'application/json',
+    },
+    data: data === undefined ? undefined : JSON.stringify(data),
+  });
+  const text = await response.text();
+  const body = text === '' ? null : JSON.parse(text);
+  if (options.expectStatus) {
+    const stale = allowedResponses.findIndex((entry) => entry.status === options.expectStatus);
+    if (stale >= 0) allowedResponses.splice(stale, 1);
+    if (response.status() !== options.expectStatus) {
+      throw new Error(
+        `${method} ${path} -> HTTP ${response.status()} (expected ${options.expectStatus})`,
+      );
+    }
+    return body;
+  }
+  if (!response.ok()) {
+    throw new Error(`${method} ${path} -> HTTP ${response.status()} ${text.slice(0, 200)}`);
+  }
+  return body;
+}
+
+async function waitForApi(loader, predicate, description, attempts = 75) {
+  let value;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    value = await loader();
+    if (predicate(value)) return value;
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`timed out waiting for ${description}`);
+}
+
+async function openDialog() {
+  const dialog = page.getByRole('dialog').last();
+  await dialog.waitFor({ timeout: 10_000 });
+  return dialog;
 }
 
 async function pick(scope, label, option) {
-  await scope.getByLabel(label).click();
+  await scope.getByLabel(label, { exact: true }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
+  await page.waitForTimeout(150);
 }
 
-async function dialog() {
-  const value = page.getByRole('dialog');
-  await value.waitFor({ timeout: 10_000 });
-  return value;
-}
-
-async function confirm(label) {
-  const value = await dialog();
-  await value.getByRole('button', { name: label, exact: true }).click();
-  await value.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
-}
-
-recording = true;
-await page.goto(`${consoleBase}/login`, { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(400);
-await shot('01-login');
-await page.locator('input[autocomplete="username"]').fill('admin');
-await page.locator('input[autocomplete="current-password"]').fill(password);
-await page.locator('button[type="submit"]').click();
-await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 30_000 });
-await waitForPage();
-await shot('02-monitor');
-
-const projectName = `UI Acceptance ${stamp}`;
-let projectId = '';
-let userId = '';
-let modelId = '';
-let modelName = '';
-let channelId = '';
-
-await step('model create, edit and delete', async () => {
-  modelName = `ui-model-${stamp}`;
-  await page.goto(`${consoleBase}/models`, { waitUntil: 'domcontentloaded' });
-  await waitForPage();
-  await page.getByRole('button', { name: 'New model' }).click();
-  const form = await dialog();
-  await pick(form, 'Provider', 'OpenAI');
-  await form.getByLabel('Upstream name').fill(modelName);
-  await form.getByLabel('Display name').fill(`${modelName} display`);
-  await form.getByLabel('Input', { exact: true }).fill('3');
-  await form.getByLabel('openai_responses', { exact: true }).check();
-  await form.getByRole('button', { name: 'Create', exact: true }).click();
-  await form.waitFor({ state: 'hidden', timeout: 10_000 });
-  let models = await api('/models');
-  const created = models.find((entry) => entry.upstream_name === modelName);
-  requireValue(created, 'the model was not created');
-  modelId = created.id;
-  requireValue(
-    created.formats?.includes('openai_chat') && created.formats?.includes('openai_responses'),
-    'the model formats were not saved',
-  );
-  requireValue(created.input_price === 3_000_000, 'the model price was not converted to micros');
-  const row = page.locator('tr').filter({ hasText: modelName });
-  await row.getByRole('button', { name: 'Edit' }).click();
-  const edit = await dialog();
-  await edit.getByLabel('Display name').fill(`${modelName} edited`);
-  await edit.getByRole('button', { name: 'Save', exact: true }).click();
-  await edit.waitFor({ state: 'hidden', timeout: 10_000 });
-  models = await api('/models');
-  requireValue(
-    models.find((entry) => entry.upstream_name === modelName)?.display_name ===
-      `${modelName} edited`,
-    'the model display name was not saved',
-  );
-
-  const orphan = `ui-orphan-${stamp}`;
-  await page.getByRole('button', { name: 'New model' }).click();
-  const orphanForm = await dialog();
-  await orphanForm.getByLabel('Upstream name').fill(orphan);
-  await orphanForm.getByRole('button', { name: 'Create', exact: true }).click();
-  await orphanForm.waitFor({ state: 'hidden', timeout: 10_000 });
-  const orphanRow = page.locator('tr').filter({ hasText: orphan });
-  await orphanRow.waitFor({ timeout: 10_000 });
-  await orphanRow.getByRole('button', { name: 'Delete' }).click();
-  await confirm('Delete');
-  models = await api('/models');
-  requireValue(
-    !models.some((entry) => entry.upstream_name === orphan),
-    'the model was not deleted',
-  );
-});
-
-await step('project create', async () => {
-  await page.goto(`${consoleBase}/projects`, { waitUntil: 'domcontentloaded' });
-  await waitForPage();
-  await page.getByRole('button', { name: 'New project' }).click();
-  const form = await dialog();
-  await form.getByLabel('Name').fill(projectName);
-  await form.getByRole('button', { name: 'Create', exact: true }).click();
-  await page.getByText(projectName, { exact: true }).waitFor({ timeout: 10_000 });
-  const projects = await api('/projects');
-  const created = projects.find((entry) => entry.name === projectName);
-  requireValue(created, 'the project was not listed by the API');
-  projectId = created.id;
-});
-
-if (projectId) {
-  const renamed = `${projectName} Renamed`;
-  await step('project settings', async () => {
-    await page.goto(`${consoleBase}/projects/${projectId}/settings`, {
-      waitUntil: 'domcontentloaded',
+async function expectText(text, description = text) {
+  await page
+    .getByText(text, { exact: true })
+    .first()
+    .waitFor({ timeout: 15_000 })
+    .catch(() => {
+      throw new Error(`${description} did not appear`);
     });
-    await waitForPage();
-    await page.getByLabel('Name').fill(renamed);
-    await page.getByLabel('Default output limit').fill('1234');
-    await page.getByLabel('Stream review window (bytes)').fill('4096');
-    await page.getByLabel('Stream review timeout (ms)').fill('500');
-    await page.getByRole('button', { name: 'Save', exact: true }).first().click();
-    await page.waitForTimeout(700);
-    const loaded = await api(`/projects/${projectId}`);
-    requireValue(loaded.name === renamed, 'the project name was not saved');
-    requireValue(loaded.default_max_output_tokens === 1234, 'the project limit was not saved');
-    requireValue(loaded.stream_review_bytes === 4096, 'the stream review window was not saved');
-    requireValue(
-      loaded.stream_review_timeout_ms === 500,
-      'the stream review timeout was not saved',
-    );
-  });
+}
 
-  const channelOptions = await api(`/projects/${projectId}/channel-options`).catch(() => []);
-  if (channelOptions.length > 0) {
-    const routeName = `ui-route-${stamp}`;
-    await step('route crud', async () => {
-      await page.goto(`${consoleBase}/projects/${projectId}/routes`, {
-        waitUntil: 'domcontentloaded',
-      });
-      await waitForPage();
-      await page.getByRole('button', { name: 'New route' }).click();
-      const form = await dialog();
-      await form.getByLabel('Name').fill(routeName);
-      await form.getByRole('button', { name: 'Add target' }).click();
-      await form.getByLabel('Output limit').fill('777');
-      await form.getByRole('button', { name: 'Create', exact: true }).click();
-      await form.waitFor({ state: 'hidden', timeout: 10_000 });
-      let routes = await api(`/projects/${projectId}/routes`);
-      const created = routes.find((entry) => entry.name === routeName);
-      requireValue(created, 'the route was not created');
-      const target = created.targets?.[0];
-      requireValue(target?.channel_id && target?.model_id, 'the route target has no channel model');
-      requireValue(target?.max_output_tokens === 777, 'the route output limit was not saved');
-      const option = channelOptions.find((entry) => entry.id === target.channel_id);
-      requireValue(
-        option?.models?.some((entry) => entry.id === target.model_id),
-        'the route target does not match a channel model',
+async function confirmDialog(label) {
+  const dialog = await openDialog();
+  await dialog.getByRole('button', { name: label, exact: true }).click();
+  await dialog.waitFor({ state: 'hidden', timeout: 20_000 });
+}
+
+async function confirmImpactDialog(label) {
+  const dialog = await openDialog();
+  const confirm = dialog.getByRole('button', { name: label, exact: true });
+  const acknowledge = dialog.getByRole('switch', { name: L.acknowledge });
+  await acknowledge.waitFor({ timeout: 10_000 });
+  requireValue(
+    await confirm.isDisabled(),
+    'the impact confirmation is enabled before acknowledgement',
+  );
+  await acknowledge.click();
+  await confirm.click();
+  await dialog.waitFor({ state: 'hidden', timeout: 20_000 });
+}
+
+async function completePasswordChangeOn(target, current, next) {
+  await target.getByLabel(L.currentPassword).fill(current);
+  await target.getByLabel(L.newPassword, { exact: true }).fill(next);
+  await target.getByLabel('Repeat new password').fill(next);
+  await target.getByRole('button', { name: L.updatePassword, exact: true }).click();
+  await target.waitForURL((url) => !url.pathname.endsWith('/password'), { timeout: 30_000 });
+}
+
+async function signIn() {
+  await page.goto(`${consoleBase}/login`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('form', { timeout: 20_000 });
+  await shot('01-login');
+  await page.getByLabel(L.username).fill('admin');
+  await page.getByLabel(L.password).fill(password);
+  await page.getByRole('button', { name: L.signIn, exact: true }).click();
+  await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 30_000 });
+  if (page.url().includes('/password')) {
+    if (!nextAdminPassword) {
+      throw new Error(
+        'the administrator must change the password; set SAFEAGENT_ADMIN_NEW_PASSWORD',
       );
-      const row = page.locator('tr').filter({ hasText: routeName });
-      await row.waitFor({ timeout: 10_000 });
-      await row.getByRole('button', { name: 'Edit' }).click();
-      const edit = await dialog();
-      await edit.getByLabel('Weight').first().fill('2');
-      await edit.getByRole('button', { name: 'Save', exact: true }).click();
-      await edit.waitFor({ state: 'hidden', timeout: 10_000 });
-      routes = await api(`/projects/${projectId}/routes`);
-      requireValue(
-        routes.find((entry) => entry.name === routeName)?.targets?.[0]?.weight === 2,
-        'the route weight was not saved',
-      );
-      await row.getByRole('button', { name: 'Delete' }).click();
-      await confirm('Delete');
-      routes = await api(`/projects/${projectId}/routes`);
-      requireValue(!routes.some((entry) => entry.name === routeName), 'the route was not deleted');
-    });
+    }
+    await completePasswordChangeOn(page, password, nextAdminPassword);
   }
-
-  await step('key crud', async () => {
-    const label = `ui-key-${stamp}`;
-    await page.goto(`${consoleBase}/projects/${projectId}/keys`, {
-      waitUntil: 'domcontentloaded',
-    });
-    await waitForPage();
-    await page.getByRole('button', { name: 'New key' }).click();
-    const form = await dialog();
-    await form.getByLabel('Label').fill(label);
-    await form.getByRole('button', { name: 'Create', exact: true }).click();
-    const secret = await dialog();
-    await secret.getByRole('button', { name: 'Secret stored' }).click();
-    let keys = await api(`/projects/${projectId}/keys`);
-    const created = keys.find((entry) => entry.label === label);
-    requireValue(created, 'the agent key was not created');
-    const row = page.locator('tr').filter({ hasText: label });
-    await row.waitFor({ timeout: 10_000 });
-    await row.getByRole('button', { name: 'Edit' }).click();
-    const edit = await dialog();
-    await edit.getByLabel('Label').fill(`${label}-edited`);
-    await edit.getByRole('button', { name: 'Save', exact: true }).click();
-    await edit.waitFor({ state: 'hidden', timeout: 10_000 });
-    keys = await api(`/projects/${projectId}/keys`);
-    requireValue(
-      keys.some((entry) => entry.label === `${label}-edited`),
-      'the key was not updated',
-    );
-    const editedRow = page.locator('tr').filter({ hasText: `${label}-edited` });
-    await editedRow.waitFor({ timeout: 10_000 });
-    await editedRow.getByRole('button', { name: 'Revoke' }).click();
-    await confirm('Revoke');
-    keys = await api(`/projects/${projectId}/keys`);
-    requireValue(
-      keys.find((entry) => entry.label === `${label}-edited`)?.revoked === true,
-      'the key was not revoked',
-    );
-  });
-
-  await step('policy save and restore', async () => {
-    await page.goto(`${consoleBase}/projects/${projectId}/policies`, {
-      waitUntil: 'domcontentloaded',
-    });
-    await waitForPage();
-    const document = {
-      rules: [
-        {
-          id: 'ui-record',
-          name: 'UI record',
-          enabled: true,
-          priority: 1,
-          phase: 'request',
-          when: 'false',
-          action: 'record',
-          severity: 'info',
-          reason: 'browser acceptance',
-        },
-      ],
-    };
-    await page.getByLabel('Policy document').fill(JSON.stringify(document, null, 2));
-    await page.getByRole('button', { name: 'Check' }).click();
-    await page.getByText('The document is valid.').waitFor({ timeout: 10_000 });
-    await page.getByRole('button', { name: 'Save and activate' }).click();
-    await page.getByText('The policy is active.').waitFor({ timeout: 10_000 });
-    let active = await api(`/projects/${projectId}/policies/active`);
-    requireValue(active.document.rules?.length === 1, 'the policy was not saved');
-    const previous = page.locator('li').filter({ hasText: 'v1' });
-    await previous.getByRole('button', { name: 'Restore' }).click();
-    await page.getByText('The earlier version is active again.').waitFor({ timeout: 10_000 });
-    active = await api(`/projects/${projectId}/policies/active`);
-    requireValue((active.document.rules ?? []).length === 0, 'the policy was not restored');
-  });
-
-  await step('redaction rule crud', async () => {
-    const label = `UI_RULE_${stamp}`;
-    await page.goto(`${consoleBase}/projects/${projectId}/redaction`, {
-      waitUntil: 'domcontentloaded',
-    });
-    await waitForPage();
-    await page.getByRole('button', { name: 'New rule' }).click();
-    const form = await dialog();
-    await pick(form, 'Type', 'Regular expression');
-    await form.getByLabel('Pattern').fill('ui-[0-9]+');
-    await form.getByLabel('Label').fill(label);
-    await form.getByLabel('Sample text').fill('prefix ui-123 suffix');
-    await form.getByText('1 match').waitFor({ timeout: 10_000 });
-    await form.getByRole('button', { name: 'Create', exact: true }).click();
-    await form.waitFor({ state: 'hidden', timeout: 10_000 });
-    let rules = await api(`/projects/${projectId}/rules`);
-    requireValue(
-      rules.some((entry) => entry.label === label),
-      'the redaction rule was not created',
-    );
-    const row = page.locator('tr').filter({ hasText: label });
-    await row.waitFor({ timeout: 10_000 });
-    await row.getByRole('button', { name: 'Edit' }).click();
-    const edit = await dialog();
-    await edit.getByLabel('Label').fill(`${label}_E`);
-    await edit.getByRole('button', { name: 'Save', exact: true }).click();
-    await edit.waitFor({ state: 'hidden', timeout: 10_000 });
-    rules = await api(`/projects/${projectId}/rules`);
-    requireValue(
-      rules.some((entry) => entry.label === `${label}_E`),
-      'the rule was not updated',
-    );
-    const edited = page.locator('tr').filter({ hasText: `${label}_E` });
-    await edited.waitFor({ timeout: 10_000 });
-    await edited.getByRole('button', { name: 'Delete' }).click();
-    await confirm('Delete');
-    rules = await api(`/projects/${projectId}/rules`);
-    requireValue(!rules.some((entry) => entry.label === `${label}_E`), 'the rule was not deleted');
-  });
-}
-
-await step('user create and disable', async () => {
-  const username = `ui${stamp}`;
-  await page.goto(`${consoleBase}/users`, { waitUntil: 'domcontentloaded' });
   await waitForPage();
-  await page.getByRole('button', { name: 'New user' }).click();
-  const form = await dialog();
-  await form.getByLabel('Username').fill(username);
-  await form.getByRole('button', { name: 'Create', exact: true }).click();
-  const secret = await dialog();
-  await secret.getByRole('button', { name: 'Secret stored' }).click();
-  let users = await api('/users');
-  const created = users.find((entry) => entry.username === username);
-  requireValue(created, 'the user was not created');
-  userId = created.id;
-  await page.getByText(username, { exact: true }).waitFor({ timeout: 10_000 });
-  const actions = page.getByRole('button', { name: `Actions: ${username}` });
-  await actions.click();
-  await page.getByRole('menuitem', { name: 'Disable' }).click();
-  await page.waitForTimeout(400);
-  users = await api('/users');
-  requireValue(
-    users.find((entry) => entry.username === username)?.disabled === true,
-    'the user was not disabled',
-  );
-  await actions.click();
-  await page.getByRole('menuitem', { name: 'Enable' }).click();
-  await page.waitForTimeout(400);
-});
-
-if (projectId && userId) {
-  await step('member add and remove', async () => {
-    await page.goto(`${consoleBase}/projects/${projectId}/members`, {
-      waitUntil: 'domcontentloaded',
-    });
-    await waitForPage();
-    await page.getByRole('button', { name: 'Add member' }).first().click();
-    const form = await dialog();
-    await pick(form, 'User', `ui${stamp}`);
-    await form.getByRole('button', { name: 'Add member' }).click();
-    await form.waitFor({ state: 'hidden', timeout: 10_000 });
-    let members = await api(`/projects/${projectId}/members`);
-    requireValue(
-      members.some((entry) => entry.user_id === userId),
-      'the member was not added',
-    );
-    const row = page.locator('tr').filter({ hasText: `ui${stamp}` });
-    await row.waitFor({ timeout: 10_000 });
-    await row.getByRole('button', { name: 'Remove' }).click();
-    await confirm('Remove');
-    members = await api(`/projects/${projectId}/members`);
-    requireValue(!members.some((entry) => entry.user_id === userId), 'the member was not removed');
-  });
+  await shot('02-monitor');
 }
 
-await step('channel settings', async () => {
-  const name = `UI Channel ${stamp}`;
-  await page.goto(`${consoleBase}/channels`, { waitUntil: 'domcontentloaded' });
+async function createProject() {
+  await goto('/projects');
+  await shot('03-projects');
+  await page.getByRole('button', { name: L.newProject, exact: true }).click();
+  const form = await openDialog();
+  await form.getByLabel(L.name).fill(suiteProjectName);
+  await form.getByRole('button', { name: L.create, exact: true }).click();
+  await form.waitFor({ state: 'hidden', timeout: 20_000 });
+  const projects = await waitForApi(
+    () => api('/projects'),
+    (list) => list.some((entry) => entry.name === suiteProjectName),
+    'the created project to be listed',
+  );
+  projectId = projects.find((entry) => entry.name === suiteProjectName).id;
+  const openProject = page.getByRole('link', { name: suiteProjectName, exact: true }).first();
+  await openProject.waitFor({ timeout: 10_000 });
+  await openProject.click();
+  await page.waitForURL(new RegExp(`/projects/${projectId}/overview`), { timeout: 20_000 });
   await waitForPage();
-  await page.getByRole('button', { name: 'New channel' }).click();
-  const form = await dialog();
-  await form.getByLabel('Name').fill(name);
-  await pick(form, 'Provider', 'OpenAI');
-  await pick(form, 'API format', 'openai_responses');
-  await form.getByRole('button', { name: 'Create', exact: true }).click();
-  await page.waitForURL(/\/channels\/[^/]+$/, { timeout: 15_000 });
+}
+
+async function switchProjects() {
+  const lab = await api(`/projects/${labProjectId}`);
+  await page.getByRole('button', { name: suiteProjectName, exact: true }).click();
+  await page.getByRole('menuitem', { name: lab.name, exact: true }).click();
+  await page.waitForURL(new RegExp(`/projects/${labProjectId}/overview`), { timeout: 20_000 });
   await waitForPage();
-  channelId = page.url().split('/').pop();
-  const created = await api(`/channels/${channelId}`);
-  requireValue(
-    created.endpoints[0]?.format === 'openai_responses',
-    'the channel format was not saved',
-  );
-  if (modelId) {
-    await page.getByRole('checkbox', { name: modelName, exact: true }).check();
-  }
-  await page.getByRole('button', { name: 'Add format' }).click();
-  await page.getByLabel('Default output limit').fill('321');
-  await page.getByLabel('Forward client headers').fill('x-ui-test');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.waitForTimeout(700);
-  let loaded = await api(`/channels/${channelId}`);
-  requireValue(loaded.default_max_output_tokens === 321, 'the channel limit was not saved');
-  requireValue(
-    (loaded.forward_headers ?? []).includes('x-ui-test'),
-    'the forwarded headers were not saved',
-  );
-  requireValue(loaded.endpoints.length === 2, 'the second channel format was not saved');
-  if (modelId) {
-    requireValue(loaded.model_ids.includes(modelId), 'the channel model binding was not saved');
-  }
-  await page.getByRole('button', { name: 'Add key' }).click();
-  const keyForm = await dialog();
-  await keyForm.getByLabel('Label').fill('ui');
-  await keyForm.getByLabel('API key').fill(`ui-secret-${stamp}`);
-  await keyForm.getByRole('button', { name: 'Create', exact: true }).click();
-  await keyForm.waitFor({ state: 'hidden', timeout: 10_000 });
-  const keys = await api(`/channels/${channelId}/keys`);
-  requireValue(
-    keys.some((entry) => entry.label === 'ui'),
-    'the channel key was not added',
-  );
-  await page.locator('label').filter({ hasText: 'Enabled' }).getByRole('switch').click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.waitForTimeout(700);
-  loaded = await api(`/channels/${channelId}`);
-  requireValue(loaded.enabled === false, 'the channel was not disabled');
-});
-
-const calls = (await api(`/projects/${project}/calls?limit=100`).catch(() => ({ items: [] })))
-  .items;
-const highCalls = (
-  await api(`/projects/${project}/calls?min_severity=high&limit=100`).catch(() => ({
-    items: [],
-  }))
-).items;
-const richCall =
-  highCalls.find((call) => call.redaction_hits > 0) ??
-  highCalls.find((call) => call.analysis_state === 'completed') ??
-  highCalls[0] ??
-  calls[0];
-
-async function fetchCalls(query) {
-  return (await api(`/projects/${project}/calls?${query}`).catch(() => ({ items: [] }))).items;
+  await page.getByRole('button', { name: lab.name, exact: true }).click();
+  await page.getByRole('menuitem', { name: suiteProjectName, exact: true }).click();
+  await page.waitForURL(new RegExp(`/projects/${projectId}/overview`), { timeout: 20_000 });
+  await waitForPage();
+  await shot('04-project-switcher', false);
 }
 
-async function findMultiSession() {
-  const keys = await api(`/projects/${project}/keys`).catch(() => []);
-  for (const key of keys) {
-    const items = await fetchCalls(`agent_key_id=${encodeURIComponent(key.id)}&limit=100`);
-    const counts = new Map();
-    for (const call of items) counts.set(call.session_id, (counts.get(call.session_id) ?? 0) + 1);
-    for (const [id, count] of counts) if (count > 1) return id;
-  }
-  return null;
+async function saveProjectSettings() {
+  await goto(`/projects/${projectId}/settings`);
+  await shot('05-project-settings');
+  suiteProjectName = `${suiteProjectName} Renamed`;
+  await page.getByLabel(L.name).fill(suiteProjectName);
+  await page.getByLabel(L.auxiliaryRetention).fill('3');
+  await page.getByRole('button', { name: L.save, exact: true }).first().click();
+  await expectText(L.changesSaved);
+  const saved = await waitForApi(
+    () => api(`/projects/${projectId}`),
+    (project) => project.name === suiteProjectName && project.auxiliary_retention_days === 3,
+    'the project settings to persist',
+  );
+  requireValue(saved.auxiliary_retention_days === 3, 'the auxiliary retention was not saved');
 }
 
-async function findProblemCall() {
-  for (const state of ['blocked', 'rejected', 'failed']) {
-    const items = await fetchCalls(`state=${state}&limit=1`);
-    if (items[0]) return items[0];
-  }
-  return null;
+async function connectProvider() {
+  await goto('/providers');
+  await page.getByRole('button', { name: L.connect, exact: true }).click();
+  const wizard = await openDialog();
+  await wizard.getByText('Connect a provider', { exact: true }).waitFor({ timeout: 10_000 });
+
+  await wizard.getByRole('button', { name: L.customProvider, exact: true }).click();
+  const providerStep = wizard.locator('section:not([hidden])');
+  await providerStep.getByLabel(L.label, { exact: true }).fill(providerLabel);
+  const catalog = {
+    openai_chat: {
+      Format: 'openai_chat',
+      BaseURL: 'http://127.0.0.1:9',
+      Path: '/v1/chat/completions',
+    },
+  };
+  await providerStep
+    .getByLabel(L.endpointCatalog, { exact: true })
+    .fill(JSON.stringify(catalog, null, 2));
+  await shot('10-provider-wizard-provider', false);
+  await wizard.getByRole('button', { name: L.next, exact: true }).click();
+
+  const channelStep = wizard.locator('section:not([hidden])');
+  await channelStep.getByLabel(L.name, { exact: true }).fill(channelName);
+  await channelStep.getByLabel(L.baseUrl, { exact: true }).fill('http://127.0.0.1:9');
+  await channelStep.getByLabel(L.apiKey, { exact: true }).fill(`ui-secret-${stamp}`);
+  await shot('11-provider-wizard-channel', false);
+  await wizard.getByRole('button', { name: L.next, exact: true }).click();
+
+  const discoveryStep = wizard.locator('section:not([hidden])');
+  await discoveryStep.getByRole('button', { name: L.connectAndDiscover, exact: true }).click();
+  await discoveryStep.getByText(L.connected, { exact: true }).waitFor({ timeout: 20_000 });
+  await shot('12-provider-wizard-discovery', false);
+  await wizard.getByRole('button', { name: L.next, exact: true }).click();
+
+  const modelsStep = wizard.locator('section:not([hidden])');
+  await modelsStep.getByLabel(L.modelNames, { exact: true }).fill(modelName);
+  await modelsStep.getByRole('button', { name: L.selectAll, exact: true }).click();
+  await shot('13-provider-wizard-models', false);
+  await wizard.getByRole('button', { name: L.next, exact: true }).click();
+
+  const routeStep = wizard.locator('section:not([hidden])');
+  await routeStep
+    .locator('label')
+    .filter({ hasText: L.createProjectRoute })
+    .getByRole('switch')
+    .click();
+  await pick(routeStep, L.project, suiteProjectName);
+  await routeStep.getByLabel(L.name, { exact: true }).fill(routeName);
+  await routeStep.getByLabel(L.defaultOutputLimit, { exact: true }).fill('111');
+  await shot('14-provider-wizard-route', false);
+  await wizard.getByRole('button', { name: L.finishSetup, exact: true }).click();
+  await wizard.waitFor({ state: 'hidden', timeout: 30_000 });
+
+  const providers = await waitForApi(
+    () => api('/providers'),
+    (list) => list.some((entry) => entry.label === providerLabel),
+    'the custom provider to be listed',
+  );
+  providerId = providers.find((entry) => entry.label === providerLabel).id;
+  const channels = await waitForApi(
+    () => api('/channels'),
+    (list) => list.some((entry) => entry.name === channelName),
+    'the channel to be listed',
+  );
+  channelId = channels.find((entry) => entry.name === channelName).id;
+  const models = await waitForApi(
+    () => api('/models'),
+    (list) => list.some((entry) => entry.upstream_name === modelName),
+    'the model to be listed',
+  );
+  modelId = models.find((entry) => entry.upstream_name === modelName).id;
+  const routes = await waitForApi(
+    () => api(`/projects/${projectId}/routes`),
+    (list) => list.some((entry) => entry.name === routeName),
+    'the route to be listed',
+  );
+  const created = routes.find((entry) => entry.name === routeName);
+  routeId = created.id;
+  const target = created.targets?.[0];
+  requireValue(target?.channel_id === channelId, 'the route target does not use the new channel');
+  requireValue(target?.model_id === modelId, 'the route target does not use the new model');
+  requireValue(target?.max_output_tokens === 111, 'the route target output limit was not saved');
+  console.log(`provider graph: provider=${providerId} channel=${channelId} model=${modelId}`);
 }
 
-const channels = await api('/channels').catch(() => []);
-requireValue(channels.length > 0, 'the lab has no channel for the channel detail page');
-const channel = channels[0];
+async function addRouteAlias() {
+  await goto(`/projects/${projectId}/routes`);
+  const row = page.locator('tr').filter({ hasText: routeName });
+  await row.waitFor({ timeout: 10_000 });
+  await shot('15-routes', false);
+  await row.getByRole('button', { name: L.edit, exact: true }).click();
+  const dialog = await openDialog();
+  await dialog.getByRole('button', { name: L.addAlias, exact: true }).click();
+  await dialog.getByLabel(L.alias, { exact: true }).fill(routeAlias);
+  await dialog.getByRole('button', { name: L.save, exact: true }).click();
+  await dialog.waitFor({ state: 'hidden', timeout: 20_000 });
+  const route = await waitForApi(
+    () => api(`/projects/${projectId}/routes`),
+    (list) =>
+      list
+        .find((entry) => entry.id === routeId)
+        ?.aliases.some((alias) => alias.alias === routeAlias && alias.source === 'manual') === true,
+    'the route alias to be saved',
+  );
+  requireValue(Boolean(route.find((entry) => entry.id === routeId)), 'the route disappeared');
+}
 
-const pages = [
-  ['03-projects', '/projects'],
-  ['04-overview', `/projects/${project}/overview`],
-  ['05-calls', `/projects/${project}/calls`],
-  ['06-conversations', `/projects/${project}/conversations`],
-  ['07-risk', `/projects/${project}/risk`],
-  ['08-activity', `/projects/${project}/activity`],
-  ['09-policies', `/projects/${project}/policies`],
-  ['10-redaction', `/projects/${project}/redaction`],
-  ['11-keys', `/projects/${project}/keys`],
-  ['12-routes', `/projects/${project}/routes`],
-  ['13-members', `/projects/${project}/members`],
-  ['14-settings', `/projects/${project}/settings`],
-  ['15-models', '/models'],
-  ['15-channels', '/channels'],
-  ['15b-channel', `/channels/${channel.id}`],
-  ['16-users', '/users'],
-  ['17-operations', '/operations'],
-  ['18-password', '/password'],
+async function createAgentKey() {
+  await goto(`/projects/${projectId}/keys`);
+  await shot('16-keys', false);
+  await page.getByRole('button', { name: L.newKey, exact: true }).click();
+  const form = await openDialog();
+  await form.getByLabel(L.label, { exact: true }).fill(keyLabel);
+  await form.getByRole('button', { name: L.create, exact: true }).click();
+  const secret = await openDialog();
+  await secret.locator('input[readonly]').waitFor({ timeout: 10_000 });
+  const value = await secret.locator('input[readonly]').inputValue();
+  requireValue(value.length > 0, 'the new agent key has no secret');
+  await page.screenshot({ path: `${shots}/17-key-secret.png` });
+  await secret.getByRole('button', { name: L.secretStored, exact: true }).click();
+  await secret.waitFor({ state: 'hidden', timeout: 10_000 });
+  const keys = await waitForApi(
+    () => api(`/projects/${projectId}/keys`),
+    (list) => list.some((entry) => entry.label === keyLabel),
+    'the agent key to be listed',
+  );
+  agentKeyId = keys.find((entry) => entry.label === keyLabel).id;
+}
+
+const projectPages = [
+  ['project-overview', `/projects/${labProjectId}/overview`],
+  ['project-calls', `/projects/${labProjectId}/calls`],
+  ['project-conversations', `/projects/${labProjectId}/conversations`],
+  ['project-risk', `/projects/${labProjectId}/risk`],
+  ['project-activity', `/projects/${labProjectId}/activity`],
+  ['project-policies', `/projects/${labProjectId}/policies`],
+  ['project-redaction', `/projects/${labProjectId}/redaction`],
+  ['project-keys', `/projects/${labProjectId}/keys`],
+  ['project-routes', `/projects/${labProjectId}/routes`],
+  ['project-members', `/projects/${labProjectId}/members`],
+  ['project-settings', `/projects/${labProjectId}/settings`],
 ];
 
-for (const [name, path] of pages) {
-  await step(`page ${path}`, async () => {
-    const response = await page.goto(consoleBase + path, { waitUntil: 'domcontentloaded' });
-    await waitForPage();
-    if (!response || response.status() >= 400) throw new Error(`HTTP ${response?.status()}`);
-    const heading = await page
-      .locator('h1')
-      .first()
-      .textContent()
-      .catch(() => null);
-    if (!heading) throw new Error('no h1');
-    const body = await page.locator('body').innerText();
-    if (body.trim().length < 40) throw new Error('empty body');
-    await shot(name);
-  });
-}
+const globalPages = [
+  ['monitor', '/monitor'],
+  ['projects', '/projects'],
+  ['providers', '/providers'],
+  ['models', '/models'],
+  ['channels', '/channels'],
+  ['users', '/users'],
+  ['operations', '/operations'],
+  ['password', '/password'],
+];
 
-if (richCall) {
-  await step('call detail tabs', async () => {
-    await page.goto(`${consoleBase}/projects/${project}/calls?call=${richCall.id}`, {
-      waitUntil: 'domcontentloaded',
+let pages = [];
+
+async function sweepPages() {
+  pages = [...projectPages, ...globalPages];
+  if (channelId) pages.push(['channel-detail', `/channels/${channelId}`]);
+  for (const [name, path] of pages) {
+    await step(`page ${path}`, async () => {
+      await goto(path);
+      await shot(`page-${name}`);
     });
-    await waitForPage();
-    await shot('19-call-detail');
-    for (const [tab, name] of [
-      ['Transcript', '20-call-transcript'],
-      ['Events', '21-call-events'],
-      ['Attempts', '22-call-attempts'],
-    ]) {
-      const trigger = page.getByRole('tab', { name: new RegExp(tab, 'i') });
-      requireValue((await trigger.count()) > 0, `no ${tab} tab`);
-      await trigger.first().click();
-      await page.waitForTimeout(300);
-      await shot(name, false);
-    }
-  });
-}
-
-const session = await findMultiSession();
-if (session) {
-  await page.goto(`${consoleBase}/projects/${project}/conversations/${session}`, {
-    waitUntil: 'domcontentloaded',
-  });
-  await waitForPage();
-  await shot('23-conversation');
-} else {
-  failures.push('no multi-call conversation was available for the tree check');
-}
-
-const problemCall = await findProblemCall();
-if (problemCall) {
-  await page.goto(`${consoleBase}/projects/${project}/calls?call=${problemCall.id}`, {
-    waitUntil: 'domcontentloaded',
-  });
-  await waitForPage();
-  await shot('24-call-blocked');
-  const body = await page.locator('body').innerText();
-  if (!/blocked|rejected|failed/i.test(body)) {
-    failures.push('the blocked call detail does not show its state');
   }
-} else {
-  failures.push('no blocked, rejected or failed call was available for the detail check');
 }
 
-await step('language and theme', async () => {
-  await page.goto(`${consoleBase}/monitor`, { waitUntil: 'domcontentloaded' });
+async function deleteAndRestoreChannel() {
+  await goto(`/channels/${channelId}`);
+  const impact = await api(`/configuration/impact?channel_id=${channelId}`);
+  requireValue(
+    impact.routes.some((reference) => reference.route_id === routeId),
+    'the channel impact does not name the referencing route',
+  );
+  const conflict = await api(`/channels/${channelId}`, 'DELETE', undefined, { expectStatus: 409 });
+  requireValue(
+    conflict?.code === 'impact_requires_acknowledge',
+    'the channel delete without acknowledgement did not require an impact review',
+  );
+  const deleteButton = page
+    .getByRole('button', { name: L.delete, exact: true })
+    .filter({ has: page.locator('svg') });
+  await deleteButton.click();
+  await page.waitForTimeout(250);
+  await shot('20-channel-impact', false);
+  await confirmImpactDialog(L.delete);
+  await page.waitForURL(/\/channels$/, { timeout: 20_000 });
   await waitForPage();
-  const language = page.getByRole('button', { name: /language|语言/i }).first();
-  requireValue((await language.count()) > 0, 'language menu button is missing');
-  await language.click();
-  await shot('25-language-menu', false);
-  const chinese = page.getByRole('menuitemradio', { name: '简体中文' });
-  requireValue((await chinese.count()) > 0, 'language menu has no Chinese option');
-  await chinese.click();
-  await page.waitForTimeout(600);
+  const deleted = await waitForApi(
+    () => api('/channels?include_deleted=true'),
+    (list) => list.some((entry) => entry.id === channelId && entry.deleted_at),
+    'the channel to be soft deleted',
+  );
+  requireValue(
+    Boolean(deleted.find((entry) => entry.id === channelId).deleted_at),
+    'no deleted_at',
+  );
+  const degraded = await api(`/projects/${projectId}/routes`);
+  const target = degraded.find((entry) => entry.id === routeId).targets[0];
+  requireValue(target.enabled === false, 'the route target was not disabled with the channel');
+
+  await goto('/channels');
+  await pick(page, L.deletion, L.showDeleted);
+  const row = page.locator('tr').filter({ hasText: channelName });
+  await row.waitFor({ timeout: 10_000 });
+  await shot('21-channel-deleted', false);
+  await row.getByRole('button', { name: L.restore, exact: true }).click();
+  await waitForApi(
+    () => api('/channels'),
+    (list) => list.some((entry) => entry.id === channelId),
+    'the channel to be restored',
+  );
+  const restoredRoute = await waitForApi(
+    () => api(`/projects/${projectId}/routes`),
+    (list) => list.find((entry) => entry.id === routeId)?.targets[0]?.enabled === true,
+    'the route target to recover after the channel restore',
+  );
+  requireValue(
+    Boolean(restoredRoute.find((entry) => entry.id === routeId)),
+    'the route disappeared',
+  );
+}
+
+async function deleteAndRestoreModel() {
+  await goto('/models');
+  const impact = await api(`/configuration/impact?model_id=${modelId}`);
+  requireValue(
+    impact.routes.some((reference) => reference.route_id === routeId),
+    'the model impact does not name the referencing route',
+  );
+  const conflict = await api(`/models/${modelId}`, 'DELETE', undefined, { expectStatus: 409 });
+  requireValue(
+    conflict?.code === 'impact_requires_acknowledge',
+    'the model delete without acknowledgement did not require an impact review',
+  );
+  const row = page.locator('tr').filter({ hasText: modelName });
+  await row.waitFor({ timeout: 10_000 });
+  await row.getByRole('button', { name: L.delete, exact: true }).click();
+  await page.waitForTimeout(250);
+  await shot('22-model-impact', false);
+  await confirmImpactDialog(L.delete);
+  await waitForApi(
+    () => api('/models?include_deleted=true'),
+    (list) => list.some((entry) => entry.id === modelId && entry.deleted_at),
+    'the model to be soft deleted',
+  );
+  const degraded = await api(`/projects/${projectId}/routes`);
+  requireValue(
+    degraded.find((entry) => entry.id === routeId).targets[0].enabled === false,
+    'the route target was not disabled with the model',
+  );
+
+  await pick(page, L.deletion, L.showDeleted);
+  await row.waitFor({ timeout: 10_000 });
+  await shot('23-model-deleted', false);
+  await row.getByRole('button', { name: L.restore, exact: true }).click();
+  await waitForApi(
+    () => api('/models'),
+    (list) => list.some((entry) => entry.id === modelId),
+    'the model to be restored',
+  );
+  await waitForApi(
+    () => api(`/projects/${projectId}/routes`),
+    (list) => list.find((entry) => entry.id === routeId)?.targets[0]?.enabled === true,
+    'the route target to recover after the model restore',
+  );
+}
+
+async function deleteAndRestoreRoute() {
+  await goto(`/projects/${projectId}/routes`);
+  const row = page.locator('tr').filter({ hasText: routeName });
+  await row.waitFor({ timeout: 10_000 });
+  await row.getByRole('button', { name: L.delete, exact: true }).click();
+  await shot('24-route-delete', false);
+  await confirmDialog(L.delete);
+  await waitForApi(
+    () => api(`/projects/${projectId}/routes?include_deleted=true`),
+    (list) => list.some((entry) => entry.id === routeId && entry.deleted_at),
+    'the route to be soft deleted',
+  );
+  await pick(page, L.deletion, L.showDeleted);
+  await row.waitFor({ timeout: 10_000 });
+  await shot('25-route-deleted', false);
+  await row.getByRole('button', { name: L.restore, exact: true }).click();
+  await waitForApi(
+    () => api(`/projects/${projectId}/routes`),
+    (list) => list.some((entry) => entry.id === routeId && !entry.deleted_at),
+    'the route to be restored',
+  );
+}
+
+async function savePolicy() {
+  await goto(`/projects/${projectId}/policies`);
+  await shot('30-policies', false);
+  const document = {
+    rules: [
+      {
+        id: 'ui-record',
+        name: 'UI record',
+        enabled: true,
+        priority: 1,
+        phase: 'request',
+        when: 'false',
+        action: 'record',
+        severity: 'info',
+        reason: 'browser acceptance',
+      },
+    ],
+  };
+  await page.getByLabel(L.policyDocument).fill(JSON.stringify(document, null, 2));
+  await page.getByRole('button', { name: L.check, exact: true }).click();
+  await expectText(L.policyValid);
+  await page.getByRole('button', { name: L.saveAndActivate, exact: true }).click();
+  await expectText(L.policyActive);
+  const active = await waitForApi(
+    () => api(`/projects/${projectId}/policies/active`),
+    (version) => (version.document.rules ?? []).length === 1,
+    'the saved policy to become active',
+  );
+  await shot('31-policy-saved', false);
+  const first = page.locator('li').filter({ has: page.getByText('v1', { exact: true }) });
+  await first.getByRole('button', { name: L.restore, exact: true }).click();
+  await expectText(L.policyRestored);
+  await waitForApi(
+    () => api(`/projects/${projectId}/policies/active`),
+    (version) => (version.document.rules ?? []).length === 0,
+    'the earlier policy version to become active',
+  );
+  requireValue(active.version > 1, 'the saved policy did not create a new version');
+}
+
+async function createRedactionRule() {
+  await goto(`/projects/${projectId}/redaction`);
+  await shot('32-redaction', false);
+  await page.getByRole('button', { name: L.newRule, exact: true }).click();
+  const form = await openDialog();
+  await pick(form, L.type, L.regularExpression);
+  await form.getByLabel(L.pattern, { exact: true }).fill('ui-[0-9]+');
+  await form.getByLabel(L.label, { exact: true }).fill(ruleLabel);
+  await form.getByLabel(L.sampleText, { exact: true }).fill('prefix ui-123 suffix');
+  await form.getByText('1 match', { exact: true }).waitFor({ timeout: 10_000 });
+  await shot('33-rule-dialog', false);
+  await form.getByRole('button', { name: L.create, exact: true }).click();
+  await form.waitFor({ state: 'hidden', timeout: 20_000 });
+  const rules = await waitForApi(
+    () => api(`/projects/${projectId}/rules`),
+    (list) => list.some((entry) => entry.label === ruleLabel),
+    'the redaction rule to be listed',
+  );
+  ruleId = rules.find((entry) => entry.label === ruleLabel).id;
+
+  await pick(page, L.ruleTest, ruleLabel);
+  await page.getByLabel(L.sampleText, { exact: true }).fill('prefix ui-777 suffix');
+  await page.getByText('1 match', { exact: true }).waitFor({ timeout: 10_000 });
+  await shot('34-rule-tested', false);
+
+  const editedLabel = `UI_ED_${stamp}`;
+  const row = page.locator('tr').filter({ hasText: ruleLabel });
+  await row.getByRole('button', { name: L.edit, exact: true }).click();
+  const edit = await openDialog();
+  await edit.getByLabel(L.label, { exact: true }).fill(editedLabel);
+  await edit.getByRole('button', { name: L.save, exact: true }).click();
+  await edit.waitFor({ state: 'hidden', timeout: 20_000 });
+  await waitForApi(
+    () => api(`/projects/${projectId}/rules`),
+    (list) => list.some((entry) => entry.label === editedLabel),
+    'the edited redaction rule to be listed',
+  );
+  const edited = page.locator('tr').filter({ hasText: editedLabel });
+  await edited.getByRole('button', { name: L.delete, exact: true }).click();
+  await confirmDialog(L.delete);
+  await waitForApi(
+    () => api(`/projects/${projectId}/rules`),
+    (list) => !list.some((entry) => entry.id === ruleId),
+    'the redaction rule to be deleted',
+  );
+}
+
+async function createUser() {
+  username = `ui${stamp}`;
+  await goto('/users');
+  await shot('40-users', false);
+  await page.getByRole('button', { name: L.newUser, exact: true }).click();
+  const form = await openDialog();
+  await form.getByLabel(L.username, { exact: true }).fill(username);
+  await form.getByRole('button', { name: L.create, exact: true }).click();
+  const secret = await openDialog();
+  await secret.locator('input[readonly]').waitFor({ timeout: 10_000 });
+  temporaryPassword = await secret.locator('input[readonly]').inputValue();
+  requireValue(temporaryPassword.length > 0, 'the new user has no temporary password');
+  await page.screenshot({ path: `${shots}/41-user-secret.png` });
+  await secret.getByRole('button', { name: L.secretStored, exact: true }).click();
+  await secret.waitFor({ state: 'hidden', timeout: 10_000 });
+  const users = await waitForApi(
+    () => api('/users'),
+    (list) => list.some((entry) => entry.username === username),
+    'the new user to be listed',
+  );
+  const created = users.find((entry) => entry.username === username);
+  userId = created.id;
+  requireValue(
+    created.must_change_password === true,
+    'the new user does not need a password change',
+  );
+
+  const actions = page.getByRole('button', { name: `Actions: ${username}`, exact: true });
+  await actions.click();
+  await page.getByRole('menuitem', { name: 'Disable', exact: true }).click();
+  await waitForApi(
+    () => api('/users'),
+    (list) => list.find((entry) => entry.id === userId)?.disabled === true,
+    'the user to be disabled',
+  );
+  await actions.click();
+  await page.getByRole('menuitem', { name: 'Enable', exact: true }).click();
+  await waitForApi(
+    () => api('/users'),
+    (list) => list.find((entry) => entry.id === userId)?.disabled === false,
+    'the user to be enabled',
+  );
+}
+
+async function forcedPasswordChange() {
+  const forcedContext = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    colorScheme: 'light',
+    locale: 'en-US',
+  });
+  const forcedPage = await forcedContext.newPage();
+  watch(forcedPage, 'forced-change ');
+  const forcedPassword = `UiPass${stamp}X9`;
+  await forcedPage.goto(`${consoleBase}/login`, { waitUntil: 'domcontentloaded' });
+  await forcedPage.getByLabel(L.username).fill(username);
+  await forcedPage.getByLabel(L.password).fill(temporaryPassword);
+  await forcedPage.getByRole('button', { name: L.signIn, exact: true }).click();
+  await forcedPage.waitForURL((url) => url.pathname.endsWith('/password'), { timeout: 30_000 });
+  await completePasswordChangeOn(forcedPage, temporaryPassword, forcedPassword);
+  await forcedPage.waitForSelector('main h1', { timeout: 20_000 });
+  await forcedPage.screenshot({ path: `${shots}/42-forced-password-change.png` });
+  await forcedContext.close();
+}
+
+async function members() {
+  await goto(`/projects/${projectId}/members`);
+  await shot('43-members', false);
+  await page.getByRole('button', { name: L.addMember, exact: true }).first().click();
+  const form = await openDialog();
+  await pick(form, L.user, username);
+  await form.getByRole('button', { name: L.addMember, exact: true }).click();
+  await form.waitFor({ state: 'hidden', timeout: 20_000 });
+  await waitForApi(
+    () => api(`/projects/${projectId}/members`),
+    (list) => list.some((entry) => entry.user_id === userId),
+    'the member to be added',
+  );
+  const row = page.locator('tr').filter({ hasText: username });
+  await row.waitFor({ timeout: 10_000 });
+  await row.getByRole('button', { name: L.remove, exact: true }).click();
+  await confirmDialog(L.remove);
+  await waitForApi(
+    () => api(`/projects/${projectId}/members`),
+    (list) => !list.some((entry) => entry.user_id === userId),
+    'the member to be removed',
+  );
+}
+
+async function saveDefaultRoute() {
+  await goto(`/projects/${projectId}/settings`);
+  await pick(page, L.defaultRoute, routeName);
+  await page.getByRole('button', { name: L.save, exact: true }).first().click();
+  await expectText(L.changesSaved);
+  await waitForApi(
+    () => api(`/projects/${projectId}`),
+    (project) => project.default_route_id === routeId,
+    'the default route to persist',
+  );
+}
+
+async function callFilters() {
+  await goto(`/projects/${labProjectId}/calls`);
+  await shot('50-calls', false);
+  const filters = [
+    [L.state, L.completed, 'state', 'completed'],
+    [L.minimumSeverity, L.highSeverity, 'min_severity', 'high'],
+    [L.lane, L.main, 'lane', 'main'],
+    [L.operation, 'Generation', 'operation', 'generation'],
+    [L.purpose, 'Chat', 'purpose', 'chat'],
+    [L.outcome, L.succeeded, 'outcome', 'ok'],
+  ];
+  for (const [label, option, parameter, expected] of filters) {
+    await pick(page, label, option);
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+    const value = new URL(page.url()).searchParams.get(parameter);
+    requireValue(value === expected, `the ${label} filter did not reach the URL`);
+  }
+  const list = page.getByRole('list', { name: 'Call list' });
+  const filtered = (await list.count()) > 0 || (await bodyText()).includes(L.noResults);
+  requireValue(filtered, 'the filtered call list shows neither calls nor the empty result');
+  await shot('51-call-filters', false);
+  await page.getByRole('button', { name: L.clearFilters, exact: true }).click();
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  requireValue(
+    !new URL(page.url()).searchParams.has('state'),
+    'clear filters kept the state filter',
+  );
+
+  const auxiliary = page.getByRole('switch', { name: L.showAuxiliary });
+  await auxiliary.click();
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  requireValue(
+    new URL(page.url()).searchParams.get('include_auxiliary') === 'true',
+    'the auxiliary toggle did not reach the URL',
+  );
+  await auxiliary.click();
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  requireValue(
+    !new URL(page.url()).searchParams.has('include_auxiliary'),
+    'the auxiliary toggle did not clear',
+  );
+}
+
+async function callDetail() {
+  let detail = null;
+  for (const call of labCalls.slice(0, 12)) {
+    const loaded = await api(`/projects/${labProjectId}/calls/${call.id}`);
+    if (!detail) detail = loaded;
+    if (loaded.call.session_id && loaded.hits.length > 0) {
+      detail = loaded;
+      break;
+    }
+  }
+  requireValue(detail !== null, 'no call detail could be loaded');
+  await goto(`/projects/${labProjectId}/calls?call=${detail.call.id}`);
+  const tab = (name) => page.getByRole('tab', { name });
+  await shot('52-call-detail', false);
+
+  await tab(/^Transcript$/).click();
+  await page.waitForTimeout(200);
+  const view = page.getByRole('group', { name: L.transcriptText });
+  await view.getByRole('button', { name: L.raw, exact: true }).click();
+  requireValue(
+    (await view.getByRole('button', { name: L.raw, exact: true }).getAttribute('aria-pressed')) ===
+      'true',
+    'the raw transcript view was not selected',
+  );
+  await shot('53-call-transcript', false);
+  await view.getByRole('button', { name: L.shown, exact: true }).click();
+
+  await tab(/^Upstream attempts$/).click();
+  await page.waitForTimeout(200);
+  if (detail.attempts.length > 0) {
+    await page.getByText('Attempt 1', { exact: true }).first().waitFor({ timeout: 10_000 });
+  } else {
+    await expectText('No upstream attempt was recorded.');
+  }
+  await shot('54-call-attempts', false);
+
+  await tab(/^Redacted values/).click();
+  await page.waitForTimeout(200);
+  if (detail.hits.length > 0) {
+    await expectText(detail.hits[0].label);
+  } else {
+    await expectText(L.noRedactions);
+  }
+  await shot('55-call-redactions', false);
+}
+
+async function conversations() {
+  const conversationPage = await api(`/projects/${labProjectId}/conversations?limit=100`);
+  const conversation =
+    conversationPage.items.find((entry) => entry.calls > 1) ?? conversationPage.items[0];
+  if (!conversation) {
+    console.log(
+      'traffic: calls exist but no conversation was linked; skipping the trajectory check',
+    );
+    await goto(`/projects/${labProjectId}/conversations`);
+    await expectText(L.noConversations);
+    await shot('56-conversations-empty');
+    return;
+  }
+  const trajectory = await api(
+    `/projects/${labProjectId}/conversations/${conversation.id}/trajectory`,
+  );
+  const redactionIndex = await api(
+    `/projects/${labProjectId}/conversations/${conversation.id}/redactions`,
+  );
+  await goto(`/projects/${labProjectId}/conversations/${conversation.id}`);
+  await page.getByRole('group', { name: L.graphView }).waitFor({ timeout: 15_000 });
+  await page.waitForTimeout(300);
+  await shot('57-trajectory-flow');
+
+  await page
+    .getByRole('group', { name: L.view })
+    .getByRole('button', { name: L.tree, exact: true })
+    .click();
+  await page.locator('ul li').first().waitFor({ timeout: 10_000 });
+  await shot('58-trajectory-tree');
+
+  await page
+    .getByRole('group', { name: L.view })
+    .getByRole('button', { name: L.flat, exact: true })
+    .click();
+  const firstNode = page.locator('ol > li > button').first();
+  await firstNode.waitFor({ timeout: 10_000 });
+  await firstNode.click();
+  await page.waitForTimeout(300);
+  requireValue(
+    new URL(page.url()).searchParams.get('node') !== null,
+    'selecting a trajectory node did not set the node deep link',
+  );
+  await page.getByRole('button', { name: L.closeInspector }).waitFor({ timeout: 10_000 });
+  await shot('59-trajectory-inspector', false);
+
+  const deepLink = page.url();
+  await page.goto(deepLink, { waitUntil: 'domcontentloaded' });
+  await waitForPage();
+  await page.getByRole('button', { name: L.closeInspector }).waitFor({ timeout: 10_000 });
+
+  if (trajectory.steps.length > 0) {
+    await page.getByRole('button', { name: L.nextStep }).click();
+    await page.getByText(/^Step 1 of \d+$/).waitFor({ timeout: 10_000 });
+    await shot('60-trajectory-replay', false);
+    await page.getByRole('button', { name: L.previousStep }).click();
+  } else {
+    await expectText(L.noAuditEvents);
+  }
+
+  const chip = page.getByRole('button', { name: /values? · \d+ occurrences/ }).first();
+  await chip.click();
+  const panel = await openDialog();
+  await panel.getByText(L.redactedValues, { exact: true }).first().waitFor({ timeout: 10_000 });
+  await shot('61-trajectory-redactions', false);
+  if (redactionIndex.values.length > 0) {
+    await panel.locator('summary').first().click();
+    await panel.getByRole('button', { name: L.showInOriginal, exact: true }).first().click();
+    await page.waitForURL((url) => (url.searchParams.get('node') ?? '').startsWith('call:'), {
+      timeout: 15_000,
+    });
+    await expectText('Metrics');
+  } else {
+    console.log('traffic: the conversation has no redacted values; skipping show-in-original');
+    await expectText(L.noRedactedValues);
+  }
+}
+
+async function riskAndOverview() {
+  await goto(`/projects/${labProjectId}/risk`);
+  const riskText = await bodyText();
+  requireValue(
+    riskText.includes(L.riskSources) || riskText.includes(L.noFindings),
+    'the risk page shows neither findings nor an empty state',
+  );
+  await shot('62-risk', false);
+  await goto(`/projects/${labProjectId}/overview`);
+  const overviewText = await bodyText();
+  requireValue(
+    overviewText.includes(L.requestsMainLane) || overviewText.includes(L.noData),
+    'the overview shows neither counters nor an empty state',
+  );
+  await shot('63-overview', false);
+  await goto('/monitor');
+  const monitorText = await bodyText();
+  for (const label of [L.calls, L.failures, L.blocked, L.highFindings]) {
+    requireValue(monitorText.includes(label), `the monitor does not show the ${label} counter`);
+  }
+  requireValue(monitorText.includes(L.mainLaneNote), 'the monitor does not explain the main lane');
+  await page
+    .getByRole('group', { name: L.timeWindow })
+    .getByRole('button', { name: L.last7Days, exact: true })
+    .click();
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  await page
+    .getByRole('group', { name: L.timeWindow })
+    .getByRole('button', { name: L.last24Hours, exact: true })
+    .click();
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  await shot('64-monitor', false);
+}
+
+async function trafficChecks() {
+  const callPage = await api(`/projects/${labProjectId}/calls?limit=100`);
+  labCalls = callPage.items;
+  if (labCalls.length === 0) {
+    console.log(
+      'traffic: the lab has no calls (no upstream configured); asserting empty states and skipping call, conversation, trajectory and risk checks',
+    );
+    await step('calls empty state', async () => {
+      await goto(`/projects/${labProjectId}/calls`);
+      await expectText(L.noCalls);
+      await shot('50-calls-empty');
+    });
+    await step('conversations empty state', async () => {
+      await goto(`/projects/${labProjectId}/conversations`);
+      await expectText(L.noConversations);
+      await shot('51-conversations-empty');
+    });
+    await step('risk empty state', async () => {
+      await goto(`/projects/${labProjectId}/risk`);
+      await expectText(L.noFindings);
+      await shot('52-risk-empty');
+    });
+    await step('overview empty state', async () => {
+      await goto(`/projects/${labProjectId}/overview`);
+      await expectText(L.noData);
+      await shot('53-overview-empty');
+    });
+    await step('monitor counters', async () => {
+      await goto('/monitor');
+      const text = await bodyText();
+      for (const label of [L.calls, L.failures, L.blocked, L.highFindings]) {
+        requireValue(text.includes(label), `the monitor does not show the ${label} counter`);
+      }
+      requireValue(text.includes(L.mainLaneNote), 'the monitor does not explain the main lane');
+      await shot('54-monitor');
+    });
+    return;
+  }
+  console.log(`traffic: ${labCalls.length} calls are available; running the data-dependent checks`);
+  await step('call classification filters', callFilters);
+  await step('call detail attempts, redactions and transcript', callDetail);
+  await step('conversation trajectory views, replay and redactions', conversations);
+  await step('risk, overview and monitor data', riskAndOverview);
+}
+
+async function languageAndTheme() {
+  await goto('/monitor');
+  await page.getByRole('button', { name: L.theme, exact: true }).click();
+  await page.getByRole('menuitemradio', { name: L.dark, exact: true }).click();
+  await page.waitForTimeout(300);
+  requireValue(
+    (await page.locator('html').getAttribute('data-theme')) === 'dark',
+    'the theme switch did not set the dark theme',
+  );
+  await shot('70-monitor-dark');
+  await page.getByRole('button', { name: L.theme, exact: true }).click();
+  await page.getByRole('menuitemradio', { name: L.light, exact: true }).click();
+  await page.getByRole('button', { name: L.language, exact: true }).click();
+  await shot('71-language-menu', false);
+  await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();
+  await page.waitForTimeout(400);
   requireValue(
     (await page.locator('html').getAttribute('lang')) === 'zh-CN',
-    'language switch did not set html lang',
+    'the language switch did not set the page language',
   );
-  await shot('26-monitor-zh');
-  const theme = page.getByRole('button', { name: /theme|主题/i }).first();
-  await theme.click();
-  const dark = page.getByRole('menuitemradio', { name: /dark|深色/i });
-  requireValue((await dark.count()) > 0, 'theme menu has no dark option');
-  await dark.click();
-  await page.waitForTimeout(500);
-  await shot('27-monitor-dark');
-  const lightButton = page.getByRole('button', { name: /theme|主题/i }).first();
-  await lightButton.click();
-  await page.getByRole('menuitemradio', { name: /light|浅色/i }).click();
-});
+  await shot('72-monitor-zh');
+  await page.getByRole('button', { name: '语言', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'English', exact: true }).click();
+  await page.waitForTimeout(300);
+  requireValue(
+    (await page.locator('html').getAttribute('lang')) === 'en',
+    'the language switch back to English failed',
+  );
+}
 
-const state = await context.storageState();
-const mobile = await browser.newContext({
-  viewport: { width: 390, height: 844 },
-  locale: 'zh-CN',
-  storageState: state,
-});
-const phone = await mobile.newPage();
-phone.on('pageerror', (error) => failures.push(`mobile pageerror: ${error.message}`));
-phone.on('response', (response) => {
-  if (response.status() >= 400 && !response.url().includes('/favicon')) {
-    failures.push(`mobile http ${response.status()}: ${response.url()}`);
+async function mobileCheck() {
+  const state = await context.storageState();
+  const mobile = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    locale: 'zh-CN',
+    colorScheme: 'light',
+    storageState: state,
+  });
+  const phone = await mobile.newPage();
+  watch(phone, 'mobile ');
+  for (const [name, path] of pages) {
+    await step(`mobile page ${path}`, async () => {
+      const response = await phone.goto(consoleBase + path, { waitUntil: 'domcontentloaded' });
+      await phone.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+      await phone.waitForTimeout(150);
+      if (!response || response.status() >= 400) throw new Error(`HTTP ${response?.status()}`);
+      const overflow = await phone.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      );
+      if (overflow > 2) throw new Error(`overflows horizontally by ${overflow}px`);
+      await phone.screenshot({ path: `${shots}/m-${name}.png`, fullPage: true });
+    });
   }
-});
-for (const [name, path] of pages) {
-  await phone.goto(consoleBase + path, { waitUntil: 'domcontentloaded' });
-  await phone.waitForTimeout(600);
-  const overflow = await phone.evaluate(
-    () => document.documentElement.scrollWidth - window.innerWidth,
+  await step('mobile navigation', async () => {
+    await phone.goto(`${consoleBase}/projects/${labProjectId}/overview`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await phone.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+    const menu = phone.getByRole('button', { name: L.openNavigation, exact: true });
+    requireValue((await menu.count()) > 0, 'the mobile navigation button is missing');
+    await menu.click();
+    await phone.waitForTimeout(300);
+    await phone.getByRole('navigation', { name: 'Main navigation' }).waitFor({ timeout: 10_000 });
+    await phone.screenshot({ path: `${shots}/m-menu.png` });
+  });
+  await mobile.close();
+}
+
+async function cleanup() {
+  const attempt = async (description, run) => {
+    try {
+      await run();
+    } catch (error) {
+      console.warn(`cleanup skipped ${description}: ${error.message}`);
+    }
+  };
+  if (!providerId || !channelId || !modelId) {
+    await attempt('resolve created records', async () => {
+      const providers = await api('/providers');
+      providerId = providerId || providers.find((entry) => entry.label === providerLabel)?.id || '';
+      const channels = await api('/channels');
+      channelId = channelId || channels.find((entry) => entry.name === channelName)?.id || '';
+      const models = await api('/models');
+      modelId = modelId || models.find((entry) => entry.upstream_name === modelName)?.id || '';
+    });
+  }
+  await attempt('project', () => (projectId ? api(`/projects/${projectId}`, 'DELETE') : null));
+  await attempt('user', () =>
+    userId ? api(`/users/${userId}`, 'PUT', { disabled: true, administrator: false }) : null,
   );
-  if (overflow > 2) failures.push(`mobile ${path} overflows horizontally by ${overflow}px`);
-  await phone.screenshot({ path: `${shots}/m-${name}.png`, fullPage: true });
-}
-await phone.goto(`${consoleBase}/projects/${project}/overview`, {
-  waitUntil: 'domcontentloaded',
-});
-await phone.waitForTimeout(500);
-const menu = phone
-  .getByRole('button', { name: /open menu|打开菜单|open navigation|打开导航/i })
-  .first();
-if ((await menu.count()) > 0) {
-  await menu.click();
-  await phone.waitForTimeout(300);
-  await phone.screenshot({ path: `${shots}/m-menu.png`, fullPage: false });
-} else {
-  failures.push('mobile navigation button is missing');
+  await attempt('channel', () =>
+    channelId ? api(`/channels/${channelId}?acknowledge=true&detach_targets=true`, 'DELETE') : null,
+  );
+  await attempt('model', () =>
+    modelId ? api(`/models/${modelId}?acknowledge=true&detach_targets=true`, 'DELETE') : null,
+  );
+  await attempt('provider', () => (providerId ? api(`/providers/${providerId}`, 'DELETE') : null));
 }
 
-await step('cleanup', async () => {
-  if (projectId) await api(`/projects/${projectId}`, 'DELETE');
-  if (userId) await api(`/users/${userId}`, 'PUT', { disabled: true, administrator: false });
-  if (channelId) await api(`/channels/${channelId}`, 'DELETE').catch(() => {});
-  if (modelId) await api(`/models/${modelId}`, 'DELETE').catch(() => {});
-});
+let suiteProjectName = `UI Acceptance ${stamp}`;
+let projectId = '';
+let providerId = '';
+let providerLabel = `UI Provider ${stamp}`;
+let channelId = '';
+let channelName = `UI Channel ${stamp}`;
+let modelId = '';
+let modelName = `ui-model-${stamp}`;
+let routeId = '';
+let routeName = `ui-route-${stamp}`;
+let routeAlias = `ui-alias-${stamp}`;
+let keyLabel = `ui-key-${stamp}`;
+let agentKeyId = '';
+let ruleLabel = `UI_RULE_${stamp}`;
+let ruleId = '';
+let username = '';
+let userId = '';
+let temporaryPassword = '';
+let labCalls = [];
 
-const report = {
-  pages: pages.map(([name, path]) => ({ name, path })),
-  projectId,
-  richCall: richCall?.id ?? null,
-  failures,
-};
-fs.writeFileSync(`${shots}/report.json`, JSON.stringify(report, null, 2));
-await browser.close();
-if (failures.length) {
-  console.error(`FAILED\n${failures.join('\n')}`);
+recording = true;
+try {
+  await step('sign in', signIn);
+  if (failures.length > 0) throw new Error('sign-in failed; the remaining flows need a session');
+  await step('project create', createProject);
+  if (!projectId) throw new Error('project creation failed; the remaining flows need a project');
+  await step('project switching', switchProjects);
+  await step('project settings', saveProjectSettings);
+  await step('provider connect wizard', connectProvider);
+  if (!channelId || !modelId || !routeId) {
+    throw new Error('provider connect failed; the remaining flows need the provider graph');
+  }
+  await step('route alias', addRouteAlias);
+  await step('agent key', createAgentKey);
+  await step('page sweep', sweepPages);
+  await step('channel soft delete and restore', deleteAndRestoreChannel);
+  await step('model soft delete and restore', deleteAndRestoreModel);
+  await step('route soft delete and restore', deleteAndRestoreRoute);
+  await step('policy save and rollback', savePolicy);
+  await step('redaction rule create, tester, edit and delete', createRedactionRule);
+  await step('user create, disable and enable', createUser);
+  await step('forced password change', forcedPasswordChange);
+  await step('member add and remove', members);
+  await step('default route', saveDefaultRoute);
+  await step('traffic-dependent checks', trafficChecks);
+  await step('language and theme', languageAndTheme);
+  await step('mobile 390px', mobileCheck);
+} catch (error) {
+  failures.push(`run: ${error.message}`);
+} finally {
+  recording = false;
+  await cleanup();
+  const report = {
+    stamp,
+    base,
+    labProject: labProjectId,
+    projectId,
+    providerId,
+    channelId,
+    modelId,
+    routeId,
+    agentKeyId,
+    ruleId,
+    userId,
+    traffic: labCalls.length,
+    pages: pages.map(([name, path]) => ({ name, path })),
+    failures,
+  };
+  fs.writeFileSync(`${shots}/report.json`, JSON.stringify(report, null, 2));
+  await browser.close();
+}
+
+if (failures.length > 0) {
+  console.error(`FAILED (${failures.length})\n${failures.join('\n')}`);
   process.exit(1);
 }
-console.log(`console acceptance passed (${pages.length} pages, desktop and mobile)`);
+console.log(
+  `console acceptance passed (${pages.length} pages at desktop and mobile width, ${labCalls.length} traffic calls)`,
+);

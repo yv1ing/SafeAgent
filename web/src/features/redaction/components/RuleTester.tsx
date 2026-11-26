@@ -2,11 +2,11 @@ import { useMutation } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 import type { ConsoleRuleInput } from '../../../api/generated/models';
 import { testRule } from '../../../api/generated/rules/rules';
+import { HighlightedText } from '../../../components/data/HighlightedText';
 import { Badge } from '../../../components/ui/badge';
 import { Label } from '../../../components/ui/label';
 import { Textarea } from '../../../components/ui/textarea';
 import { errorMessage, interpolate, useLocale } from '../../../i18n';
-import { splitByByteRanges } from '../../../lib/highlight';
 
 const debounceMilliseconds = 400;
 
@@ -62,19 +62,18 @@ export function RuleTester({ projectId, rule }: { projectId: string; rule: Conso
               {result.blocked && <Badge tone="danger">{t.redaction.blocked}</Badge>}
             </div>
             <pre className="rounded-md border bg-sunken p-2.5 font-mono text-xs break-words whitespace-pre-wrap">
-              {splitByByteRanges(sample, result.hits).map((segment, index) =>
-                segment.range === undefined ? (
-                  segment.text
-                ) : (
-                  <mark
-                    key={index}
-                    title={result.hits[segment.range]?.label}
-                    className="rounded-sm bg-warning-soft text-warning"
-                  >
-                    {segment.text}
-                  </mark>
-                ),
-              )}
+              <HighlightedText
+                text={sample}
+                className="font-mono"
+                sets={[
+                  {
+                    id: 'hit',
+                    ranges: result.hits.map((hit) => ({ start: hit.start, end: hit.end })),
+                    tone: 'warning',
+                    tooltip: (_range, index) => result.hits[index]?.label,
+                  },
+                ]}
+              />
             </pre>
             {result.hits.length > 0 && (
               <pre className="rounded-md border bg-surface p-2.5 font-mono text-xs break-words whitespace-pre-wrap">

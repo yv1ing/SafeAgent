@@ -5,11 +5,17 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleRouteTarget } from './consoleRouteTarget.ts';
+import type { ConsoleRouteTargetInput } from './consoleRouteTargetInput.ts';
 
 export interface ConsoleCreateRouteInput {
+  aliases?: string[];
+  /**
+   * Defaults to true on create and to the stored value on update
+   * @nullable
+   */
+  enabled?: boolean | null;
   name: string;
-  targets: ConsoleRouteTarget[];
+  targets: ConsoleRouteTargetInput[];
   /** Required on update, ignored on create */
   version?: number;
 }

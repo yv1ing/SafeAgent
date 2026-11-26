@@ -59,8 +59,9 @@ func (store *Store) CreateProject(ctx context.Context, project *entity.Project, 
 
 func (store *Store) UpdateProject(ctx context.Context, id string, project entity.Project, version int64) (*entity.Project, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Project)(nil)).
-		Set("name = ?, retention_days = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, stream_review_bytes = ?, stream_review_timeout_ms = ?, version = version + 1",
-			project.Name, project.RetentionDays, project.RequestsPerMinute, project.Concurrency, project.DailyTokenQuota,
+		Set("name = ?, retention_days = ?, auxiliary_retention_days = ?, default_route_id = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, stream_review_bytes = ?, stream_review_timeout_ms = ?, version = version + 1",
+			project.Name, project.RetentionDays, project.AuxiliaryRetentionDays, project.DefaultRouteID,
+			project.RequestsPerMinute, project.Concurrency, project.DailyTokenQuota,
 			project.DefaultMaxOutputTokens, project.StreamReviewBytes, project.StreamReviewTimeoutMS).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
@@ -130,7 +131,11 @@ func (store *Store) Prune(ctx context.Context, operationLogDays int) error {
 			WHERE b.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM calls WHERE id IN (
 			SELECT c.id FROM calls c JOIN projects p ON p.id = c.project_id
-			WHERE c.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+			WHERE c.lane <> 'auxiliary' AND c.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM calls WHERE id IN (
+			SELECT c.id FROM calls c JOIN projects p ON p.id = c.project_id
+			WHERE c.lane = 'auxiliary' AND p.auxiliary_retention_days > 0
+				AND c.created_at < now() - make_interval(days => p.auxiliary_retention_days) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM conversations WHERE id IN (
 			SELECT cv.id FROM conversations cv WHERE NOT EXISTS (SELECT 1 FROM calls c WHERE c.project_id = cv.project_id AND c.session_id = cv.id) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM analysis_jobs WHERE id IN (

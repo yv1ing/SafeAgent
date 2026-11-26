@@ -16,7 +16,8 @@ secure_cookies = true
 # Empty means the request's own Host is used for the same-origin check.
 public_origin = ""
 
-# CIDRs of reverse proxies whose X-Forwarded-For header may be trusted.
+# Reverse proxy IP addresses or CIDR ranges whose X-Forwarded-For header is trusted.
+# Empty means no proxy is trusted, so the client address is the connection's remote address.
 # trusted_proxies = ["10.0.0.0/8"]
 
 max_request_bytes = 8388608

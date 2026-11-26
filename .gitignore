@@ -20,7 +20,14 @@ coverage.out
 # Acceptance lab state
 /testenv/runtime/
 
+# Python bytecode from local tooling
+__pycache__/
+*.pyc
+
 # Editor and operating system files
 .DS_Store
 .idea/
 .vscode/
+
+# Local build caches (unused by the project itself)
+/.cache/

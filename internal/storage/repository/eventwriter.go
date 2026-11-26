@@ -147,12 +147,15 @@ func (writer *EventWriter) settle(callID string, failure error) {
 
 // sealedCallColumns are the fields the seal owns. CancelledAt and ResponseDeletedAt are written by
 // CancelResponse and DeleteResponse on a different instance, so they must not be overwritten here.
+// A lifecycle update that is not listed here is silently dropped, which is why every classification
+// column and UpdatedAt must be present.
 var sealedCallColumns = []string{
-	"public_model", "client_format", "kind", "client_transport", "stream", "session_id", "parent_call_id", "message_offset",
+	"public_model", "client_format", "client_transport", "stream", "session_id", "parent_call_id", "message_offset",
+	"operation", "purpose", "purpose_source", "lane", "outcome", "route_id", "resolution",
 	"state", "error_code", "terminated_at", "first_token_milliseconds", "duration_milliseconds", "input_tokens", "output_tokens",
 	"cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "usage_known", "cost_micros", "currency",
-	"redaction_hits", "losses", "repairs", "attempts", "response_id", "response_store", "conversation_hash",
-	"channel_id", "model_id", "upstream_model", "endpoint_format", "audit_head", "audit_events", "analysis_state",
+	"redaction_values", "redaction_labels", "losses", "repairs", "attempts", "response_id", "response_store", "conversation_hash",
+	"channel_id", "model_id", "upstream_model", "upstream_format", "audit_head", "audit_events", "analysis_state", "updated_at",
 }
 
 // Seal terminates a call: it waits for the call's in-flight batches, then writes the remaining
@@ -284,7 +287,13 @@ func writeAnalysis(ctx context.Context, transaction bun.Tx, seal entity.SealAnal
 		}
 	}
 	if seal.Snapshot != nil {
-		if _, err := transaction.NewInsert().Model(seal.Snapshot).On("CONFLICT (id) DO NOTHING").Exec(ctx); err != nil {
+		rules := seal.Snapshot.Rules
+		if len(rules) == 0 {
+			rules = []byte(`[]`)
+		}
+		if _, err := transaction.NewRaw(`INSERT INTO redaction_snapshots (id, call_id, rules, rules_version, rules_hash, created_at)
+			VALUES (?, ?, ?::jsonb, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+			seal.Snapshot.ID, seal.Snapshot.CallID, rules, seal.RulesVersion, seal.RulesHash, seal.Snapshot.CreatedAt).Exec(ctx); err != nil {
 			return err
 		}
 	}

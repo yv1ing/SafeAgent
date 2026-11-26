@@ -9,6 +9,7 @@ import (
 
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/chat"
+	"github.com/yv1ing/SafeAgent/internal/llm/codec/messages"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/stream"
 )
@@ -469,5 +470,105 @@ func TestLoweredCustomToolUsesTheJSONRestorer(t *testing.T) {
 	item := session.Journal().Response(model.Chat).Items[0]
 	if item.ToolCall == nil || item.ToolCall.Kind != model.ToolCustom || item.ToolCall.Arguments != `a"b` {
 		t.Fatalf("the lowered call must be restored as JSON and unwrapped: %+v", item.ToolCall)
+	}
+}
+
+func TestRawMessagesKeepsTheFinishFrame(t *testing.T) {
+	writer := &collector{header: http.Header{}}
+	session := stream.New(stream.Options{
+		Encoder: messages.New().NewStreamEncoder(model.ResponseMeta{ID: "msg_1", Model: "claude"},
+			codec.Peer{Side: codec.Client, Vendor: model.VendorAnthropic, Model: "claude"}),
+		Writer: writer, Journal: model.NewJournal(), Restorers: passthrough{},
+		Format: model.Messages, Raw: true, ResponseID: "msg_1", ResponseModel: "claude", HoldLimit: 1 << 20,
+	})
+	decoder := messages.New().NewStreamDecoder(codec.Peer{Side: codec.Upstream, Vendor: model.VendorAnthropic})
+	frames := []string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude","usage":{"input_tokens":5}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","usage":{"output_tokens":1}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+		`{"type":"message_stop"}`,
+	}
+	for _, payload := range frames {
+		frame := codec.Frame{Data: []byte(payload)}
+		events, _, err := decoder.Feed(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if failure := session.Handle(events, &frame); failure != nil {
+			t.Fatal(failure)
+		}
+	}
+	if err := session.StageComplete(); err != nil {
+		t.Fatal(err)
+	}
+	session.WriteStaged()
+	body := writer.body.String()
+	if !strings.Contains(body, `"stop_reason":"end_turn"`) {
+		t.Fatalf("the closing message_delta must reach the client: %s", body)
+	}
+	if count := strings.Count(body, `"type":"message_delta"`); count != 1 {
+		t.Fatalf("the message must close exactly once, got %d: %s", count, body)
+	}
+	if count := strings.Count(body, `"type":"message_stop"`); count != 1 {
+		t.Fatalf("the message must stop exactly once, got %d: %s", count, body)
+	}
+}
+
+func rawChatSession(t *testing.T, includeUsage bool) (*stream.Session, *collector) {
+	t.Helper()
+	writer := &collector{header: http.Header{}}
+	session := stream.New(stream.Options{
+		Encoder: chat.New().NewStreamEncoder(model.ResponseMeta{ID: "chatcmpl-1", Model: "m"},
+			codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m", IncludeUsage: includeUsage}),
+		Writer: writer, Journal: model.NewJournal(), Restorers: passthrough{},
+		Format: model.Chat, Raw: true, IncludeUsage: includeUsage,
+		ResponseID: "chatcmpl-1", ResponseModel: "m", HoldLimit: 1 << 20,
+	})
+	return session, writer
+}
+
+func feedRawChat(t *testing.T, session *stream.Session) {
+	t.Helper()
+	decoder := chat.New().NewStreamDecoder(codec.Peer{Side: codec.Upstream, Vendor: model.VendorOpenAI})
+	for _, payload := range []string{
+		`{"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`,
+		`{"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		`[DONE]`,
+	} {
+		frame := codec.Frame{Data: []byte(payload)}
+		events, _, err := decoder.Feed(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if failure := session.Handle(events, &frame); failure != nil {
+			t.Fatal(failure)
+		}
+	}
+	if err := session.StageComplete(); err != nil {
+		t.Fatal(err)
+	}
+	session.WriteStaged()
+}
+
+func TestRawChatSuppressesAUsageOnlyChunk(t *testing.T) {
+	session, writer := rawChatSession(t, false)
+	feedRawChat(t, session)
+	body := writer.body.String()
+	if strings.Contains(body, `"total_tokens":5`) {
+		t.Fatalf("a usage-only chunk must not reach a client that did not ask for usage: %s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"stop"`) {
+		t.Fatalf("the finish chunk must still reach the client: %s", body)
+	}
+}
+
+func TestRawChatForwardsAUsageOnlyChunkWhenRequested(t *testing.T) {
+	session, writer := rawChatSession(t, true)
+	feedRawChat(t, session)
+	if body := writer.body.String(); !strings.Contains(body, `"total_tokens":5`) {
+		t.Fatalf("a requested usage chunk must reach the client: %s", body)
 	}
 }

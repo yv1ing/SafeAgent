@@ -5,24 +5,61 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from '@tanstack/react-query';
 
-import type { ConsoleAPIError, ConsoleProviderView } from '../models';
+import type {
+  ConsoleAPIError,
+  ConsoleProviderInput,
+  ConsoleProviderView,
+  ConsoleUpdateProviderInput,
+} from '../models';
 
 import { request } from '../../client.ts';
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+const getHeaders = (
+  ...sources: (RequestInit['headers'] | Record<string, string | undefined>)[]
+) => {
+  const seen = new Set<string>();
+  const layers: [string, string | readonly string[]][][] = [];
+  for (const source of sources.reverse()) {
+    if (!source) continue;
+    const entries =
+      source instanceof Headers
+        ? source.entries()
+        : Symbol.iterator in source
+          ? Array.from(
+              source as Iterable<Iterable<string>>,
+              (entry) => Array.from(entry) as [string, string],
+            )
+          : Object.entries<string | readonly string[] | undefined>(source);
+    const layer: [string, string | readonly string[]][] = [];
+    for (const [name, value] of entries) {
+      if (value !== undefined && !seen.has(name.toLowerCase())) layer.push([name, value]);
+    }
+    for (const [name] of layer) seen.add(name.toLowerCase());
+    layers.push(layer);
+  }
+  return Object.fromEntries(layers.reverse().flat()) as Extract<
+    RequestInit['headers'],
+    Record<string, unknown>
+  >;
+};
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };
@@ -144,3 +181,433 @@ export function useListProviders<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getCreateProviderUrl = () => {
+  return `/console/api/providers`;
+};
+
+export const createProvider = async (
+  consoleProviderInput: ConsoleProviderInput,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleProviderView> => {
+  return request<ConsoleProviderView>(getCreateProviderUrl(), {
+    ...options,
+    method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(consoleProviderInput),
+  });
+};
+
+export const getCreateProviderMutationKey = () => ['createProvider'] as const;
+
+export const getCreateProviderMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProvider>>,
+    TError,
+    CreateProviderMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createProvider>>,
+  TError,
+  CreateProviderMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateProviderMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createProvider>>,
+    CreateProviderMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createProvider(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateProviderMutationResult = NonNullable<Awaited<ReturnType<typeof createProvider>>>;
+export type CreateProviderMutationBody = ConsoleProviderInput;
+export type CreateProviderMutationError = ConsoleAPIError;
+export type CreateProviderMutationVariables = { data: ConsoleProviderInput };
+
+export const useCreateProvider = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createProvider>>,
+      TError,
+      CreateProviderMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createProvider>>,
+  TError,
+  CreateProviderMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreateProviderMutationOptions(options), queryClient);
+};
+export const getDeleteProviderUrl = (providerId: string) => {
+  return `/console/api/providers/${providerId}`;
+};
+
+export const deleteProvider = async (
+  providerId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<void> => {
+  return request<void>(getDeleteProviderUrl(providerId), {
+    ...options,
+    method: 'DELETE',
+  });
+};
+
+export const getDeleteProviderMutationKey = () => ['deleteProvider'] as const;
+
+export const getDeleteProviderMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteProvider>>,
+    TError,
+    DeleteProviderMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteProvider>>,
+  TError,
+  DeleteProviderMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteProviderMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteProvider>>,
+    DeleteProviderMutationVariables
+  > = (props) => {
+    const { providerId } = props ?? {};
+
+    return deleteProvider(providerId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteProviderMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProvider>>>;
+
+export type DeleteProviderMutationError = ConsoleAPIError;
+export type DeleteProviderMutationVariables = { providerId: string };
+
+export const useDeleteProvider = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteProvider>>,
+      TError,
+      DeleteProviderMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteProvider>>,
+  TError,
+  DeleteProviderMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteProviderMutationOptions(options), queryClient);
+};
+export const getGetProviderUrl = (providerId: string) => {
+  return `/console/api/providers/${providerId}`;
+};
+
+export const getProvider = async (
+  providerId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleProviderView> => {
+  return request<ConsoleProviderView>(getGetProviderUrl(providerId), {
+    ...options,
+    method: 'GET',
+  });
+};
+
+export const getGetProviderQueryKey = (providerId: string) => {
+  return [`/console/api/providers/${providerId}`] as const;
+};
+
+export const getGetProviderQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProvider>>,
+  TError = ConsoleAPIError,
+>(
+  providerId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetProviderQueryKey(providerId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getProvider>>> = ({ signal }) =>
+    getProvider(providerId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: providerId !== null && providerId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+};
+
+export type GetProviderQueryResult = NonNullable<Awaited<ReturnType<typeof getProvider>>>;
+export type GetProviderQueryError = ConsoleAPIError;
+
+export function useGetProvider<
+  TData = Awaited<ReturnType<typeof getProvider>>,
+  TError = ConsoleAPIError,
+>(
+  providerId: string,
+  options: {
+    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData>> &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProvider>>,
+          TError,
+          Awaited<ReturnType<typeof getProvider>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetProvider<
+  TData = Awaited<ReturnType<typeof getProvider>>,
+  TError = ConsoleAPIError,
+>(
+  providerId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData>> &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProvider>>,
+          TError,
+          Awaited<ReturnType<typeof getProvider>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetProvider<
+  TData = Awaited<ReturnType<typeof getProvider>>,
+  TError = ConsoleAPIError,
+>(
+  providerId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetProvider<
+  TData = Awaited<ReturnType<typeof getProvider>>,
+  TError = ConsoleAPIError,
+>(
+  providerId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getProvider>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+  const queryOptions = getGetProviderQueryOptions(providerId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateProviderUrl = (providerId: string) => {
+  return `/console/api/providers/${providerId}`;
+};
+
+export const updateProvider = async (
+  providerId: string,
+  consoleUpdateProviderInput: ConsoleUpdateProviderInput,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleProviderView> => {
+  return request<ConsoleProviderView>(getUpdateProviderUrl(providerId), {
+    ...options,
+    method: 'PUT',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(consoleUpdateProviderInput),
+  });
+};
+
+export const getUpdateProviderMutationKey = () => ['updateProvider'] as const;
+
+export const getUpdateProviderMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProvider>>,
+    TError,
+    UpdateProviderMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateProvider>>,
+  TError,
+  UpdateProviderMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateProviderMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateProvider>>,
+    UpdateProviderMutationVariables
+  > = (props) => {
+    const { providerId, data } = props ?? {};
+
+    return updateProvider(providerId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateProviderMutationResult = NonNullable<Awaited<ReturnType<typeof updateProvider>>>;
+export type UpdateProviderMutationBody = ConsoleUpdateProviderInput;
+export type UpdateProviderMutationError = ConsoleAPIError;
+export type UpdateProviderMutationVariables = {
+  providerId: string;
+  data: ConsoleUpdateProviderInput;
+};
+
+export const useUpdateProvider = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateProvider>>,
+      TError,
+      UpdateProviderMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateProvider>>,
+  TError,
+  UpdateProviderMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateProviderMutationOptions(options), queryClient);
+};
+export const getResetProviderUrl = (providerId: string) => {
+  return `/console/api/providers/${providerId}/reset`;
+};
+
+export const resetProvider = async (
+  providerId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleProviderView> => {
+  return request<ConsoleProviderView>(getResetProviderUrl(providerId), {
+    ...options,
+    method: 'POST',
+  });
+};
+
+export const getResetProviderMutationKey = () => ['resetProvider'] as const;
+
+export const getResetProviderMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetProvider>>,
+    TError,
+    ResetProviderMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetProvider>>,
+  TError,
+  ResetProviderMutationVariables,
+  TContext
+> => {
+  const mutationKey = getResetProviderMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetProvider>>,
+    ResetProviderMutationVariables
+  > = (props) => {
+    const { providerId } = props ?? {};
+
+    return resetProvider(providerId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetProviderMutationResult = NonNullable<Awaited<ReturnType<typeof resetProvider>>>;
+
+export type ResetProviderMutationError = ConsoleAPIError;
+export type ResetProviderMutationVariables = { providerId: string };
+
+export const useResetProvider = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof resetProvider>>,
+      TError,
+      ResetProviderMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof resetProvider>>,
+  TError,
+  ResetProviderMutationVariables,
+  TContext
+> => {
+  return useMutation(getResetProviderMutationOptions(options), queryClient);
+};

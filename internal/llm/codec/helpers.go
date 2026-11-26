@@ -41,7 +41,7 @@ func ValidJSON(value string) bool {
 	return err == nil
 }
 
-func InputJSON(value any) string {
+func inputJSON(value any) string {
 	if value == nil {
 		return ""
 	}

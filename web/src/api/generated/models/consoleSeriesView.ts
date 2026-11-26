@@ -9,8 +9,8 @@ import type { ConsoleBucketView } from './consoleBucketView.ts';
 import type { ConsoleChannelTraffic } from './consoleChannelTraffic.ts';
 import type { ConsoleCodeCountView } from './consoleCodeCountView.ts';
 import type { ConsoleCostView } from './consoleCostView.ts';
-import type { ConsoleHealthView } from './consoleHealthView.ts';
 import type { ConsoleRedactionView } from './consoleRedactionView.ts';
+import type { ConsoleSeriesHealthView } from './consoleSeriesHealthView.ts';
 import type { ConsoleSeriesViewBucket } from './consoleSeriesViewBucket.ts';
 import type { ConsoleSeriesViewWindow } from './consoleSeriesViewWindow.ts';
 import type { ConsoleSeverityCountView } from './consoleSeverityCountView.ts';
@@ -21,7 +21,7 @@ export interface ConsoleSeriesView {
   channels: ConsoleChannelTraffic[];
   costs: ConsoleCostView[];
   finding_codes: ConsoleCodeCountView[];
-  health: ConsoleHealthView[];
+  health: ConsoleSeriesHealthView[];
   redactions: ConsoleRedactionView[];
   severities: ConsoleSeverityCountView[];
   window: ConsoleSeriesViewWindow;

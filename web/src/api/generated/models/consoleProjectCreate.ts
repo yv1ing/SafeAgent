@@ -7,6 +7,11 @@
  */
 
 export interface ConsoleProjectCreate {
+  /**
+   * Days auxiliary calls are kept; 0 keeps them as long as the project retention
+   * @nullable
+   */
+  auxiliary_retention_days?: number | null;
   /** @nullable */
   concurrency?: number | null;
   /** @nullable */
@@ -16,6 +21,8 @@ export interface ConsoleProjectCreate {
    * @nullable
    */
   default_max_output_tokens?: number | null;
+  /** Route that serves side and auxiliary calls whose model has no route */
+  default_route_id?: string;
   name: string;
   /** @nullable */
   requests_per_minute?: number | null;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -22,11 +23,14 @@ type RiskReport struct {
 	TotalFindings int64                     `json:"total_findings"`
 }
 
-func (service *Service) Risk(ctx context.Context, projectID string, since time.Time) (RiskReport, error) {
+func (service *Service) Risk(ctx context.Context, actor access.Actor, projectID string, since time.Time) (RiskReport, error) {
 	report := RiskReport{
 		Since: since, Sources: []repository.FindingCount{}, Modes: []repository.FindingCount{},
 		Harms: []repository.FindingCount{}, Severities: []repository.FindingCount{},
 		Codes: []repository.FindingCode{}, Agents: []repository.AgentRisk{}, HighRecent: []repository.HighRiskCall{},
+	}
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return report, err
 	}
 	var err error
 	if report.Sources, err = service.store.FindingDistribution(ctx, projectID, since, "source"); err != nil {
@@ -57,10 +61,16 @@ func (service *Service) Risk(ctx context.Context, projectID string, since time.T
 }
 
 // FlowsOfAgent returns the flow edges the risk page draws for one agent key.
-func (service *Service) FlowsOfAgent(ctx context.Context, projectID, agentKeyID string, since time.Time) ([]entity.AnalysisFlow, error) {
+func (service *Service) FlowsOfAgent(ctx context.Context, actor access.Actor, projectID, agentKeyID string, since time.Time) ([]entity.AnalysisFlow, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	return service.store.AgentFlows(ctx, projectID, agentKeyID, since, 500)
 }
 
-func (service *Service) BatchesOfProject(ctx context.Context, projectID string, limit int) ([]entity.AnalysisBatch, error) {
+func (service *Service) BatchesOfProject(ctx context.Context, actor access.Actor, projectID string, limit int) ([]entity.AnalysisBatch, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	return service.store.BatchesOfProject(ctx, projectID, limit)
 }

@@ -11,17 +11,18 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
 type PolicyService struct {
-	store  *repository.Store
-	access ProjectAccess
+	store    *repository.Store
+	projects access.ProjectAccess
 }
 
 func NewPolicyService(store *repository.Store) *PolicyService {
-	return &PolicyService{store: store, access: store}
+	return &PolicyService{store: store, projects: store}
 }
 
 type PolicyVersion struct {
@@ -34,8 +35,8 @@ type PolicyVersion struct {
 	CreatedAt time.Time
 }
 
-func (service *PolicyService) List(ctx context.Context, actor Actor, projectID string) ([]PolicyVersion, error) {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) List(ctx context.Context, actor access.Actor, projectID string) ([]PolicyVersion, error) {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return nil, err
 	}
 	rows, err := service.store.PolicyVersions(ctx, projectID)
@@ -53,8 +54,8 @@ func (service *PolicyService) List(ctx context.Context, actor Actor, projectID s
 	return versions, nil
 }
 
-func (service *PolicyService) Active(ctx context.Context, actor Actor, projectID string) (PolicyVersion, error) {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) Active(ctx context.Context, actor access.Actor, projectID string) (PolicyVersion, error) {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return PolicyVersion{}, err
 	}
 	row, err := service.store.ActivePolicy(ctx, projectID)
@@ -70,8 +71,8 @@ func (service *PolicyService) Active(ctx context.Context, actor Actor, projectID
 
 // Save compiles and activates a new version. Policy editing is administrator-only; members can read
 // the active document and its history.
-func (service *PolicyService) Save(ctx context.Context, actor Actor, projectID string, document policy.Document, note string) (PolicyVersion, error) {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) Save(ctx context.Context, actor access.Actor, projectID string, document policy.Document, note string) (PolicyVersion, error) {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return PolicyVersion{}, err
 	}
 	if err := actor.RequireAdmin(); err != nil {
@@ -80,10 +81,10 @@ func (service *PolicyService) Save(ctx context.Context, actor Actor, projectID s
 	return service.save(ctx, actor, projectID, document, note)
 }
 
-func (service *PolicyService) save(ctx context.Context, actor Actor, projectID string, document policy.Document, note string) (PolicyVersion, error) {
+func (service *PolicyService) save(ctx context.Context, actor access.Actor, projectID string, document policy.Document, note string) (PolicyVersion, error) {
 	compiled, err := policy.Compile(document)
 	if err != nil {
-		return PolicyVersion{}, Invalid("invalid_policy")
+		return PolicyVersion{}, access.Invalid("invalid_policy")
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {
@@ -95,15 +96,15 @@ func (service *PolicyService) save(ctx context.Context, actor Actor, projectID s
 	}
 	version, err := service.store.SavePolicyVersion(ctx, row)
 	if err != nil {
-		return PolicyVersion{}, Translate(err)
+		return PolicyVersion{}, access.Translate(err)
 	}
 	row.Version = version
 	return decode(row)
 }
 
 // Rollback saves an older document as a new version. History is never rewritten.
-func (service *PolicyService) Rollback(ctx context.Context, actor Actor, projectID string, version int64) (PolicyVersion, error) {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) Rollback(ctx context.Context, actor access.Actor, projectID string, version int64) (PolicyVersion, error) {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return PolicyVersion{}, err
 	}
 	if err := actor.RequireAdmin(); err != nil {
@@ -111,7 +112,7 @@ func (service *PolicyService) Rollback(ctx context.Context, actor Actor, project
 	}
 	row, err := service.store.PolicyVersion(ctx, projectID, version)
 	if err != nil {
-		return PolicyVersion{}, Translate(err)
+		return PolicyVersion{}, access.Translate(err)
 	}
 	previous, err := decode(row)
 	if err != nil {
@@ -120,15 +121,15 @@ func (service *PolicyService) Rollback(ctx context.Context, actor Actor, project
 	return service.save(ctx, actor, projectID, previous.Document, fmt.Sprintf("restore version %d", version))
 }
 
-func (service *PolicyService) Validate(ctx context.Context, actor Actor, projectID string, document policy.Document) error {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) Validate(ctx context.Context, actor access.Actor, projectID string, document policy.Document) error {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return err
 	}
 	if err := actor.RequireAdmin(); err != nil {
 		return err
 	}
 	if _, err := policy.Compile(document); err != nil {
-		return Invalid("invalid_policy")
+		return access.Invalid("invalid_policy")
 	}
 	return nil
 }
@@ -154,8 +155,8 @@ type PolicyTestResult struct {
 
 // Test compiles a document, runs the deterministic detector set over the supplied observation and
 // evaluates every rule against it. It stores nothing.
-func (service *PolicyService) Test(ctx context.Context, actor Actor, projectID string, document policy.Document, trace *observation.Trace) (*PolicyTestResult, error) {
-	if err := actor.RequireProject(ctx, service.access, projectID); err != nil {
+func (service *PolicyService) Test(ctx context.Context, actor access.Actor, projectID string, document policy.Document, trace *observation.Trace) (*PolicyTestResult, error) {
+	if err := actor.RequireProject(ctx, service.projects, projectID); err != nil {
 		return nil, err
 	}
 	if err := actor.RequireAdmin(); err != nil {
@@ -163,10 +164,10 @@ func (service *PolicyService) Test(ctx context.Context, actor Actor, projectID s
 	}
 	compiled, err := policy.Compile(document)
 	if err != nil {
-		return nil, Invalid("invalid_policy")
+		return nil, access.Invalid("invalid_policy")
 	}
 	if trace == nil {
-		return nil, Invalid("invalid_request")
+		return nil, access.Invalid("invalid_request")
 	}
 	engine := analysis.NewEngine(analysis.DefaultRegistry())
 	result := engine.Evaluate(ctx, trace, analysis.Options{})

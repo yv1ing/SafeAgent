@@ -5,6 +5,7 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
+import type { ConsoleFlowViewSourceSection } from './consoleFlowViewSourceSection.ts';
 
 export interface ConsoleFlowView {
   confidence: number;
@@ -12,8 +13,13 @@ export interface ConsoleFlowView {
   relation: string;
   sink: string;
   sink_tool_call_id: string;
+  source_call_id: string;
+  /** Detector-time item index; kept for detector parity */
   source_item: number;
+  source_ordinal: number;
   source_origin: string;
   source_path: string;
+  source_section: ConsoleFlowViewSourceSection;
+  /** Detector-time turn index; kept for detector parity */
   source_turn: number;
 }

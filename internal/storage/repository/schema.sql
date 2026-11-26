@@ -28,17 +28,20 @@ CREATE TABLE IF NOT EXISTS projects (
     id text PRIMARY KEY,
     name text NOT NULL,
     retention_days integer NOT NULL DEFAULT 30,
+    auxiliary_retention_days integer NOT NULL DEFAULT 3,
     requests_per_minute integer NOT NULL DEFAULT 0,
     concurrency integer NOT NULL DEFAULT 0,
     daily_token_quota bigint NOT NULL DEFAULT 0,
     default_max_output_tokens integer NOT NULL DEFAULT 0,
     stream_review_bytes integer NOT NULL DEFAULT 0,
     stream_review_timeout_ms integer NOT NULL DEFAULT 300,
+    default_route_id text NOT NULL DEFAULT '',
     rules_version bigint NOT NULL DEFAULT 0,
     active_policy_version bigint NOT NULL DEFAULT 0,
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT projects_retention CHECK (retention_days BETWEEN 1 AND 3650),
+    CONSTRAINT projects_auxiliary_retention CHECK (auxiliary_retention_days BETWEEN 0 AND 90),
     CONSTRAINT projects_stream_review CHECK (
         stream_review_bytes BETWEEN 0 AND 65536 AND stream_review_timeout_ms BETWEEN 0 AND 5000
     )
@@ -68,32 +71,25 @@ CREATE TABLE IF NOT EXISTS agent_keys (
 );
 CREATE INDEX IF NOT EXISTS agent_keys_project ON agent_keys (project_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS models (
+CREATE TABLE IF NOT EXISTS providers (
     id text PRIMARY KEY,
-    provider_id text NOT NULL,
-    upstream_name text NOT NULL,
-    display_name text NOT NULL DEFAULT '',
-    kind text NOT NULL,
-    formats jsonb NOT NULL DEFAULT '[]',
-    input_price bigint NOT NULL DEFAULT 0,
-    output_price bigint NOT NULL DEFAULT 0,
-    cache_read_price bigint NOT NULL DEFAULT 0,
-    cache_write_price bigint NOT NULL DEFAULT 0,
-    currency text NOT NULL DEFAULT 'USD',
+    source text NOT NULL,
+    label text NOT NULL,
+    endpoints jsonb NOT NULL DEFAULT '{}',
+    seed_version integer NOT NULL DEFAULT 0,
     enabled boolean NOT NULL DEFAULT true,
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL,
-    UNIQUE (provider_id, upstream_name),
-    CONSTRAINT models_kind CHECK (kind IN ('generation','embedding','moderation'))
+    updated_at timestamptz NOT NULL,
+    deleted_at timestamptz,
+    CONSTRAINT providers_source CHECK (source IN ('builtin','custom'))
 );
 
 CREATE TABLE IF NOT EXISTS channels (
     id text PRIMARY KEY,
+    provider_id text NOT NULL REFERENCES providers(id) ON DELETE RESTRICT,
     name text NOT NULL,
-    provider_id text NOT NULL,
-    endpoints jsonb NOT NULL DEFAULT '[]',
-    model_ids jsonb NOT NULL DEFAULT '[]',
-    capability_overrides jsonb NOT NULL DEFAULT '[]',
+    base_url text NOT NULL,
     headers jsonb NOT NULL DEFAULT '{}',
     forward_headers jsonb NOT NULL DEFAULT '[]',
     default_max_output_tokens integer NOT NULL DEFAULT 0,
@@ -102,8 +98,11 @@ CREATE TABLE IF NOT EXISTS channels (
     allow_private_network boolean NOT NULL DEFAULT false,
     enabled boolean NOT NULL DEFAULT true,
     version bigint NOT NULL DEFAULT 1,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    deleted_at timestamptz
 );
+CREATE UNIQUE INDEX IF NOT EXISTS channels_provider_name ON channels (provider_id, name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS channel_keys (
     id text PRIMARY KEY,
@@ -115,15 +114,77 @@ CREATE TABLE IF NOT EXISTS channel_keys (
 );
 CREATE INDEX IF NOT EXISTS channel_keys_channel ON channel_keys (channel_id);
 
+CREATE TABLE IF NOT EXISTS models (
+    id text PRIMARY KEY,
+    provider_id text NOT NULL REFERENCES providers(id) ON DELETE RESTRICT,
+    upstream_name text NOT NULL,
+    display_name text NOT NULL DEFAULT '',
+    kind text NOT NULL,
+    input_price bigint NOT NULL DEFAULT 0,
+    output_price bigint NOT NULL DEFAULT 0,
+    cache_read_price bigint NOT NULL DEFAULT 0,
+    cache_write_price bigint NOT NULL DEFAULT 0,
+    currency text NOT NULL DEFAULT 'USD',
+    enabled boolean NOT NULL DEFAULT true,
+    version bigint NOT NULL DEFAULT 1,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    deleted_at timestamptz,
+    CONSTRAINT models_kind CHECK (kind IN ('generation','embedding','moderation'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS models_provider_upstream ON models (provider_id, upstream_name) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS channel_capability_overrides (
+    channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    model_id text NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    format text NOT NULL,
+    field text NOT NULL,
+    value jsonb NOT NULL DEFAULT '{}',
+    reason text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (channel_id, model_id, format, field)
+);
+
 CREATE TABLE IF NOT EXISTS model_routes (
     id text PRIMARY KEY,
     project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name text NOT NULL,
-    targets jsonb NOT NULL DEFAULT '[]',
+    enabled boolean NOT NULL DEFAULT true,
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL,
-    UNIQUE (project_id, name)
+    updated_at timestamptz NOT NULL,
+    deleted_at timestamptz
 );
+CREATE UNIQUE INDEX IF NOT EXISTS model_routes_project_name ON model_routes (project_id, name) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS route_aliases (
+    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    alias text NOT NULL,
+    route_id text NOT NULL REFERENCES model_routes(id) ON DELETE CASCADE,
+    source text NOT NULL DEFAULT 'manual',
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (project_id, alias),
+    CONSTRAINT route_aliases_source CHECK (source IN ('manual','renamed'))
+);
+CREATE INDEX IF NOT EXISTS route_aliases_route ON route_aliases (route_id);
+
+CREATE TABLE IF NOT EXISTS route_targets (
+    id text PRIMARY KEY,
+    route_id text NOT NULL REFERENCES model_routes(id) ON DELETE CASCADE,
+    channel_id text NOT NULL REFERENCES channels(id) ON DELETE RESTRICT,
+    model_id text NOT NULL REFERENCES models(id) ON DELETE RESTRICT,
+    format text NOT NULL DEFAULT '',
+    priority integer NOT NULL DEFAULT 0,
+    weight integer NOT NULL DEFAULT 1,
+    max_output_tokens integer NOT NULL DEFAULT 0,
+    enabled boolean NOT NULL DEFAULT true,
+    disabled_reason text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    UNIQUE (route_id, channel_id, model_id, format)
+);
+CREATE INDEX IF NOT EXISTS route_targets_route ON route_targets (route_id);
+CREATE INDEX IF NOT EXISTS route_targets_channel ON route_targets (channel_id);
+CREATE INDEX IF NOT EXISTS route_targets_model ON route_targets (model_id);
 
 CREATE TABLE IF NOT EXISTS redaction_rules (
     id text PRIMARY KEY,
@@ -158,14 +219,20 @@ CREATE TABLE IF NOT EXISTS calls (
     project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     agent_key_id text NOT NULL REFERENCES agent_keys(id) ON DELETE CASCADE,
     client_format text NOT NULL,
-    kind text NOT NULL DEFAULT '',
+    operation text NOT NULL,
+    purpose text NOT NULL DEFAULT 'unknown',
+    purpose_source text NOT NULL DEFAULT 'default',
+    lane text NOT NULL,
     client_transport text NOT NULL DEFAULT '',
-    endpoint_format text NOT NULL DEFAULT '',
+    upstream_format text NOT NULL DEFAULT '',
     public_model text NOT NULL DEFAULT '',
     model_id text NOT NULL DEFAULT '',
     upstream_model text NOT NULL DEFAULT '',
     channel_id text NOT NULL DEFAULT '',
+    route_id text NOT NULL DEFAULT '',
+    resolution text NOT NULL DEFAULT '',
     state text NOT NULL,
+    outcome text NOT NULL DEFAULT '',
     error_code text NOT NULL DEFAULT '',
     stream boolean NOT NULL DEFAULT false,
     first_token_milliseconds integer NOT NULL DEFAULT 0,
@@ -178,7 +245,8 @@ CREATE TABLE IF NOT EXISTS calls (
     usage_known boolean NOT NULL DEFAULT false,
     cost_micros bigint,
     currency text NOT NULL DEFAULT '',
-    redaction_hits integer NOT NULL DEFAULT 0,
+    redaction_values integer NOT NULL DEFAULT 0,
+    redaction_labels jsonb NOT NULL DEFAULT '[]',
     max_severity text NOT NULL DEFAULT '',
     losses jsonb NOT NULL DEFAULT '[]',
     repairs jsonb NOT NULL DEFAULT '[]',
@@ -197,23 +265,42 @@ CREATE TABLE IF NOT EXISTS calls (
     latest_analysis_id text NOT NULL DEFAULT '',
     finding_count integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
     terminated_at timestamptz,
-    CONSTRAINT calls_state CHECK (state IN ('running','completed','failed','blocked','cancelled','interrupted','rejected')),
-    CONSTRAINT calls_analysis_state CHECK (analysis_state IN ('pending','running','completed','failed'))
+    CONSTRAINT calls_operation CHECK (operation IN (
+        'generation','count_tokens','models','model','responses_retrieve',
+        'responses_input_items','responses_cancel','responses_delete','embeddings','moderations'
+    )),
+    CONSTRAINT calls_purpose CHECK (purpose IN (
+        'chat','subagent','compaction','title','description','review','memory','suggestion',
+        'probe','count_tokens','model_list','embedding','moderation','unknown'
+    )),
+    CONSTRAINT calls_purpose_source CHECK (purpose_source IN ('declared','heuristic','default')),
+    CONSTRAINT calls_lane CHECK (lane IN ('main','side','auxiliary')),
+    CONSTRAINT calls_state CHECK (state IN ('running','completed','failed','cancelled','interrupted')),
+    CONSTRAINT calls_outcome CHECK (outcome IN (
+        '','ok','blocked','rejected','client_error','upstream_error','unsupported','not_found',
+        'rate_limited','cancelled'
+    )),
+    CONSTRAINT calls_resolution CHECK (resolution IN ('','exact','alias','explicit','fallback')),
+    CONSTRAINT calls_analysis_state CHECK (analysis_state IN ('pending','running','completed','skipped','failed'))
 );
 CREATE INDEX IF NOT EXISTS calls_project_created ON calls (project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS calls_project_lane_created ON calls (project_id, lane, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS calls_lane_created ON calls (lane, created_at);
+CREATE INDEX IF NOT EXISTS calls_project_operation ON calls (project_id, operation, created_at DESC);
 CREATE INDEX IF NOT EXISTS calls_agent ON calls (agent_key_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS calls_agent_conversation ON calls (agent_key_id, conversation_hash) WHERE conversation_hash <> '';
 CREATE INDEX IF NOT EXISTS calls_agent_response ON calls (agent_key_id, response_id) WHERE response_id <> '';
-CREATE INDEX IF NOT EXISTS calls_session ON calls (project_id, session_id, created_at, id);
-CREATE INDEX IF NOT EXISTS calls_parent ON calls (parent_call_id) WHERE parent_call_id <> '';
+CREATE INDEX IF NOT EXISTS calls_session ON calls (project_id, session_id, created_at, id) WHERE session_id <> '';
 CREATE INDEX IF NOT EXISTS calls_project_severity ON calls (project_id, max_severity, created_at DESC) WHERE max_severity <> '';
-CREATE INDEX IF NOT EXISTS calls_project_analysis ON calls (project_id, analysis_state, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS redaction_snapshots (
     id text PRIMARY KEY,
     call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     rules jsonb NOT NULL DEFAULT '[]',
+    rules_version bigint NOT NULL DEFAULT 0,
+    rules_hash text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS redaction_snapshots_call ON redaction_snapshots (call_id);
@@ -223,15 +310,13 @@ CREATE TABLE IF NOT EXISTS events (
     sequence bigint NOT NULL,
     project_id text NOT NULL,
     kind text NOT NULL,
-    schema_version integer NOT NULL DEFAULT 6,
+    schema_version integer NOT NULL DEFAULT 8,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL,
     prev_hash text NOT NULL DEFAULT '',
     hash text NOT NULL DEFAULT '',
     PRIMARY KEY (call_id, sequence)
 );
-CREATE INDEX IF NOT EXISTS events_project_kind ON events (project_id, kind, created_at DESC);
-CREATE INDEX IF NOT EXISTS events_project_created ON events (project_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS call_tools (
     project_id text NOT NULL,
@@ -277,9 +362,7 @@ CREATE TABLE IF NOT EXISTS analyses (
 );
 CREATE INDEX IF NOT EXISTS analyses_call ON analyses (call_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS analyses_project ON analyses (project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS analyses_batch ON analyses (batch_id) WHERE batch_id <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS analyses_identity ON analyses (call_id, input_hash, detector_version, decision_model);
-CREATE INDEX IF NOT EXISTS analyses_finished ON analyses (finished_at);
 
 CREATE TABLE IF NOT EXISTS analysis_findings (
     id text PRIMARY KEY,
@@ -300,17 +383,18 @@ CREATE TABLE IF NOT EXISTS analysis_findings (
     detector_version text NOT NULL,
     evidence jsonb NOT NULL DEFAULT '[]',
     attribution jsonb NOT NULL DEFAULT '[]',
-    flow_source_turn integer NOT NULL DEFAULT 0,
-    flow_source_item integer NOT NULL DEFAULT 0,
+    flow_source_call_id text NOT NULL DEFAULT '',
+    flow_source_section text NOT NULL DEFAULT '',
+    flow_source_ordinal integer NOT NULL DEFAULT 0,
     flow_source_origin text NOT NULL DEFAULT '',
+    flow_source_path text NOT NULL DEFAULT '',
     flow_relation text NOT NULL DEFAULT '',
     flow_sink_tool_call_id text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     UNIQUE (analysis_id, fingerprint)
 );
 CREATE INDEX IF NOT EXISTS analysis_findings_project ON analysis_findings (project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_findings_code ON analysis_findings (project_id, code, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_findings_source ON analysis_findings (project_id, source, created_at DESC);
+CREATE INDEX IF NOT EXISTS analysis_findings_call ON analysis_findings (call_id, created_at);
 
 CREATE TABLE IF NOT EXISTS analysis_flows (
     id text PRIMARY KEY,
@@ -318,8 +402,9 @@ CREATE TABLE IF NOT EXISTS analysis_flows (
     project_id text NOT NULL,
     call_id text NOT NULL,
     agent_key_id text NOT NULL,
-    source_turn integer NOT NULL,
-    source_item integer NOT NULL,
+    source_call_id text NOT NULL DEFAULT '',
+    source_section text NOT NULL DEFAULT '',
+    source_ordinal integer NOT NULL DEFAULT 0,
     source_origin text NOT NULL,
     source_path text NOT NULL DEFAULT '',
     sink_tool_call_id text NOT NULL DEFAULT '',
@@ -330,7 +415,6 @@ CREATE TABLE IF NOT EXISTS analysis_flows (
     created_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS analysis_flows_agent ON analysis_flows (project_id, agent_key_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_flows_call ON analysis_flows (call_id, created_at);
 CREATE INDEX IF NOT EXISTS analysis_flows_analysis ON analysis_flows (analysis_id);
 
 CREATE TABLE IF NOT EXISTS analysis_batches (
@@ -431,7 +515,7 @@ CREATE TABLE IF NOT EXISTS traffic_rollups (
     input_tokens bigint NOT NULL DEFAULT 0,
     output_tokens bigint NOT NULL DEFAULT 0,
     duration_p95 bigint NOT NULL DEFAULT 0,
-    redaction_hits bigint NOT NULL DEFAULT 0,
+    redaction_values bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (bucket_start, bucket_size, project_id, channel_id, model)
 );
 CREATE INDEX IF NOT EXISTS traffic_rollups_project ON traffic_rollups (project_id, bucket_size, bucket_start DESC);

@@ -2,6 +2,7 @@ package console
 
 import (
 	"github.com/gin-gonic/gin"
+	service "github.com/yv1ing/SafeAgent/internal/service/console"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -13,17 +14,17 @@ type StatsView struct {
 }
 
 type TotalsView struct {
-	Calls         int64 `json:"calls" required:"true"`
-	Failures      int64 `json:"failures" required:"true"`
-	Blocked       int64 `json:"blocked" required:"true"`
-	InputTokens   int64 `json:"input_tokens" required:"true"`
-	OutputTokens  int64 `json:"output_tokens" required:"true"`
-	RedactionHits int64 `json:"redaction_hits" required:"true"`
-	HighSeverity  int64 `json:"high_severity" required:"true"`
-	FirstTokenP50 int64 `json:"first_token_p50" required:"true"`
-	FirstTokenP95 int64 `json:"first_token_p95" required:"true"`
-	DurationP50   int64 `json:"duration_p50" required:"true"`
-	DurationP95   int64 `json:"duration_p95" required:"true"`
+	Calls           int64 `json:"calls" required:"true" description:"Main-lane calls only"`
+	Failures        int64 `json:"failures" required:"true" description:"Main-lane calls whose state is failed"`
+	Blocked         int64 `json:"blocked" required:"true" description:"Main-lane calls whose outcome is blocked"`
+	InputTokens     int64 `json:"input_tokens" required:"true"`
+	OutputTokens    int64 `json:"output_tokens" required:"true"`
+	RedactionValues int64 `json:"redaction_values" required:"true" description:"Distinct redacted values, not occurrences"`
+	HighSeverity    int64 `json:"high_severity" required:"true"`
+	FirstTokenP50   int64 `json:"first_token_p50" required:"true"`
+	FirstTokenP95   int64 `json:"first_token_p95" required:"true"`
+	DurationP50     int64 `json:"duration_p50" required:"true"`
+	DurationP95     int64 `json:"duration_p95" required:"true"`
 }
 
 type GroupView struct {
@@ -50,24 +51,36 @@ type SeriesView struct {
 	Severities   []SeverityCountView `json:"severities" required:"true"`
 	FindingCodes []CodeCountView     `json:"finding_codes" required:"true"`
 	Channels     []ChannelTraffic    `json:"channels" required:"true"`
-	Health       []HealthView        `json:"health" required:"true"`
+	Health       []SeriesHealthView  `json:"health" required:"true"`
+}
+
+// SeriesHealthView is the live breaker state of one channel model format used by the project routes.
+type SeriesHealthView struct {
+	ChannelID           string `json:"channel_id" required:"true"`
+	ChannelName         string `json:"channel_name" required:"true"`
+	ModelID             string `json:"model_id" required:"true"`
+	ModelName           string `json:"model_name" required:"true"`
+	Format              string `json:"format" required:"true"`
+	State               string `json:"state" required:"true"`
+	ConsecutiveFailures int    `json:"consecutive_failures" required:"true"`
+	CooldownSeconds     int64  `json:"cooldown_seconds" required:"true"`
 }
 
 type BucketView struct {
-	Start         string `json:"start" required:"true"`
-	Requests      int64  `json:"requests" required:"true"`
-	Errors        int64  `json:"errors" required:"true"`
-	Blocked       int64  `json:"blocked" required:"true"`
-	InputTokens   int64  `json:"input_tokens" required:"true"`
-	OutputTokens  int64  `json:"output_tokens" required:"true"`
-	DurationP95   int64  `json:"duration_p95" required:"true"`
-	RedactionHits int64  `json:"redaction_hits" required:"true"`
-	FindingsHigh  int64  `json:"findings_high" required:"true"`
+	Start           string `json:"start" required:"true"`
+	Requests        int64  `json:"requests" required:"true"`
+	Errors          int64  `json:"errors" required:"true"`
+	Blocked         int64  `json:"blocked" required:"true"`
+	InputTokens     int64  `json:"input_tokens" required:"true"`
+	OutputTokens    int64  `json:"output_tokens" required:"true"`
+	DurationP95     int64  `json:"duration_p95" required:"true"`
+	RedactionValues int64  `json:"redaction_values" required:"true" description:"Distinct redacted values, not occurrences"`
+	FindingsHigh    int64  `json:"findings_high" required:"true"`
 }
 
 type RedactionView struct {
-	Label string `json:"label" required:"true"`
-	Hits  int64  `json:"hits" required:"true"`
+	Label  string `json:"label" required:"true"`
+	Values int64  `json:"values" required:"true" description:"Distinct redacted values carrying this label"`
 }
 
 type SeverityCountView struct {
@@ -110,7 +123,7 @@ func statsView(value *entity.Statistics) StatsView {
 	totals := value.Totals
 	return StatsView{
 		Window: value.Window,
-		Totals: TotalsView{Calls: totals.Calls, Failures: totals.Failures, Blocked: totals.Blocked, InputTokens: totals.InputTokens, OutputTokens: totals.OutputTokens, RedactionHits: totals.RedactionHits, HighSeverity: totals.HighSeverity, FirstTokenP50: totals.FirstTokenP50, FirstTokenP95: totals.FirstTokenP95, DurationP50: totals.DurationP50, DurationP95: totals.DurationP95},
+		Totals: TotalsView{Calls: totals.Calls, Failures: totals.Failures, Blocked: totals.Blocked, InputTokens: totals.InputTokens, OutputTokens: totals.OutputTokens, RedactionValues: totals.RedactionValues, HighSeverity: totals.HighSeverity, FirstTokenP50: totals.FirstTokenP50, FirstTokenP95: totals.FirstTokenP95, DurationP50: totals.DurationP50, DurationP95: totals.DurationP95},
 		Groups: viewAll(value.Groups, func(group *entity.Group) GroupView {
 			return GroupView{Name: group.Name, Label: group.Label, Calls: group.Calls, Failures: group.Failures, InputTokens: group.InputTokens, OutputTokens: group.OutputTokens, Costs: costViews(group.Costs)}
 		}),
@@ -123,11 +136,11 @@ func seriesView(window, bucket string, series *entity.Series) SeriesView {
 		Window: window,
 		Bucket: bucket,
 		Buckets: viewAll(series.Buckets, func(entry *entity.SeriesBucket) BucketView {
-			return BucketView{Start: stamp(entry.Start), Requests: entry.Requests, Errors: entry.Errors, Blocked: entry.Blocked, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, DurationP95: entry.DurationP95, RedactionHits: entry.RedactionHits, FindingsHigh: entry.FindingsHigh}
+			return BucketView{Start: stamp(entry.Start), Requests: entry.Requests, Errors: entry.Errors, Blocked: entry.Blocked, InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens, DurationP95: entry.DurationP95, RedactionValues: entry.RedactionValues, FindingsHigh: entry.FindingsHigh}
 		}),
 		Costs: costViews(series.Costs),
 		Redactions: viewAll(series.Redactions, func(entry *entity.Redaction) RedactionView {
-			return RedactionView{Label: entry.Label, Hits: entry.Hits}
+			return RedactionView{Label: entry.Label, Values: entry.Hits}
 		}),
 		Severities: viewAll(series.Findings, func(entry *entity.SeverityCount) SeverityCountView {
 			return SeverityCountView{Severity: entry.Severity, Count: entry.Count}
@@ -155,7 +168,15 @@ func (console *Console) registerStats() {
 			return nil, err
 		}
 		view := seriesView(series.Window, series.Bucket, &series.Series)
-		view.Health = viewAll(series.Health, healthView)
+		view.Health = viewAll(series.Health, seriesHealthView)
 		return view, nil
 	})
+}
+
+func seriesHealthView(value *service.ChannelHealth) SeriesHealthView {
+	return SeriesHealthView{
+		ChannelID: value.ChannelID, ChannelName: value.ChannelName, ModelID: value.ModelID,
+		ModelName: value.ModelName, Format: value.Format, State: string(value.State),
+		ConsecutiveFailures: value.Failures, CooldownSeconds: value.Cooldown,
+	}
 }

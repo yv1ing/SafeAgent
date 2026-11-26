@@ -78,7 +78,7 @@ func evaluateFlow(ctx context.Context, trace *observation.Trace) []analysis.Find
 				if finding.Fingerprint == "" {
 					continue
 				}
-				finding.Attribution = []analysis.Attribution{{Turn: ref.Turn, Item: ref.Position, ToolCallID: sink.call.ID, Source: "tool_call"}}
+				finding.Attribution = []analysis.Attribution{{Turn: ref.Turn, Item: ref.Position, ToolCallID: sink.call.ID, Source: "tool_call", Locator: ref.Item.Locator}}
 				flowCopy := flow
 				finding.Flow = &flowCopy
 				findings = append(findings, finding)
@@ -275,7 +275,7 @@ func secretFlowFindings(ref observation.ItemRef, call *observation.ToolCall) []a
 		observation.OriginAssistant, call.Sink, "", 0.9, locationKey(ref, "tool_call.arguments"), 0,
 		analysis.EvidenceAt(ref, "message", "tool_call.arguments", call.Arguments, 0, len(call.Arguments.Raw)),
 	)
-	finding.Attribution = []analysis.Attribution{{Turn: ref.Turn, Item: ref.Position, ToolCallID: call.ID, Source: "tool_call"}}
+	finding.Attribution = []analysis.Attribution{{Turn: ref.Turn, Item: ref.Position, ToolCallID: call.ID, Source: "tool_call", Locator: ref.Item.Locator}}
 	return []analysis.Finding{finding}
 }
 

@@ -12,8 +12,9 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/analysis/decision"
 	"github.com/yv1ing/SafeAgent/internal/observation"
-	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -57,7 +58,13 @@ func (service *Service) DecisionConfig(ctx context.Context, projectID string) (*
 }
 
 // StoredDecisionConfig returns the stored row without decrypting the key.
-func (service *Service) StoredDecisionConfig(ctx context.Context, projectID string) (*entity.DecisionModelConfig, error) {
+func (service *Service) StoredDecisionConfig(ctx context.Context, actor access.Actor, projectID string) (*entity.DecisionModelConfig, error) {
+	if err := actor.RequireAdmin(); err != nil {
+		return nil, err
+	}
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	stored, err := service.store.DecisionConfig(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -70,7 +77,13 @@ func (service *Service) StoredDecisionConfig(ctx context.Context, projectID stri
 
 // SaveDecisionConfig stores a configuration. An empty apiKey keeps the stored key; a non-empty one
 // replaces it.
-func (service *Service) SaveDecisionConfig(ctx context.Context, projectID string, config entity.DecisionModelConfig, apiKey string) (*entity.DecisionModelConfig, error) {
+func (service *Service) SaveDecisionConfig(ctx context.Context, actor access.Actor, projectID string, config entity.DecisionModelConfig, apiKey string) (*entity.DecisionModelConfig, error) {
+	if err := actor.RequireAdmin(); err != nil {
+		return nil, err
+	}
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	if config.Kind != decision.KindTypeSafe && config.Kind != decision.KindOpenAI {
 		return nil, fmt.Errorf("%w: unsupported kind", ErrInvalidDecisionConfig)
 	}
@@ -289,7 +302,7 @@ func buildState(trace *observation.Trace, useRaw, authorizationOnly bool) decisi
 		}
 		state.Tools = append(state.Tools, decision.Tool{
 			Name: tool.Name, Kind: tool.Kind, Description: description,
-			Sink:     string(observe.SinkOf(tool.Name, observation.Target{}, nil)),
+			Sink:     string(adapter.SinkOf(tool.Name, observation.Target{}, nil)),
 			Boundary: tool.Tags.Boundary, Sensitivity: tool.Tags.Sensitivity, Integrity: tool.Tags.Integrity,
 			Capabilities: tool.Tags.Tags, Parameters: parameters,
 		})

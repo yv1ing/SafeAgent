@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/yv1ing/SafeAgent/internal/redact"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -40,14 +41,14 @@ func (input RuleInput) redactRule() redact.Rule {
 
 func (input RuleInput) validate() error {
 	if err := redact.Validate([]redact.Rule{input.redactRule()}); err != nil {
-		return Invalid("invalid_rule")
+		return access.Invalid("invalid_rule")
 	}
 	return nil
 }
 
 // A blocking redaction rule refuses whole requests, so only an administrator may introduce or
 // keep one; members may still manage replacing and alerting rules.
-func requireRuleAdmin(actor Actor, actions ...string) error {
+func requireRuleAdmin(actor access.Actor, actions ...string) error {
 	for _, action := range actions {
 		if action == string(redact.ActionBlock) {
 			return actor.RequireAdmin()
@@ -58,14 +59,14 @@ func requireRuleAdmin(actor Actor, actions ...string) error {
 
 func (service *RuleService) Detectors() []redact.Detector { return redact.Detectors }
 
-func (service *RuleService) List(ctx context.Context, actor Actor, projectID string) ([]entity.Rule, error) {
+func (service *RuleService) List(ctx context.Context, actor access.Actor, projectID string) ([]entity.Rule, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
 	return service.store.Rules(ctx, projectID)
 }
 
-func (service *RuleService) Create(ctx context.Context, actor Actor, projectID string, input RuleInput) (*entity.Rule, error) {
+func (service *RuleService) Create(ctx context.Context, actor access.Actor, projectID string, input RuleInput) (*entity.Rule, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
@@ -77,16 +78,16 @@ func (service *RuleService) Create(ctx context.Context, actor Actor, projectID s
 	}
 	created, err := service.store.CreateRule(ctx, projectID, input.entity(), redact.MaximumRules)
 	if errors.Is(err, repository.ErrRuleLimit) {
-		return nil, Conflict("rule_limit_reached")
+		return nil, access.Conflict("rule_limit_reached")
 	}
-	return created, Translate(err)
+	return created, access.Translate(err)
 }
 
-func (service *RuleService) Update(ctx context.Context, actor Actor, projectID, ruleID string, input RuleInput) (*entity.Rule, error) {
+func (service *RuleService) Update(ctx context.Context, actor access.Actor, projectID, ruleID string, input RuleInput) (*entity.Rule, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
-	if err := RequireVersion(input.Version); err != nil {
+	if err := access.RequireVersion(input.Version); err != nil {
 		return nil, err
 	}
 	if err := input.validate(); err != nil {
@@ -94,27 +95,27 @@ func (service *RuleService) Update(ctx context.Context, actor Actor, projectID, 
 	}
 	existing, err := service.store.Rule(ctx, projectID, ruleID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	if err := requireRuleAdmin(actor, input.Action, existing.Action); err != nil {
 		return nil, err
 	}
 	updated, err := service.store.UpdateRule(ctx, projectID, ruleID, input.entity(), input.Version)
-	return updated, Translate(err)
+	return updated, access.Translate(err)
 }
 
-func (service *RuleService) Delete(ctx context.Context, actor Actor, projectID, ruleID string) (*entity.Rule, error) {
+func (service *RuleService) Delete(ctx context.Context, actor access.Actor, projectID, ruleID string) (*entity.Rule, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
 	rule, err := service.store.Rule(ctx, projectID, ruleID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	if err := requireRuleAdmin(actor, rule.Action); err != nil {
 		return nil, err
 	}
-	return rule, Translate(service.store.DeleteRule(ctx, projectID, ruleID, rule.Action, rule.Version))
+	return rule, access.Translate(service.store.DeleteRule(ctx, projectID, ruleID, rule.Action, rule.Version))
 }
 
 type RuleTestResult struct {
@@ -125,7 +126,7 @@ type RuleTestResult struct {
 
 // Test runs one rule in isolation against a sample. Project rules are not consulted, so the result
 // never depends on the caller's stored configuration.
-func (service *RuleService) Test(ctx context.Context, actor Actor, projectID string, input RuleInput, text string) (*RuleTestResult, error) {
+func (service *RuleService) Test(ctx context.Context, actor access.Actor, projectID string, input RuleInput, text string) (*RuleTestResult, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
@@ -134,7 +135,7 @@ func (service *RuleService) Test(ctx context.Context, actor Actor, projectID str
 	}
 	engine, err := redact.NewEngine([]redact.Rule{input.redactRule()}, []byte(testScope), testScope)
 	if err != nil {
-		return nil, Invalid("invalid_rule")
+		return nil, access.Invalid("invalid_rule")
 	}
 	replaced, result := engine.NewScope().Replace(text, "text")
 	return &RuleTestResult{Replaced: replaced, Blocked: result.Blocked, Hits: result.Hits}, nil

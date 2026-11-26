@@ -4,17 +4,11 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"log/slog"
-	"net/http"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/chat"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/gemini"
@@ -26,9 +20,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
-	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
-	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
 const persistenceTimeout = 10 * time.Second
@@ -119,50 +111,6 @@ func New(repository Repository, secret []byte, options Options) *Pipeline {
 	}
 }
 
-// Providers exposes the catalog for the console and auxiliary endpoints.
-func (pipeline *Pipeline) Providers() *provider.Registry { return pipeline.providers }
-
-type policyEntry struct {
-	version  int64
-	compiled *policy.Compiled
-}
-
-type policyCache struct {
-	mu      sync.RWMutex
-	entries map[string]policyEntry
-}
-
-// compiledPolicy loads the newest saved policy of a project. A version is compiled once, so a busy
-// project pays the CEL cost only after a save.
-func (pipeline *Pipeline) compiledPolicy(ctx context.Context, projectID string) (*policy.Compiled, int64, error) {
-	stored, err := pipeline.repository.ActivePolicy(ctx, projectID)
-	if err != nil {
-		return nil, 0, err
-	}
-	version := int64(0)
-	document := policy.DefaultDocument()
-	if stored != nil {
-		if err := json.Unmarshal(stored.Document, &document); err != nil {
-			return nil, 0, err
-		}
-		version = stored.Version
-	}
-	pipeline.policies.mu.RLock()
-	entry, found := pipeline.policies.entries[projectID]
-	pipeline.policies.mu.RUnlock()
-	if found && entry.version == version {
-		return entry.compiled, entry.version, nil
-	}
-	compiled, err := policy.Compile(document)
-	if err != nil {
-		return nil, 0, err
-	}
-	pipeline.policies.mu.Lock()
-	pipeline.policies.entries[projectID] = policyEntry{version: version, compiled: compiled}
-	pipeline.policies.mu.Unlock()
-	return compiled, version, nil
-}
-
 func persistenceContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), persistenceTimeout)
 }
@@ -180,243 +128,6 @@ func (envelope Envelope) Open(encoded string) (model.Signature, bool) {
 	return model.OpenSignature(envelope.Secret, encoded)
 }
 
-// Authenticate maps a presented agent key to its project.
-func (pipeline *Pipeline) Authenticate(ctx context.Context, key string) (*Identity, *model.Error) {
-	if key == "" {
-		return nil, failure("unauthorized", model.ClassAuth, "missing_api_key", "An API key is required.", http.StatusUnauthorized)
-	}
-	agentKey, err := pipeline.repository.AgentKeyByHash(ctx, secure.Digest(key))
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, failure("unauthorized", model.ClassAuth, "invalid_api_key", "The API key is invalid.", http.StatusUnauthorized)
-		}
-		pipeline.logger.Error("agent key lookup failed", "error", err)
-		return nil, internal("store_failure", "The API key could not be checked.")
-	}
-	project, err := pipeline.repository.Project(ctx, agentKey.ProjectID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, failure("unauthorized", model.ClassAuth, "invalid_project", "The project is unavailable.", http.StatusUnauthorized)
-		}
-		pipeline.logger.Error("project lookup failed", "error", err)
-		return nil, internal("store_failure", "The project could not be loaded.")
-	}
-	pipeline.repository.TouchAgentKey(ctx, agentKey.ID)
-	return &Identity{Project: project, AgentKey: agentKey}, nil
-}
-
-// BearerToken extracts the agent key from the headers agents conventionally use, then from the
-// ?key= value the transport passed for Gemini routes.
-func BearerToken(header http.Header, queryKey string) string {
-	if value := header.Get("Authorization"); value != "" {
-		if len(value) > 7 && strings.EqualFold(value[:7], "bearer ") {
-			return strings.TrimSpace(value[7:])
-		}
-		return ""
-	}
-	for _, name := range []string{"x-api-key", "x-goog-api-key"} {
-		if value := header.Get(name); value != "" {
-			return value
-		}
-	}
-	return queryKey
-}
-
-// Models lists the public model names the caller's project can use.
-func (pipeline *Pipeline) Models(ctx context.Context, key string) ([]entity.Route, *model.Error) {
-	identity, release, denied := pipeline.authorize(ctx, nil, key)
-	if denied != nil {
-		return nil, denied
-	}
-	defer release()
-	routes, err := pipeline.repository.Routes(ctx, identity.Project.ID)
-	if err != nil {
-		return nil, internal("store_failure", "The model list could not be loaded.")
-	}
-	if failure := pipeline.recordAuxiliary(ctx, identity, "models", Request{Kind: model.Chat}, nil, "", nil); failure != nil {
-		return nil, failure
-	}
-	return routes, nil
-}
-
-// engineCache keeps one compiled rule set per project; the project's rules_version invalidates it.
-type engineEntry struct {
-	version int64
-	engine  *redact.Engine
-	rules   []redact.Rule
-}
-
-type engineCache struct {
-	mu      sync.RWMutex
-	entries map[string]engineEntry
-}
-
-func (pipeline *Pipeline) redactionEngine(ctx context.Context, project *entity.Project) (*redact.Engine, []redact.Rule, error) {
-	cache := pipeline.engines
-	cache.mu.RLock()
-	entry, found := cache.entries[project.ID]
-	cache.mu.RUnlock()
-	if found && entry.version == project.RulesVersion {
-		return entry.engine, entry.rules, nil
-	}
-	stored, err := pipeline.repository.Rules(ctx, project.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	rules := make([]redact.Rule, 0, len(stored))
-	for _, rule := range stored {
-		rules = append(rules, redact.Rule{Kind: redact.RuleKind(rule.Kind), Detector: rule.Detector, Pattern: rule.Pattern, Capture: rule.Capture, Label: rule.Label, Action: redact.Action(rule.Action), Enabled: rule.Enabled})
-	}
-	engine, err := redact.NewEngine(rules, pipeline.secret, project.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	cache.mu.Lock()
-	cache.entries[project.ID] = engineEntry{version: project.RulesVersion, engine: engine, rules: rules}
-	cache.mu.Unlock()
-	return engine, rules, nil
-}
-
-// channels is the resolved view of what a route can reach: enabled channels and their live keys.
-type channels struct {
-	byID map[string]*entity.Channel
-	keys map[string][]routing.Key
-}
-
-func (pipeline *Pipeline) resolve(ctx context.Context, projectID, modelName string, clientFormat model.Format) ([]routing.Target, map[string]endpoint, channels, string, error) {
-	route, err := pipeline.repository.RouteByName(ctx, projectID, modelName)
-	if err != nil {
-		return nil, nil, channels{}, "", err
-	}
-	modelIDs := make([]string, 0, len(route.Targets))
-	seenModel := map[string]bool{}
-	for _, target := range route.Targets {
-		if !seenModel[target.ModelID] {
-			seenModel[target.ModelID] = true
-			modelIDs = append(modelIDs, target.ModelID)
-		}
-	}
-	storedModels, err := pipeline.repository.ModelsByIDs(ctx, modelIDs)
-	if err != nil {
-		return nil, nil, channels{}, "", err
-	}
-	modelByID := make(map[string]*entity.Model, len(storedModels))
-	for index := range storedModels {
-		modelByID[storedModels[index].ID] = &storedModels[index]
-	}
-	routeKind := ""
-	for _, target := range route.Targets {
-		if found := modelByID[target.ModelID]; found != nil {
-			if routeKind == "" {
-				routeKind = string(found.Kind)
-			} else if routeKind != string(found.Kind) {
-				return nil, nil, channels{}, "", errors.New("route targets use different model kinds")
-			}
-		}
-	}
-	stored, err := pipeline.repository.Channels(ctx)
-	if err != nil {
-		return nil, nil, channels{}, "", err
-	}
-	resolved := channels{byID: map[string]*entity.Channel{}, keys: map[string][]routing.Key{}}
-	for index := range stored {
-		if stored[index].Enabled {
-			resolved.byID[stored[index].ID] = &stored[index]
-		}
-	}
-	endpoints := map[string]endpoint{}
-	var targets []routing.Target
-	for _, target := range route.Targets {
-		channel := resolved.byID[target.ChannelID]
-		modelEntry := modelByID[target.ModelID]
-		if channel == nil || modelEntry == nil || !modelEntry.Enabled || !channel.HasModel(modelEntry.ID) || channel.ProviderID != modelEntry.ProviderID {
-			continue
-		}
-		spec, found := pipeline.providers.Get(channel.ProviderID)
-		if !found {
-			continue
-		}
-		channelEndpoint, format, ok := selectFormat(*channel, *modelEntry, spec, clientFormat)
-		if !ok {
-			continue
-		}
-		formatEndpoint, ok := endpointFor(spec, channel, *modelEntry, channelEndpoint, format)
-		if !ok {
-			continue
-		}
-		upstreamModel := formatEndpoint.ApplyAlias(modelEntry.UpstreamName)
-		key := endpointKey(channel.ID, modelEntry.ID, format)
-		endpoints[key] = endpoint{channel: channel, model: modelEntry, endpoint: formatEndpoint, format: format, upstreamModel: upstreamModel}
-		targets = append(targets, routing.Target{
-			ChannelID: channel.ID, ModelID: modelEntry.ID, UpstreamModel: upstreamModel, Format: string(format),
-			Priority: target.Priority, Weight: target.Weight, MaxOutputTokens: target.MaxOutputTokens,
-		})
-	}
-	secrets, err := pipeline.repository.EnabledChannelKeys(ctx)
-	if err != nil {
-		return nil, nil, channels{}, "", err
-	}
-	for _, secret := range secrets {
-		if resolved.byID[secret.ChannelID] == nil {
-			continue
-		}
-		plain, err := secure.Open(pipeline.secret, secret.Secret)
-		if err != nil {
-			pipeline.logger.Error("upstream key could not be opened", "key", secret.ID, "error", err)
-			continue
-		}
-		resolved.keys[secret.ChannelID] = append(resolved.keys[secret.ChannelID], routing.Key{ID: secret.ID, Secret: string(plain)})
-	}
-	return targets, endpoints, resolved, routeKind, nil
-}
-
-// selectFormat picks exactly one format for a target: the client format when the model and channel
-// both support it, otherwise the first usable channel endpoint in operator order.
-func selectFormat(channel entity.Channel, modelEntry entity.Model, spec provider.ProviderSpec, clientFormat model.Format) (entity.ChannelEndpoint, model.Format, bool) {
-	var chosen entity.ChannelEndpoint
-	var chosenFormat model.Format
-	for _, channelEndpoint := range channel.Endpoints {
-		if !modelEntry.Supports(channelEndpoint.Format) {
-			continue
-		}
-		format := model.Format(channelEndpoint.Format)
-		endpoint, found := spec.Endpoint(format)
-		if !found || !formatServesKind(endpoint, modelEntry.Kind) {
-			continue
-		}
-		if chosen.Format == "" {
-			chosen, chosenFormat = channelEndpoint, format
-		}
-		if string(format) == string(clientFormat) {
-			return channelEndpoint, format, true
-		}
-	}
-	if chosen.Format == "" {
-		return entity.ChannelEndpoint{}, "", false
-	}
-	return chosen, chosenFormat, true
-}
-
-func formatServesKind(endpoint provider.EndpointSpec, kind entity.ModelKind) bool {
-	if kind == entity.ModelGeneration {
-		return true
-	}
-	wanted := provider.AuxiliaryEmbeddings
-	if kind == entity.ModelModeration {
-		wanted = provider.AuxiliaryModerations
-	}
-	for _, auxiliary := range endpoint.Auxiliary {
-		if auxiliary.Kind == wanted {
-			return true
-		}
-	}
-	return false
-}
-
-func endpointKey(channelID, modelID string, format model.Format) string {
-	return channelID + "\x00" + modelID + "\x00" + string(format)
-}
-
 // endpoint is one enabled format of one channel with its catalog defaults and operator overrides.
 type endpoint struct {
 	channel       *entity.Channel
@@ -424,26 +135,6 @@ type endpoint struct {
 	endpoint      provider.EndpointSpec
 	format        model.Format
 	upstreamModel string
-}
-
-// endpointFor merges the provider catalog with the channel endpoint and capability overrides.
-func endpointFor(spec provider.ProviderSpec, channel *entity.Channel, modelEntry entity.Model, channelEndpoint entity.ChannelEndpoint, format model.Format) (provider.EndpointSpec, bool) {
-	endpoint, found := spec.Endpoint(format)
-	if !found {
-		return provider.EndpointSpec{}, false
-	}
-	if channelEndpoint.BaseURL != "" {
-		endpoint.BaseURL = channelEndpoint.BaseURL
-	}
-	if channelEndpoint.Path != "" {
-		endpoint.Path = channelEndpoint.Path
-	}
-	for _, override := range channel.CapabilityOverrides {
-		if override.ModelID == modelEntry.ID && override.Format == string(format) {
-			applyCapabilityOverride(&endpoint, override.Field)
-		}
-	}
-	return endpoint, true
 }
 
 func applyCapabilityOverride(endpoint *provider.EndpointSpec, field string) {
@@ -465,14 +156,4 @@ func applyCapabilityOverride(endpoint *provider.EndpointSpec, field string) {
 	case "custom_tool":
 		endpoint.Compat.NoCustomToolType = true
 	}
-}
-
-// unsealRequest verifies the reasoning signatures a client echoed back and returns what could not
-// be verified.
-func unsealRequest(peer codec.Peer, request *model.Request) []model.Loss {
-	var losses []model.Loss
-	for index := range request.Items {
-		losses = append(losses, peer.Unseal(&request.Items[index])...)
-	}
-	return losses
 }

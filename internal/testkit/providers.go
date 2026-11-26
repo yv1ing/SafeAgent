@@ -63,3 +63,11 @@ func capabilityOf(kind model.Format) model.Capability {
 	}
 	return codec.Codec(chat.New()).BaseCapability()
 }
+
+// UseProvider replaces the memory store's single catalog row with the spec of a registry, so a test
+// that pins a transport or a format set changes the routing source too.
+func (store *Memory) UseProvider(registry *provider.Registry) {
+	if spec, found := registry.Get("test"); found {
+		store.SetProvider(spec)
+	}
+}

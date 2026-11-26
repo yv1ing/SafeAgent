@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -30,22 +31,22 @@ type KeyInput struct {
 }
 
 func (input KeyInput) normalize() (KeyInput, error) {
-	label, err := RequireName(input.Label, "invalid_label")
+	label, err := access.RequireName(input.Label, "invalid_label")
 	if err != nil {
 		return input, err
 	}
 	input.Label = label
 	if input.RequestsPerMinute < 0 || input.RequestsPerMinute > MaximumKeyRequestsPerMinute || input.Concurrency < 0 || input.Concurrency > MaximumKeyConcurrency {
-		return input, Invalid("invalid_limit")
+		return input, access.Invalid("invalid_limit")
 	}
 	if input.Role == "" {
 		input.Role = "agent"
 	}
 	if input.Role != "agent" && input.Role != "user" && input.Role != "service" {
-		return input, Invalid("invalid_role")
+		return input, access.Invalid("invalid_role")
 	}
 	if input.TrustLevel < 0 || input.TrustLevel > 100 {
-		return input, Invalid("invalid_limit")
+		return input, access.Invalid("invalid_limit")
 	}
 	return input, nil
 }
@@ -55,14 +56,14 @@ type KeyResult struct {
 	Secret string
 }
 
-func (service *KeyService) Keys(ctx context.Context, actor Actor, projectID string) ([]entity.AgentKey, error) {
+func (service *KeyService) Keys(ctx context.Context, actor access.Actor, projectID string) ([]entity.AgentKey, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
 	return service.store.AgentKeys(ctx, projectID)
 }
 
-func (service *KeyService) CreateKey(ctx context.Context, actor Actor, projectID string, input KeyInput) (*KeyResult, error) {
+func (service *KeyService) CreateKey(ctx context.Context, actor access.Actor, projectID string, input KeyInput) (*KeyResult, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
@@ -71,17 +72,17 @@ func (service *KeyService) CreateKey(ctx context.Context, actor Actor, projectID
 		return nil, err
 	}
 	if !actor.Administrator && (normalized.TrustLevel != 0 || normalized.Role != "agent") {
-		return nil, Forbidden()
+		return nil, access.Forbidden()
 	}
 	secret := keyPrefix + secure.Random(24)
 	key, err := service.store.CreateAgentKey(ctx, projectID, normalized.Label, secret, normalized.RequestsPerMinute, normalized.Concurrency, normalized.TrustLevel, normalized.Role)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	return &KeyResult{Key: key, Secret: secret}, nil
 }
 
-func (service *KeyService) UpdateKey(ctx context.Context, actor Actor, projectID, keyID string, input KeyInput) (*entity.AgentKey, error) {
+func (service *KeyService) UpdateKey(ctx context.Context, actor access.Actor, projectID, keyID string, input KeyInput) (*entity.AgentKey, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
@@ -91,25 +92,25 @@ func (service *KeyService) UpdateKey(ctx context.Context, actor Actor, projectID
 	}
 	existing, err := service.store.AgentKey(ctx, projectID, keyID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	if !actor.Administrator && (existing.TrustLevel != normalized.TrustLevel || existing.Role != normalized.Role) {
-		return nil, Forbidden()
+		return nil, access.Forbidden()
 	}
 	updated, err := service.store.UpdateAgentKey(ctx, projectID, keyID, normalized.Label, normalized.RequestsPerMinute, normalized.Concurrency, normalized.TrustLevel, normalized.Role, normalized.Enabled)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	return updated, nil
 }
 
-func (service *KeyService) RevokeKey(ctx context.Context, actor Actor, projectID, keyID string) (*entity.AgentKey, error) {
+func (service *KeyService) RevokeKey(ctx context.Context, actor access.Actor, projectID, keyID string) (*entity.AgentKey, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
 	if err := service.store.RevokeAgentKey(ctx, projectID, keyID); err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	key, err := service.store.AgentKey(ctx, projectID, keyID)
-	return key, Translate(err)
+	return key, access.Translate(err)
 }

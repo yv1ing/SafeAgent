@@ -88,7 +88,7 @@ func decodeResponse(payload []byte) (Answers, Usage, error) {
 	}
 	answers := Answers{}
 	for name, answer := range wire.Answers {
-		required := name == QuestionUnsafe || name == QuestionAuthorized
+		required := name == questionUnsafe || name == questionAuthorized
 		if required && answer.Noul == nil && (answer.Probability == nil || answer.Confidence == nil) {
 			return nil, Usage{}, fmt.Errorf("the decision model answer %q has no probability or confidence", name)
 		}
@@ -129,13 +129,13 @@ func systemOneQuestions(questions []Question) map[string]any {
 	for _, question := range questions {
 		item := map[string]any{"type": question.Kind, "instructions": question.Instructions}
 		switch question.Kind {
-		case KindChoice:
+		case kindChoice:
 			criteria := make(map[string]any, len(question.Options))
 			for _, option := range question.Options {
 				criteria[option] = nil
 			}
 			item["criteria"] = criteria
-		case KindScore:
+		case kindScore:
 			item["criteria"] = append([]string{}, question.Options...)
 		}
 		encoded[question.Name] = item

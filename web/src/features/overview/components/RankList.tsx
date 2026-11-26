@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Progress } from '../../../components/ui/progress';
 
 interface RankItem {
   key: string;
@@ -31,12 +32,7 @@ export function RankList({
               )}
             </span>
           </div>
-          <div aria-hidden className="h-1.5 rounded-full bg-sunken">
-            <div
-              className="h-full rounded-full bg-chart-1"
-              style={{ width: `${(item.value / maximum) * 100}%` }}
-            />
-          </div>
+          <Progress value={item.value} max={maximum} />
         </li>
       ))}
     </ol>

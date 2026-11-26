@@ -10,7 +10,7 @@ type monitorInput struct {
 }
 
 type MonitorTotalsView struct {
-	Calls        int64 `json:"calls" required:"true"`
+	Calls        int64 `json:"calls" required:"true" description:"Main-lane calls only"`
 	Failures     int64 `json:"failures" required:"true"`
 	Blocked      int64 `json:"blocked" required:"true"`
 	Findings     int64 `json:"findings" required:"true"`
@@ -29,13 +29,13 @@ type MonitorProjectView struct {
 }
 
 type MonitorBucketView struct {
-	Start        string `json:"start" required:"true"`
-	Requests     int64  `json:"requests" required:"true"`
-	Errors       int64  `json:"errors" required:"true"`
-	Blocked      int64  `json:"blocked" required:"true"`
-	InputTokens  int64  `json:"input_tokens" required:"true"`
-	OutputTokens int64  `json:"output_tokens" required:"true"`
-	DurationP95  int64  `json:"duration_p95" required:"true"`
+	Start          string `json:"start" required:"true"`
+	Requests       int64  `json:"requests" required:"true"`
+	Errors         int64  `json:"errors" required:"true"`
+	Blocked        int64  `json:"blocked" required:"true"`
+	InputTokens    int64  `json:"input_tokens" required:"true"`
+	OutputTokens   int64  `json:"output_tokens" required:"true"`
+	DurationP95Max int64  `json:"duration_p95_max" required:"true"`
 }
 
 type MonitorAgentView struct {
@@ -50,6 +50,7 @@ type MonitorAgentView struct {
 
 type MonitorRecentView struct {
 	CallID     string `json:"call_id" required:"true"`
+	NodeID     string `json:"node_id" required:"true" description:"Trajectory call node of this finding"`
 	ProjectID  string `json:"project_id" required:"true"`
 	AgentKeyID string `json:"agent_key_id" required:"true"`
 	Model      string `json:"model" required:"true"`
@@ -81,13 +82,13 @@ func monitorView(snapshot service.MonitorSnapshot) MonitorView {
 		view.Projects = append(view.Projects, MonitorProjectView{ProjectID: project.ProjectID, Name: project.Name, Calls: project.Calls, Failures: project.Failures, Blocked: project.Blocked, HighFindings: project.HighFindings, LastAt: stamp(project.LastAt)})
 	}
 	for _, bucket := range snapshot.Series {
-		view.Series = append(view.Series, MonitorBucketView{Start: stamp(bucket.Start), Requests: bucket.Requests, Errors: bucket.Errors, Blocked: bucket.Blocked, InputTokens: bucket.InputTokens, OutputTokens: bucket.OutputTokens, DurationP95: bucket.DurationP95})
+		view.Series = append(view.Series, MonitorBucketView{Start: stamp(bucket.Start), Requests: bucket.Requests, Errors: bucket.Errors, Blocked: bucket.Blocked, InputTokens: bucket.InputTokens, OutputTokens: bucket.OutputTokens, DurationP95Max: bucket.DurationP95Max})
 	}
 	for _, agent := range snapshot.Agents {
 		view.Agents = append(view.Agents, MonitorAgentView{ProjectID: agent.ProjectID, AgentKeyID: agent.AgentKeyID, Label: agent.Label, Calls: agent.Calls, Blocked: agent.Blocked, HighFindings: agent.HighFindings, LastAt: stamp(agent.LastAt)})
 	}
 	for _, recent := range snapshot.Recent {
-		view.Recent = append(view.Recent, MonitorRecentView{CallID: recent.CallID, ProjectID: recent.ProjectID, AgentKeyID: recent.AgentKeyID, Model: recent.Model, Severity: recent.Severity, State: recent.State, CreatedAt: stamp(recent.CreatedAt)})
+		view.Recent = append(view.Recent, MonitorRecentView{CallID: recent.CallID, NodeID: service.CallNodeID(recent.CallID), ProjectID: recent.ProjectID, AgentKeyID: recent.AgentKeyID, Model: recent.Model, Severity: recent.Severity, State: recent.State, CreatedAt: stamp(recent.CreatedAt)})
 	}
 	return view
 }

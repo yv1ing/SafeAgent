@@ -7,6 +7,7 @@ import "encoding/json"
 type Decoded struct {
 	Kind           string
 	Request        *Request
+	Routing        *Routing
 	Attempt        *Attempt
 	AttemptFailure *AttemptFailure
 	FirstToken     *FirstToken
@@ -28,6 +29,9 @@ func Decode(kind string, payload json.RawMessage) (Decoded, error) {
 	case KindRequest:
 		decoded.Request = new(Request)
 		target = decoded.Request
+	case KindRouting:
+		decoded.Routing = new(Routing)
+		target = decoded.Routing
 	case KindAttempt:
 		decoded.Attempt = new(Attempt)
 		target = decoded.Attempt
@@ -68,24 +72,4 @@ func Decode(kind string, payload json.RawMessage) (Decoded, error) {
 		return decoded, err
 	}
 	return decoded, nil
-}
-
-// LastUserText returns the text of the last user message a request added. It is the metadata-only
-// summary the console shows for a conversation node.
-func LastUserText(request *Request) string {
-	if request == nil {
-		return ""
-	}
-	for index := len(request.Items) - 1; index >= 0; index-- {
-		item := request.Items[index]
-		if item.Role != "user" || item.Kind != "message" {
-			continue
-		}
-		for partIndex := len(item.Parts) - 1; partIndex >= 0; partIndex-- {
-			if text := item.Parts[partIndex].Text; text != "" {
-				return text
-			}
-		}
-	}
-	return ""
 }

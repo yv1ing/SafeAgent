@@ -11,12 +11,14 @@ type Project struct {
 	ID                     string    `bun:",pk" json:"id" required:"true"`
 	Name                   string    `json:"name" required:"true"`
 	RetentionDays          int       `json:"retention_days"`
+	AuxiliaryRetentionDays int       `json:"auxiliary_retention_days"`
 	RequestsPerMinute      int       `json:"requests_per_minute"`
 	Concurrency            int       `json:"concurrency"`
 	DailyTokenQuota        int64     `json:"daily_token_quota"`
 	DefaultMaxOutputTokens int       `json:"default_max_output_tokens"`
 	StreamReviewBytes      int       `json:"stream_review_bytes"`
 	StreamReviewTimeoutMS  int       `json:"stream_review_timeout_ms"`
+	DefaultRouteID         string    `json:"default_route_id"`
 	RulesVersion           int64     `json:"rules_version"`
 	ActivePolicyVersion    int64     `json:"active_policy_version"`
 	Version                int64     `json:"version"`

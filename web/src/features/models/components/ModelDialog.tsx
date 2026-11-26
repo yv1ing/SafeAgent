@@ -5,14 +5,17 @@ import type {
   ConsoleCatalogModelInputKind,
   ConsoleCatalogModelView,
 } from '../../../api/generated/models';
+import { Callout } from '../../../components/feedback/Callout';
 import { Field } from '../../../components/form/Field';
 import { FormDialog } from '../../../components/form/FormDialog';
+import { Badge } from '../../../components/ui/badge';
 import { DecimalInput, Input } from '../../../components/ui/input';
 import { Select } from '../../../components/ui/select';
 import { Switch } from '../../../components/ui/switch';
 import { useLocale } from '../../../i18n';
 import { currencies } from '../../../lib/currency';
 import { priceFromMicros, priceToMicros } from '../../../lib/format';
+import { formatsForKind, parseEndpointCatalog } from '../../providers/endpoints';
 
 const kinds: ConsoleCatalogModelInputKind[] = ['generation', 'embedding', 'moderation'];
 
@@ -30,15 +33,11 @@ export function ModelDialog({
   const { t } = useLocale();
   const providers = useListProviders();
   const catalog = providers.data ?? [];
-  const defaultProvider = catalog[0];
-  const [draft, setDraft] = useState<ConsoleCatalogModelInput>({
-    provider_id: model?.provider_id ?? defaultProvider?.id ?? 'openai',
+  const [draft, setDraft] = useState<ConsoleCatalogModelInput>(() => ({
+    provider_id: model?.provider_id ?? catalog[0]?.id ?? '',
     upstream_name: model?.upstream_name ?? '',
     display_name: model?.display_name ?? '',
-    kind: (model?.kind as ConsoleCatalogModelInputKind) ?? 'generation',
-    formats:
-      model?.formats ??
-      (defaultProvider?.formats?.[0] ? [defaultProvider.formats[0]] : ['openai_chat']),
+    kind: model?.kind ?? 'generation',
     input_price: model?.input_price ?? 0,
     output_price: model?.output_price ?? 0,
     cache_read_price: model?.cache_read_price ?? 0,
@@ -46,23 +45,11 @@ export function ModelDialog({
     currency: model?.currency ?? 'USD',
     enabled: model?.enabled ?? true,
     version: model?.version,
-  });
+  }));
   const provider = catalog.find((entry) => entry.id === draft.provider_id);
-  const formats = provider?.formats ?? [];
+  const endpoints = parseEndpointCatalog(provider?.endpoints);
+  const formats = endpoints ? formatsForKind(endpoints, draft.kind) : [];
   const set = (patch: Partial<ConsoleCatalogModelInput>) => setDraft({ ...draft, ...patch });
-  const toggleFormat = (format: string) =>
-    set({
-      formats: draft.formats.includes(format)
-        ? draft.formats.filter((entry) => entry !== format)
-        : [...draft.formats, format],
-    });
-  const selectProvider = (providerID: string) => {
-    const selected = catalog.find((entry) => entry.id === providerID);
-    set({
-      provider_id: providerID,
-      formats: selected?.formats?.[0] ? [selected.formats[0]] : [],
-    });
-  };
   return (
     <FormDialog
       open
@@ -71,6 +58,9 @@ export function ModelDialog({
       title={model ? t.models.edit : t.models.add}
       submitLabel={model ? t.common.save : t.common.create}
       pending={pending}
+      disabled={
+        draft.upstream_name.trim() === '' || draft.provider_id === '' || formats.length === 0
+      }
       onSubmit={() => onSubmit(draft)}
     >
       <div className="grid gap-4 md:grid-cols-2">
@@ -82,9 +72,9 @@ export function ModelDialog({
               disabled={model !== null}
               options={catalog.map((entry) => ({
                 value: entry.id,
-                label: entry.label ?? entry.id,
+                label: entry.label,
               }))}
-              onValueChange={selectProvider}
+              onValueChange={(providerId) => set({ provider_id: providerId })}
             />
           )}
         </Field>
@@ -121,23 +111,16 @@ export function ModelDialog({
           )}
         </Field>
       </div>
-      <fieldset>
-        <legend className="mb-1.5 text-xs font-medium text-muted">{t.models.formats}</legend>
-        <div className="flex flex-wrap gap-3">
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs font-medium text-muted">{t.models.formats}</p>
+        <div className="flex flex-wrap gap-1.5">
           {formats.map((format) => (
-            <label key={format} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-3.5 accent-accent"
-                checked={draft.formats.includes(format)}
-                onChange={() => toggleFormat(format)}
-              />
-              <span className="font-mono">{format}</span>
-            </label>
+            <Badge key={format}>{format}</Badge>
           ))}
         </div>
-        <p className="mt-1 text-xs text-faint">{t.models.formatHint}</p>
-      </fieldset>
+        <p className="text-xs text-faint">{t.models.formatHint}</p>
+        {formats.length === 0 && <Callout tone="warning">{t.models.noFormats}</Callout>}
+      </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {(
           [

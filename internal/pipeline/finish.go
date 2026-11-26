@@ -5,21 +5,23 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
 // finish ends a call for which no response exists: nothing was attempted, or every attempt failed
 // before the client saw a byte.
-func (state *call) finish(failure *model.Error, stateName string) {
+func (state *call) finish(failure *model.Error) {
 	record := state.recorder.Call()
 	record.Losses = convertLosses(mergeLosses(state.failureLedger.Losses, nil))
 	record.Repairs = convertRepairs(mergeRepairs(state.failureLedger.Repairs, nil))
 	state.applyLossHeaders(nil)
-	state.settle(stateName, failure, nil, nil)
+	state.settle(failure, nil, nil)
 	state.reply(failure)
 }
 
@@ -35,16 +37,19 @@ func (pipeline *Pipeline) refuse(state *call, kind model.Format, writer Writer, 
 	if state != nil {
 		defer state.release()
 		if state.opened {
-			state.settle("rejected", failure, nil, nil)
+			state.settle(failure, nil, nil)
 		}
 	}
 	writeError(writer, pipeline.codecs, kind, failure)
 }
 
 // settle records the final accounting, stores the online run and asynchronous outbox entry in the
-// seal transaction, and moves the call to its terminal state.
-func (state *call) settle(stateName string, failure *model.Error, usage *model.Usage, modelEntry *entity.Model) bool {
+// seal transaction, and moves the call to its terminal state. The state and outcome pair comes from
+// the one mapping function, so every exit path writes the same semantics.
+func (state *call) settle(failure *model.Error, usage *model.Usage, modelEntry *entity.Model) bool {
 	record := state.recorder.Call()
+	settled := settlementFor(failure, state.lane)
+	record.Outcome = settled.outcome
 	record.Attempts = state.attempts
 	record.DurationMilliseconds = int(time.Since(state.started).Milliseconds())
 	if modelEntry != nil {
@@ -71,7 +76,7 @@ func (state *call) settle(stateName string, failure *model.Error, usage *model.U
 	if failure != nil {
 		code = failure.Code
 	}
-	if stateName == "cancelled" {
+	if settled.state == "cancelled" {
 		reason := ""
 		if failure != nil {
 			reason = failure.Message
@@ -82,33 +87,48 @@ func (state *call) settle(stateName string, failure *model.Error, usage *model.U
 	}
 	ctx, cancel := persistenceContext()
 	defer cancel()
-	if err := state.recorder.Seal(ctx, stateName, code); err != nil {
-		state.pipeline.logger.Error("call could not be sealed", "call", record.ID, "state", stateName, "error", err)
+	if err := state.recorder.Seal(ctx, settled.state, code); err != nil {
+		state.pipeline.logger.Error("call could not be sealed", "call", record.ID, "state", settled.state, "error", err)
 		return false
 	}
 	return true
 }
 
-// attachAnalysis records the online decisions and queues the asynchronous job in the seal
-// transaction. Online diagnosis results do not exist.
+// attachAnalysis records the decisions and the redaction snapshot in the seal transaction. Only a
+// main call queues the asynchronous diagnosis job; a side or auxiliary call keeps the snapshot so a
+// replay shows exactly how it was redacted, but is never analyzed.
 func (state *call) attachAnalysis() {
 	record := state.recorder.Call()
-	rules, _ := json.Marshal(state.redactionRules)
+	seal := sealAnalysis(record, state.lane, state.identity.Project, state.redactionRules, state.decisions)
+	state.recorder.SetAnalysis(seal)
+}
+
+// sealAnalysis is the shared seal payload of every lane. The snapshot is written for auxiliary calls
+// too: without it, a replay would re-redact a probe with today's rules instead of the ones that
+// produced the recorded call.
+func sealAnalysis(record *entity.Call, lane classify.Lane, project *entity.Project, rules []redact.Rule, decisions []entity.Decision) entity.SealAnalysis {
+	payload, _ := json.Marshal(nonNil(rules))
 	now := time.Now().UTC()
+	seal := entity.SealAnalysis{
+		Decisions: decisions,
+		Snapshot: &entity.RedactionSnapshot{
+			ID: "snap_" + record.ID, CallID: record.ID, Rules: payload, CreatedAt: now,
+		},
+		RulesVersion: project.RulesVersion,
+		RulesHash:    secure.Digest(string(payload)),
+	}
+	if !lane.Analyzed() {
+		record.AnalysisState = "skipped"
+		return seal
+	}
 	record.AnalysisState = "pending"
-	jobScope, _ := json.Marshal(map[string]any{"call_id": record.ID})
-	job := &entity.AnalysisJob{
+	scope, _ := json.Marshal(map[string]any{"call_id": record.ID})
+	seal.Job = &entity.AnalysisJob{
 		ID: "job_" + secure.Random(12), ProjectID: record.ProjectID, Kind: "analyze_call",
-		Scope: jobScope, State: "pending", MaxAttempts: 5, Priority: 10,
+		Scope: scope, State: "pending", MaxAttempts: 5, Priority: 10,
 		RunAfter: now, DedupeKey: "call:" + record.ID + ":async", CreatedAt: now, UpdatedAt: now,
 	}
-	state.recorder.SetAnalysis(entity.SealAnalysis{
-		Decisions: state.decisions,
-		Job:       job,
-		Snapshot: &entity.RedactionSnapshot{
-			ID: "snap_" + record.ID, CallID: record.ID, Rules: rules, CreatedAt: now,
-		},
-	})
+	return seal
 }
 
 func writeError(writer Writer, codecs codec.Registry, kind model.Format, failure *model.Error) {

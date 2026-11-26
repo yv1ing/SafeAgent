@@ -1,62 +1,70 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { ChevronLeft, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronLeft, RotateCcw, Sparkles, Trash2, Unplug } from 'lucide-react';
 import { useState } from 'react';
 import { useGetChannel, useGetChannelHealth } from '../../api/generated/channels/channels';
-import { useListModels } from '../../api/generated/models/models';
-import type { ConsoleChannelInput, ConsoleChannelView } from '../../api/generated/models';
-import { ConfirmDialog } from '../../components/form/ConfirmDialog';
+import { useListProjects } from '../../api/generated/projects/projects';
+import { useListProviders } from '../../api/generated/providers/providers';
+import type { ConsoleChannelView, ConsoleProviderView } from '../../api/generated/models';
+import { TableSkeleton } from '../../components/data/DataTable';
 import { HealthList } from '../../components/data/HealthList';
+import { Callout } from '../../components/feedback/Callout';
+import { QueryState } from '../../components/feedback/QueryState';
+import { ConfirmDialog } from '../../components/form/ConfirmDialog';
 import { Page } from '../../components/layout/Page';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { QueryState } from '../../components/feedback/QueryState';
-import { TableSkeleton } from '../../components/data/DataTable';
 import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
-import { useLocale } from '../../i18n';
+import { interpolate, useLocale } from '../../i18n';
+import { formatDate } from '../../lib/format';
+import { DeleteImpactDialog } from '../providers/components/DeleteImpactDialog';
+import { discoveryFormats, parseEndpointCatalog, providerFormats } from '../providers/endpoints';
+import { useConfigurationImpact } from '../providers/hooks';
+import { projectNameMap, replacementOptions } from '../providers/impact';
+import { channelInput } from './channel';
+import { CapabilityOverrides } from './components/CapabilityOverrides';
 import { ChannelFields } from './components/ChannelFields';
 import { DiscoveryDialog } from './components/DiscoveryDialog';
 import { HeaderEditor, type HeaderRow } from './components/HeaderEditor';
 import { KeyPool } from './components/KeyPool';
-import { ModelPicker } from './components/ModelPicker';
-import { useDeleteChannel, useUpdateChannel } from './hooks';
+import {
+  useChannels,
+  useDeleteChannel,
+  useDetachChannelTargets,
+  useRestoreChannel,
+  useUpdateChannel,
+} from './hooks';
 
-function channelInput(channel: ConsoleChannelView): ConsoleChannelInput {
-  return {
-    name: channel.name,
-    provider_id: channel.provider_id,
-    endpoints: channel.endpoints,
-    model_ids: channel.model_ids,
-    forward_headers: channel.forward_headers,
-    default_max_output_tokens: channel.default_max_output_tokens,
-    timeout_seconds: channel.timeout_seconds,
-    first_byte_timeout_seconds: channel.first_byte_timeout_seconds,
-    allow_private_network: channel.allow_private_network,
-    enabled: channel.enabled,
-    version: channel.version,
-  };
-}
-
-function ChannelEditor({ channel }: { channel: ConsoleChannelView }) {
-  const { t } = useLocale();
+function ChannelEditor({
+  channel,
+  providers,
+  siblings,
+}: {
+  channel: ConsoleChannelView;
+  providers: ConsoleProviderView[];
+  siblings: ConsoleChannelView[];
+}) {
+  const { t, locale } = useLocale();
   const navigate = useNavigate();
   const update = useUpdateChannel(channel.id);
   const remove = useDeleteChannel();
-  const models = useListModels();
-  const [draft, setDraft] = useState<ConsoleChannelInput>(() => channelInput(channel));
+  const restore = useRestoreChannel(channel.id);
+  const detach = useDetachChannelTargets(channel.id);
+  const projects = useListProjects();
+  const [draft, setDraft] = useState(() => channelInput(channel));
   const [headers, setHeaders] = useState<HeaderRow[]>(() => Object.entries(channel.headers ?? {}));
   const [discovering, setDiscovering] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const setDraftAndPrune = (next: ConsoleChannelInput) => {
-    const formats = new Set(next.endpoints.map((endpoint) => endpoint.format));
-    const catalog = models.data ?? [];
-    const valid = catalog.length
-      ? next.model_ids.filter((modelId) => {
-          const model = catalog.find((entry) => entry.id === modelId);
-          return !model || model.formats.some((format) => formats.has(format));
-        })
-      : next.model_ids;
-    setDraft({ ...next, model_ids: valid });
-  };
+  const [detaching, setDetaching] = useState(false);
+  const impact = useConfigurationImpact(deleting ? { channelId: channel.id } : null);
+  const deleted = channel.deleted_at !== undefined;
+  const provider = providers.find((entry) => entry.id === channel.provider_id);
+  const catalog = parseEndpointCatalog(provider?.endpoints);
+  const discovery = catalog ? discoveryFormats(catalog) : [];
+  const replacements = replacementOptions(
+    siblings.filter((entry) => entry.provider_id === channel.provider_id && !entry.deleted_at),
+    channel.id,
+    (entry) => entry.name,
+  );
   const save = () =>
     update.mutate({
       ...draft,
@@ -64,98 +72,130 @@ function ChannelEditor({ channel }: { channel: ConsoleChannelView }) {
     });
   return (
     <>
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          save();
-        }}
-      >
+      <div className="flex flex-col gap-4">
+        {deleted && (
+          <Callout tone="warning">
+            {interpolate(t.channels.deletedAt, {
+              time: formatDate(channel.deleted_at, locale),
+            })}{' '}
+            {t.channels.deletedHint}
+          </Callout>
+        )}
         <Card>
-          <CardHeader title={t.channels.settings} />
+          <CardHeader title={t.channels.settings} description={t.channels.settingsHint} />
           <div className="p-4">
-            <ChannelFields draft={draft} onChange={setDraftAndPrune} />
+            <ChannelFields draft={draft} providers={providers} editing onChange={setDraft} />
           </div>
         </Card>
         <Card>
-          <CardHeader title={t.channels.models} description={t.channels.modelsHint} />
-          <QueryState query={models} loading={<TableSkeleton rows={3} />}>
-            {(catalog) => (
-              <ModelPicker
-                draft={draft}
-                models={catalog}
-                onChange={(model_ids) => setDraft({ ...draft, model_ids })}
-              />
-            )}
-          </QueryState>
-        </Card>
-        <Card>
-          <CardHeader title={t.channels.discoverModels} description={t.channels.discoverHint} />
-          <div className="flex flex-wrap gap-2 px-4 py-3">
-            {channel.endpoints
-              .filter((endpoint) =>
-                draft.endpoints.some((entry) => entry.format === endpoint.format),
-              )
-              .map((endpoint) => (
-                <Button
-                  key={endpoint.format}
-                  size="sm"
-                  onClick={() => setDiscovering(endpoint.format)}
-                >
-                  <Sparkles aria-hidden />
-                  {endpoint.format}
-                </Button>
-              ))}
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title={t.channels.headers} />
+          <CardHeader title={t.channels.headers} description={t.channels.headersHint} />
           <HeaderEditor rows={headers} onChange={setHeaders} />
         </Card>
-        <div className="flex justify-between gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            className="text-danger"
-            onClick={() => setDeleting(true)}
-          >
-            <Trash2 aria-hidden />
-            {t.common.delete}
-          </Button>
-          <Button type="submit" variant="primary" loading={update.isPending}>
-            {t.common.save}
-          </Button>
-        </div>
-      </form>
+        <Card>
+          <CardHeader
+            title={t.channels.discoverModels}
+            description={t.channels.discoverChannelHint}
+          />
+          <div className="flex flex-wrap gap-2 px-4 py-3">
+            {discovery.length === 0 && (
+              <p className="text-sm text-muted">{t.channels.noDiscoveryFormat}</p>
+            )}
+            {discovery.map((format) => (
+              <Button
+                key={format}
+                size="sm"
+                onClick={() => setDiscovering(format)}
+                disabled={deleted}
+              >
+                <Sparkles aria-hidden />
+                {format}
+              </Button>
+            ))}
+          </div>
+          <p className="px-4 pb-3 text-xs text-faint">{t.channels.discoverImportHint}</p>
+        </Card>
+        <Card>
+          <CardHeader title={t.channels.dangerZone} />
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{t.channels.detach}</p>
+              <p className="text-xs text-muted">{t.channels.detachHint}</p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setDetaching(true)}
+              disabled={deleted || channel.route_count === 0}
+            >
+              <Unplug aria-hidden />
+              {t.channels.detach}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{t.common.delete}</p>
+              <p className="text-xs text-muted">{t.channels.deleteHint}</p>
+            </div>
+            {deleted ? (
+              <Button size="sm" loading={restore.isPending} onClick={() => restore.mutate()}>
+                <RotateCcw aria-hidden />
+                {t.common.restore}
+              </Button>
+            ) : (
+              <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
+                <Trash2 aria-hidden />
+                {t.common.delete}
+              </Button>
+            )}
+          </div>
+        </Card>
+        {!deleted && (
+          <div className="flex justify-end">
+            <Button variant="primary" loading={update.isPending} onClick={save}>
+              {t.common.save}
+            </Button>
+          </div>
+        )}
+      </div>
       {discovering && (
         <DiscoveryDialog
           channelId={channel.id}
           format={discovering}
           onClose={() => setDiscovering(null)}
-          onImported={(added) => {
-            setDraft((current) => ({
-              ...current,
-              model_ids: Array.from(new Set([...current.model_ids, ...added])),
-            }));
-            setDiscovering(null);
-          }}
         />
       )}
-      <ConfirmDialog
+      <DeleteImpactDialog
         open={deleting}
         onOpenChange={setDeleting}
-        title={t.channels.deleteTitle.replace('{name}', channel.name)}
-        description={t.channels.deleteHint}
+        title={interpolate(t.channels.deleteTitle, { name: channel.name })}
+        description={t.impact.warning}
         confirmLabel={t.common.delete}
         pending={remove.isPending}
-        onConfirm={() =>
-          remove.mutate(channel.id, {
-            onSuccess: () => {
-              setDeleting(false);
-              void navigate({ to: '/channels' });
+        impact={impact.data}
+        loading={impact.isPending}
+        error={impact.error}
+        projectNames={projectNameMap(projects.data)}
+        replacements={replacements}
+        onConfirm={(replacementId) => {
+          if (!impact.data) return;
+          remove.mutate(
+            { channel, impact: impact.data, replacementId },
+            {
+              onSuccess: () => {
+                setDeleting(false);
+                void navigate({ to: '/channels' });
+              },
             },
-          })
-        }
+          );
+        }}
+      />
+      <ConfirmDialog
+        open={detaching}
+        onOpenChange={setDetaching}
+        title={interpolate(t.channels.detachTitle, { name: channel.name })}
+        description={t.channels.detachConfirm}
+        confirmLabel={t.channels.detach}
+        pending={detach.isPending}
+        onConfirm={() => detach.mutate(undefined, { onSuccess: () => setDetaching(false) })}
       />
     </>
   );
@@ -166,6 +206,8 @@ export function ChannelPage() {
   const { channelId } = useParams({ from: '/app/admin/channels/$channelId' });
   const channel = useGetChannel(channelId);
   const health = useGetChannelHealth(channelId);
+  const providers = useListProviders();
+  const siblings = useChannels(false);
   return (
     <Page>
       <Link
@@ -176,30 +218,39 @@ export function ChannelPage() {
         {t.nav.channels}
       </Link>
       <QueryState query={channel} loading={<TableSkeleton rows={10} />}>
-        {(loaded) => (
-          <div className="flex flex-col gap-5">
-            <PageHeader
-              title={loaded.name}
-              description={[loaded.provider_id, loaded.endpoints.map((e) => e.format).join(' · ')]
-                .filter(Boolean)
-                .join(' · ')}
-            />
-            <div className="grid items-start gap-4 xl:grid-cols-3">
-              <div className="min-w-0 xl:col-span-2">
-                <ChannelEditor key={loaded.version} channel={loaded} />
-              </div>
-              <div className="flex min-w-0 flex-col gap-4">
-                <KeyPool channelId={channelId} />
-                <Card>
-                  <CardHeader title={t.channels.health} />
-                  <QueryState query={health} loading={<TableSkeleton rows={2} />}>
-                    {(entries) => <HealthList health={entries} empty={t.channels.noHealth} />}
-                  </QueryState>
-                </Card>
+        {(loaded) => {
+          const provider = providers.data?.find((entry) => entry.id === loaded.provider_id);
+          const catalog = parseEndpointCatalog(provider?.endpoints);
+          const formats = catalog ? providerFormats(catalog) : (provider?.formats ?? []);
+          return (
+            <div className="flex flex-col gap-5">
+              <PageHeader
+                title={loaded.name}
+                description={[loaded.provider_label, ...formats].filter(Boolean).join(' · ')}
+              />
+              <div className="grid items-start gap-4 xl:grid-cols-3">
+                <div className="min-w-0 xl:col-span-2">
+                  <ChannelEditor
+                    key={`${loaded.id}:${loaded.version}`}
+                    channel={loaded}
+                    providers={providers.data ?? []}
+                    siblings={siblings.data ?? []}
+                  />
+                </div>
+                <div className="flex min-w-0 flex-col gap-4">
+                  <KeyPool channelId={channelId} />
+                  <Card>
+                    <CardHeader title={t.channels.health} />
+                    <QueryState query={health} loading={<TableSkeleton rows={2} />}>
+                      {(entries) => <HealthList health={entries} empty={t.channels.noHealth} />}
+                    </QueryState>
+                  </Card>
+                  <CapabilityOverrides overrides={loaded.capability_overrides} />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        }}
       </QueryState>
     </Page>
   );

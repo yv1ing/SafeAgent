@@ -1,9 +1,38 @@
-import type { ConsoleTranscriptView } from '../../../api/generated/models';
+import { useEffect } from 'react';
+import type { ConsoleItemView, ConsoleTranscriptView } from '../../../api/generated/models';
 import { useLocale } from '../../../i18n';
+import { itemAnchorId, type ItemReveal } from '../reveal';
 import { ItemView } from './ItemView';
 
-export function Transcript({ transcript }: { transcript: ConsoleTranscriptView }) {
+function matchesReveal(item: ConsoleItemView, reveal?: ItemReveal) {
+  return (
+    reveal !== undefined &&
+    item.call_id === reveal.callId &&
+    item.section === reveal.section &&
+    item.ordinal === reveal.ordinal
+  );
+}
+
+export function Transcript({
+  transcript,
+  showRaw,
+  reveal,
+  valueFilter,
+}: {
+  transcript: ConsoleTranscriptView;
+  showRaw: boolean;
+  reveal?: ItemReveal;
+  valueFilter?: string | null;
+}) {
   const { t } = useLocale();
+  useEffect(() => {
+    if (!reveal) return;
+    const target = document.getElementById(
+      itemAnchorId({ call_id: reveal.callId, section: reveal.section, ordinal: reveal.ordinal }),
+    );
+    if (!target) return;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [reveal]);
   return (
     <div className="flex flex-col gap-3">
       {transcript.truncated && <p className="text-xs text-faint">{t.call.truncated}</p>}
@@ -16,7 +45,13 @@ export function Transcript({ transcript }: { transcript: ConsoleTranscriptView }
           </div>
           <div className="flex min-w-0 flex-col gap-2 rounded-md border bg-surface px-3 py-2.5">
             {turn.items.map((item, index) => (
-              <ItemView key={index} item={item} />
+              <ItemView
+                key={`${item.call_id}:${item.section}:${item.ordinal}:${index}`}
+                item={item}
+                showRaw={showRaw}
+                valueFilter={valueFilter}
+                highlighted={matchesReveal(item, reveal)}
+              />
             ))}
           </div>
         </div>
@@ -31,6 +66,9 @@ export function Transcript({ transcript }: { transcript: ConsoleTranscriptView }
               <li key={tool.name} className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-mono font-medium">{tool.name}</span>
                 <span className="text-faint">{tool.kind}</span>
+                {tool.description && (
+                  <span className="truncate text-muted">{tool.description}</span>
+                )}
                 {tool.boundary && <span className="text-muted">{tool.boundary}</span>}
                 {tool.integrity && <span className="text-muted">{tool.integrity}</span>}
               </li>

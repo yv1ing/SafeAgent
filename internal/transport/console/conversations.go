@@ -5,6 +5,8 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
+// ConversationView is one row of the conversation listing. Its counts only include conversational
+// lanes; the session page itself is the trajectory.
 type ConversationView struct {
 	ID          string `json:"id" required:"true"`
 	FirstCallID string `json:"first_call_id" required:"true"`
@@ -18,17 +20,6 @@ type ConversationView struct {
 type ConversationPage struct {
 	Items []ConversationView `json:"items" required:"true"`
 	Next  *CursorView        `json:"next,omitempty"`
-}
-
-type ConversationTreeView struct {
-	Conversation ConversationView `json:"conversation" required:"true"`
-	Nodes        []TreeNodeView   `json:"nodes" required:"true"`
-	Truncated    bool             `json:"truncated" required:"true"`
-}
-
-type TreeNodeView struct {
-	Call    CallView `json:"call" required:"true"`
-	Summary string   `json:"summary" required:"true"`
 }
 
 type listConversationsInput struct {
@@ -56,16 +47,5 @@ func (console *Console) registerConversations() {
 			return nil, err
 		}
 		return ConversationPage{Items: viewAll(page.Items, conversationView), Next: cursorView(page.Next)}, nil
-	})
-	console.add("GET", "/projects/{project_id}/conversations/{session_id}", "getConversation", conversationPath{}, ConversationTreeView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		tree, err := console.Calls.Conversation(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), ctx.Param("session_id"))
-		if err != nil {
-			return nil, err
-		}
-		nodes := make([]TreeNodeView, 0, len(tree.Nodes))
-		for index := range tree.Nodes {
-			nodes = append(nodes, TreeNodeView{Call: callView(&tree.Nodes[index].Call), Summary: tree.Nodes[index].Summary})
-		}
-		return ConversationTreeView{Conversation: conversationView(tree.Conversation), Nodes: nodes, Truncated: tree.Truncated}, nil
 	})
 }

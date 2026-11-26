@@ -1,45 +1,33 @@
 # Roadmap
 
-The current release covers four wire formats, online request/tool/tool-result checkpoints, non-streaming response inspection, an optional bounded streaming review window, an event timeline, an explicit session link and a signed audit chain. The items below are the known limits that matter for agent safety; they are ordered by how much they change an operator's ability to see and stop an action.
+This page states what the current release covers and which limits are deliberate. It is a status page, not a plan.
 
-## P0: semantic and cross-call relations
+## Current coverage
 
-**Problem.** Flow detection matches specific tokens. Paraphrases, translated instructions and values transformed by a tool are invisible. Relations stop at one call.
-
-**Direction.** Keep the deterministic literal detector as the baseline and add an optional embedding or model-assisted relation pass over the same observation model. Add a cross-call edge type that links a tool result in call A to a later side-effecting call in call B, but only when the conversation chain is explicit or verified. Every semantic edge records its detector, model and confidence, and a semantic edge never overrides a deterministic block.
-
-**Touchpoints.** `internal/analysis/builtin/flow.go`, `internal/analysis/engine.go`, `internal/observation` (trace/chain), `internal/service/diagnosis` (ancestor expansion), decision-model budget.
-
-**Acceptance.** Paraphrased and cross-call cases are added to the analysis acceptance suite; a low-confidence semantic edge produces `unknown`, not `safe`; the deterministic path remains unchanged when the optional pass is disabled.
-
-## P1: multi-agent trajectories
-
-**Problem.** The unit of analysis is one agent key and one call chain. A2A or supervisor/worker setups split one task across several keys or sessions, so a flow can cross a boundary the model does not represent.
-
-**Direction.** Introduce an explicit trajectory identifier that a trusted orchestrator can attach to several agent keys in one project. Build the chain view over that identifier, and let policy conditions read trajectories without changing the per-call enforcement point. Keep the default single-key behavior.
-
-**Touchpoints.** `internal/pipeline` session resolution, `calls.parent_call_id`/`session_id`, `internal/service/diagnosis`, console conversation tree, policy CEL surface.
-
-**Acceptance.** A two-key fixture links into one trajectory; an unauthenticated caller cannot join another project's trajectory; per-call checkpoints still run before any tool side effect.
-
-## P1: repeatable evaluation
-
-**Problem.** The project has unit, integration and acceptance tests, but no repeatable safety benchmark with labelled trajectories. Detector changes are judged by fixtures and review.
-
-**Direction.** Add a small, versioned evaluation fixture in the style of ATBench: generated and reviewed trajectories with risk source, failure mode and harm labels. Do not copy the paper's dataset or claim its numbers. Report the same coverage-aware verdicts the product produces, and keep false negatives visible.
-
-**Touchpoints.** `internal/analysis` fixture format, a testenv evaluation runner, versioned detector/catalogue metadata, `docs/human/verification.md`.
-
-**Acceptance.** The runner reports per-code precision/recall and verdict confusion; a detector version change produces a diff; the fixture is small enough to run in the normal acceptance lab.
+- Four wire formats convert in both directions, with canonical non-streaming and streaming paths, a raw same-format pass-through and a per-call loss ledger.
+- Calls are classified by operation, purpose, purpose source, lane and outcome. Main calls drive conversations, diagnosis and traffic metrics; side calls stay in the conversation without diagnosis; auxiliary calls are protocol traffic with no conversation.
+- Providers, channels, models, routes, aliases and targets are stored and editable, with soft deletion, impact previews, configuration health and a one-shot connect flow.
+- Online policy runs at four checkpoints, with reversible redaction before policy reads the text and an optional bounded stream review window.
+- A conversation is projected as one trajectory with stable node and edge identities, replay steps, bounded history and an in-process cache. The redaction index is deduplicated by value id.
+- The asynchronous worker rebuilds a call from the audit events, analyses it with deterministic detectors and an optional decision model, and stores findings, flows, coverage and a verdict.
+- Every admitted call has an HMAC-chained audit trail, a timeline and an offline verification command.
+- The console covers monitor, calls, conversations, risk, activity, policy, redaction, keys, routes, members and settings, plus global models, channels, users and operations.
 
 ## Known boundaries
 
-- Human approval/review is intentionally not implemented. The policy actions remain `block` and `record`; adding a queue requires an operator-facing workflow and a durable pending state.
-- Image, audio and other binary payloads are not inspected or redacted.
+- Human approval and a review queue are not implemented. Online policy actions remain `block` and `record`.
+- Images, audio and other binary payloads are not inspected or redacted.
 - Stream review covers only the configured leading window. Text after that window reaches the client before asynchronous diagnosis.
-- A provider-executed server tool has already run before the gateway sees its result; the gateway can withhold the result but cannot undo the execution.
-- The decision model is optional, provider-dependent and returns calibrated answers without a rationale.
-- The gateway sees only traffic that passes through it.
+- A provider-executed server tool has already run before the gateway sees its result. The gateway can withhold the result but cannot undo the execution.
+- Tool destinations and source-to-sink flows are inferred heuristically. A finding is evidence for review, not proof of an attack, and a policy that needs a strong claim matches findings.
+- The decision model is optional, provider-dependent and returns calibrated answers without a rationale. Its failure cannot release a deterministic block.
+- Analysis and metrics cover only traffic through the gateway.
+- A conversation trajectory reads at most 200 calls and 32 MiB of decoded payload, and a diagnosis expands at most 200 ancestors within the same 32 MiB budget. Beyond that the result is marked truncated and the verdict cannot be `safe`.
+- A route target produces one candidate in one format. Multi-choice requests are served only by a streaming same-format pass-through with no redaction or history expansion.
+- Auxiliary calls are retained for the project's `auxiliary_retention_days` (default 3); main and side calls follow `retention_days`.
+- The service runs a single instance against one database, and the schema is a fresh baseline with no migration path. A schema or audit-version change requires recreating the database.
+- Cross-call semantic relations are not modelled: a flow stays inside one call, and the analysis unit is one agent key and one call chain. A multi-agent task split across keys or sessions is not linked into one trajectory.
+- There is no versioned, labelled safety benchmark. Detector changes are judged by unit, integration and acceptance fixtures.
 
 ## Related
 

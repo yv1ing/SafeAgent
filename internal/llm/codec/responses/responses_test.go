@@ -311,3 +311,77 @@ func TestRequestAcceptsMessageItemsWithoutType(t *testing.T) {
 		t.Fatalf("unexpected items: %+v", request.Items)
 	}
 }
+
+func reasoningItem(signature *model.Signature) model.Item {
+	return model.Item{
+		Kind: model.ItemReasoning, Role: model.RoleAssistant,
+		Parts:     []model.Part{{Kind: model.PartReasoningText, Text: "kept thought"}},
+		Reasoning: &model.Reasoning{Visibility: "full", Signature: signature},
+	}
+}
+
+func encodeReasoningRequest(t *testing.T, item model.Item) []byte {
+	t.Helper()
+	body, _, _, err := responses.New().EncodeRequest(
+		&model.Request{Model: "m", Items: []model.Item{item}},
+		codec.Peer{Side: codec.Upstream, Vendor: model.VendorOpenAI, Model: "m"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestResponsesDropsASignatureThatDoesNotCoverTheReasoningText(t *testing.T) {
+	signature := &model.Signature{Vendor: model.VendorOpenAI, Blob: "enc", TextDigest: model.TextDigest("another thought")}
+	body := encodeReasoningRequest(t, reasoningItem(signature))
+	if sealed := testkit.JSONValue(t, body, "input.0.encrypted_content"); sealed != nil {
+		t.Fatalf("a signature that does not cover the reasoning text must not be sent: %v (%s)", sealed, body)
+	}
+	signature.TextDigest = model.TextDigest("kept thought")
+	body = encodeReasoningRequest(t, reasoningItem(signature))
+	if sealed := testkit.JSONValue(t, body, "input.0.encrypted_content"); sealed != "enc" {
+		t.Fatalf("a signature covering the reasoning text must be sent: %v (%s)", sealed, body)
+	}
+}
+
+func TestStreamedReasoningSignatureIsCheckedBeforeSealing(t *testing.T) {
+	envelope := testkit.SealingEnvelope{Secret: []byte("secret")}
+	peer := codec.Peer{Side: codec.Client, Vendor: model.VendorOpenAI, Model: "m", Envelope: envelope}
+	signature := &model.Signature{Vendor: model.VendorOpenAI, Blob: "enc", TextDigest: model.TextDigest("another thought")}
+	item := reasoningItem(signature)
+	events := []model.Event{
+		{Kind: model.EventMessageStart, Meta: &model.ResponseMeta{ID: "resp_1", Model: "m"}},
+		{Kind: model.EventItemStart, ItemIndex: 0, Item: &item},
+		{Kind: model.EventPartStart, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText}},
+		{Kind: model.EventPartStop, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText, Text: "kept thought"}},
+		{Kind: model.EventItemStop, ItemIndex: 0, Item: &item},
+	}
+	output, _ := testkit.EncodeEvents(t, responses.New().NewStreamEncoder(model.ResponseMeta{ID: "resp_1", Model: "m"}, peer), events)
+	if sealed := sealedReasoning(t, output); sealed != "" {
+		t.Fatalf("a signature that does not cover the reasoning text must not be sealed: %s", sealed)
+	}
+
+	signature.TextDigest = model.TextDigest("kept thought")
+	item = reasoningItem(signature)
+	events[1].Item, events[4].Item = &item, &item
+	output, _ = testkit.EncodeEvents(t, responses.New().NewStreamEncoder(model.ResponseMeta{ID: "resp_1", Model: "m"}, peer), events)
+	sealed := sealedReasoning(t, output)
+	opened, ok := envelope.Open(sealed)
+	if !ok || opened.Blob != "enc" {
+		t.Fatalf("a covering signature must be sealed for the client: %q %+v", sealed, opened)
+	}
+}
+
+func sealedReasoning(t *testing.T, frames []codec.Frame) string {
+	t.Helper()
+	for _, frame := range frames {
+		if kind := model.String(testkit.JSONValue(t, frame.Data, "type")); kind != "response.output_item.done" {
+			continue
+		}
+		if sealed := model.String(testkit.JSONValue(t, frame.Data, "item.encrypted_content")); sealed != "" {
+			return sealed
+		}
+	}
+	return ""
+}

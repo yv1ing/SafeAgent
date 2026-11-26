@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -37,7 +38,7 @@ func issuePassword() (string, string, error) {
 func (service *AccountService) Login(ctx context.Context, username, password string) (*repository.Identity, error) {
 	identity, err := service.store.Authenticate(ctx, username, password)
 	if errors.Is(err, repository.ErrInvalidCredentials) {
-		return nil, Unauthenticated("invalid_credentials")
+		return nil, access.Unauthenticated("invalid_credentials")
 	}
 	return identity, err
 }
@@ -46,7 +47,7 @@ func (service *AccountService) Login(ctx context.Context, username, password str
 func (service *AccountService) Session(ctx context.Context, token string) (*entity.User, error) {
 	identity, err := service.store.Session(ctx, token)
 	if errors.Is(err, repository.ErrInvalidCredentials) {
-		return nil, Unauthenticated("unauthenticated")
+		return nil, access.Unauthenticated("unauthenticated")
 	}
 	if err != nil {
 		return nil, err
@@ -60,11 +61,11 @@ func (service *AccountService) Logout(ctx context.Context, token string) error {
 
 func (service *AccountService) ChangePassword(ctx context.Context, userID, token, current, next string) error {
 	if !ValidPassword(next) {
-		return Invalid("weak_password")
+		return access.Invalid("weak_password")
 	}
 	err := service.store.ChangePassword(ctx, userID, token, current, next)
 	if errors.Is(err, repository.ErrInvalidCredentials) {
-		return Denied("invalid_credentials")
+		return access.Denied("invalid_credentials")
 	}
 	return err
 }
@@ -93,12 +94,12 @@ func ValidPassword(value string) bool {
 func validUsername(value string) (string, error) {
 	name := strings.TrimSpace(value)
 	if !usernamePattern.MatchString(name) {
-		return "", Invalid("invalid_username")
+		return "", access.Invalid("invalid_username")
 	}
 	return name, nil
 }
 
-func (service *AccountService) Users(ctx context.Context, actor Actor) ([]entity.User, error) {
+func (service *AccountService) Users(ctx context.Context, actor access.Actor) ([]entity.User, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ type UserResult struct {
 	Password string
 }
 
-func (service *AccountService) Create(ctx context.Context, actor Actor, username string, administrator bool) (*UserResult, error) {
+func (service *AccountService) Create(ctx context.Context, actor access.Actor, username string, administrator bool) (*UserResult, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
@@ -125,28 +126,28 @@ func (service *AccountService) Create(ctx context.Context, actor Actor, username
 	user := &entity.User{ID: secure.Random(12), Username: name, PasswordHash: hash, Administrator: administrator, MustChangePassword: true, CreatedAt: time.Now().UTC()}
 	if err := service.store.CreateUser(ctx, user); err != nil {
 		if repository.IsUniqueViolation(err) {
-			return nil, Conflict("username_taken")
+			return nil, access.Conflict("username_taken")
 		}
 		return nil, err
 	}
 	return &UserResult{User: user, Password: password}, nil
 }
 
-func (service *AccountService) Update(ctx context.Context, actor Actor, userID string, disabled, administrator bool) (*entity.User, error) {
+func (service *AccountService) Update(ctx context.Context, actor access.Actor, userID string, disabled, administrator bool) (*entity.User, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
 	if userID == actor.UserID && (disabled || !administrator) {
-		return nil, Invalid("cannot_demote_self")
+		return nil, access.Invalid("cannot_demote_self")
 	}
 	if err := service.store.UpdateUser(ctx, userID, disabled, administrator); err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	user, err := service.store.UserByID(ctx, userID)
-	return user, Translate(err)
+	return user, access.Translate(err)
 }
 
-func (service *AccountService) ResetPassword(ctx context.Context, actor Actor, userID string) (*UserResult, error) {
+func (service *AccountService) ResetPassword(ctx context.Context, actor access.Actor, userID string) (*UserResult, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
@@ -155,33 +156,33 @@ func (service *AccountService) ResetPassword(ctx context.Context, actor Actor, u
 		return nil, err
 	}
 	if err := service.store.ResetPassword(ctx, userID, hash); err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	user, err := service.store.UserByID(ctx, userID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	return &UserResult{User: user, Password: password}, nil
 }
 
 // Members lists the accounts of a project; any member may read it, only administrators change it.
-func (service *AccountService) Members(ctx context.Context, actor Actor, projectID string) ([]entity.User, error) {
+func (service *AccountService) Members(ctx context.Context, actor access.Actor, projectID string) ([]entity.User, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
 	}
 	return service.store.Members(ctx, projectID)
 }
 
-func (service *AccountService) AddMember(ctx context.Context, actor Actor, projectID, userID string) (*entity.User, error) {
+func (service *AccountService) AddMember(ctx context.Context, actor access.Actor, projectID, userID string) (*entity.User, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
 	if _, err := service.store.Project(ctx, projectID); err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	user, err := service.store.UserByID(ctx, userID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	if err := service.store.AddMember(ctx, projectID, userID); err != nil {
 		return nil, err
@@ -189,16 +190,16 @@ func (service *AccountService) AddMember(ctx context.Context, actor Actor, proje
 	return user, nil
 }
 
-func (service *AccountService) RemoveMember(ctx context.Context, actor Actor, projectID, userID string) (*entity.User, error) {
+func (service *AccountService) RemoveMember(ctx context.Context, actor access.Actor, projectID, userID string) (*entity.User, error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return nil, err
 	}
 	user, err := service.store.UserByID(ctx, userID)
 	if err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	if err := service.store.RemoveMember(ctx, projectID, userID); err != nil {
-		return nil, Translate(err)
+		return nil, access.Translate(err)
 	}
 	return user, nil
 }

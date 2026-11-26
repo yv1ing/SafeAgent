@@ -5,32 +5,25 @@ import type { ConsoleRiskView, GetProjectRiskWindow } from '../../api/generated/
 import { useListProjectFlows } from '../../api/generated/flows/flows';
 import { useGetProjectRisk } from '../../api/generated/risk/risk';
 import { useProjectId } from '../../app/context';
-import { Page } from '../../components/layout/Page';
-import { usePollingInterval } from '../../hooks/usePolling';
-import { PageHeader } from '../../components/layout/PageHeader';
+import { DataTable } from '../../components/data/DataTable';
 import { QueryState } from '../../components/feedback/QueryState';
 import { Segmented } from '../../components/feedback/Segmented';
+import { Page } from '../../components/layout/Page';
+import { PageHeader } from '../../components/layout/PageHeader';
+import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
+import { Progress } from '../../components/ui/progress';
 import { Select } from '../../components/ui/select';
 import { Skeleton } from '../../components/ui/skeleton';
-import { Table, Td, Th, Tr } from '../../components/ui/table';
+import { usePollingInterval } from '../../hooks/usePolling';
 import { errorMessage, findingLabel, interpolate, useLocale } from '../../i18n';
-import { Button } from '../../components/ui/button';
 import { formatDate, formatNumber } from '../../lib/format';
 
 const windows: GetProjectRiskWindow[] = ['24h', '7d', '30d'];
 
-function Bar({ value, max, tone }: { value: number; max: number; tone?: string }) {
-  const width = max > 0 ? Math.max((value / max) * 100, 2) : 0;
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded bg-sunken">
-      <div
-        className="h-full rounded"
-        style={{ width: `${width}%`, background: tone ?? 'var(--chart-1)' }}
-      />
-    </div>
-  );
+function Bar({ value, max, tone }: { value: number; max: number; tone?: 'accent' | 'danger' }) {
+  return <Progress value={value} max={max} tone={tone ?? 'accent'} />;
 }
 
 function Distribution({
@@ -119,7 +112,7 @@ function RiskContent({
               <Bar
                 value={code.count}
                 max={maxCode}
-                tone={code.severity === 'high' ? 'var(--danger)' : 'var(--chart-2)'}
+                tone={code.severity === 'high' ? 'danger' : undefined}
               />
             </li>
           ))}
@@ -127,39 +120,54 @@ function RiskContent({
       </Card>
       <Card>
         <CardHeader title={t.risk.agents} />
-        <Table>
-          <thead>
-            <tr>
-              <Th>{t.monitor.agent}</Th>
-              <Th className="text-right">{t.risk.findings}</Th>
-              <Th className="text-right">{t.risk.high}</Th>
-              <Th className="text-right">{t.risk.flows}</Th>
-              <Th className="text-right">{t.monitor.lastSeen}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.agents.map((agent) => (
-              <Tr key={agent.agent_key_id}>
-                <Td>
-                  <button
-                    type="button"
-                    aria-pressed={selected === agent.agent_key_id}
-                    className="font-mono text-xs hover:text-accent"
-                    onClick={() => setAgentKey(agent.agent_key_id)}
-                  >
-                    {agent.label}
-                  </button>
-                </Td>
-                <Td className="num text-right">{formatNumber(agent.findings)}</Td>
-                <Td className="num text-right text-danger">{formatNumber(agent.high)}</Td>
-                <Td className="num text-right">{formatNumber(agent.flows)}</Td>
-                <Td className="text-right text-xs text-faint">
-                  {formatDate(agent.last_at, locale)}
-                </Td>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
+        <DataTable
+          rows={report.agents}
+          rowKey={(agent) => agent.agent_key_id}
+          columns={[
+            {
+              key: 'agent',
+              header: t.monitor.agent,
+              cell: (agent) => (
+                <button
+                  type="button"
+                  aria-pressed={selected === agent.agent_key_id}
+                  className="font-mono text-xs hover:text-accent"
+                  onClick={() => setAgentKey(agent.agent_key_id)}
+                >
+                  {agent.label}
+                </button>
+              ),
+            },
+            {
+              key: 'findings',
+              header: t.risk.findings,
+              align: 'right',
+              className: 'num',
+              cell: (agent) => formatNumber(agent.findings),
+            },
+            {
+              key: 'high',
+              header: t.risk.high,
+              align: 'right',
+              className: 'num text-danger',
+              cell: (agent) => formatNumber(agent.high),
+            },
+            {
+              key: 'flows',
+              header: t.risk.flows,
+              align: 'right',
+              className: 'num',
+              cell: (agent) => formatNumber(agent.flows),
+            },
+            {
+              key: 'last',
+              header: t.monitor.lastSeen,
+              align: 'right',
+              className: 'text-xs text-faint',
+              cell: (agent) => formatDate(agent.last_at, locale),
+            },
+          ]}
+        />
       </Card>
       <Card>
         <CardHeader
@@ -190,19 +198,15 @@ function RiskContent({
             </Button>
           </div>
         ) : flows.data && flows.data.items.length > 0 ? (
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t.risk.source}</Th>
-                <Th>{t.risk.relation}</Th>
-                <Th>{t.risk.sink}</Th>
-                <Th className="text-right">{t.risk.confidence}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {flows.data.items.map((flow, index) => (
-                <Tr key={`${flow.content_hash}:${index}`} className="align-top">
-                  <Td>
+          <DataTable
+            rows={flows.data.items}
+            rowKey={(flow, index) => `${flow.content_hash}:${index}`}
+            columns={[
+              {
+                key: 'source',
+                header: t.risk.source,
+                cell: (flow) => (
+                  <>
                     <div className="font-mono text-xs">
                       {t.call.origins[flow.source_origin as keyof typeof t.call.origins] ??
                         flow.source_origin}
@@ -213,22 +217,37 @@ function RiskContent({
                         item: flow.source_item,
                       })}
                     </div>
-                  </Td>
-                  <Td className="font-mono text-xs">
-                    {t.call.relations[flow.relation as keyof typeof t.call.relations] ??
-                      flow.relation}
-                  </Td>
-                  <Td>
+                  </>
+                ),
+              },
+              {
+                key: 'relation',
+                header: t.risk.relation,
+                className: 'font-mono text-xs',
+                cell: (flow) =>
+                  t.call.relations[flow.relation as keyof typeof t.call.relations] ?? flow.relation,
+              },
+              {
+                key: 'sink',
+                header: t.risk.sink,
+                cell: (flow) => (
+                  <>
                     <div className="font-mono text-xs">
                       {t.call.sinks[flow.sink as keyof typeof t.call.sinks] ?? flow.sink}
                     </div>
                     <div className="text-[11px] text-faint">{flow.sink_tool_call_id}</div>
-                  </Td>
-                  <Td className="num text-right text-xs">{Math.round(flow.confidence * 100)}%</Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
+                  </>
+                ),
+              },
+              {
+                key: 'confidence',
+                header: t.risk.confidence,
+                align: 'right',
+                className: 'num text-xs',
+                cell: (flow) => `${Math.round(flow.confidence * 100)}%`,
+              },
+            ]}
+          />
         ) : (
           <p className="px-4 py-6 text-sm text-muted">{t.risk.noFlows}</p>
         )}
@@ -245,9 +264,8 @@ function RiskContent({
                 className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
               >
                 <Link
-                  to="/projects/$projectId/calls"
-                  params={{ projectId }}
-                  search={{ call: call.call_id }}
+                  to="/projects/$projectId/conversations/node/$nodeId"
+                  params={{ projectId, nodeId: call.node_id || `call:${call.call_id}` }}
                   className="font-mono text-xs text-accent hover:underline"
                 >
                   {call.call_id}
@@ -288,6 +306,7 @@ export function RiskPage() {
           />
         }
       />
+      <p className="text-[11px] text-faint">{t.risk.mainLaneNote}</p>
       <QueryState query={risk} loading={<Skeleton className="h-96" />}>
         {(report) =>
           report.total_findings === 0 && report.agents.length === 0 ? (

@@ -18,7 +18,10 @@ export interface ConsoleTimelineEntryView {
   label: string;
   message: string;
   model_id: string;
+  resolution: string;
   response?: ConsoleTimelineResponse;
+  route_id: string;
+  route_name: string;
   sequence: number;
   status: string;
   tool_call_id: string;

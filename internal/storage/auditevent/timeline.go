@@ -48,6 +48,12 @@ func timelineEntry(record Record, decoded Decoded) Entry {
 	switch record.Kind {
 	case KindRequest:
 		entry.Category, entry.Label, entry.Status = "admission", "call_admitted", "info"
+	case KindRouting:
+		entry.Category, entry.Label, entry.Status = "routing", "route_resolved", "info"
+		if decoded.Routing != nil {
+			entry.Message = decoded.Routing.RouteName
+			entry.Code = decoded.Routing.Resolution
+		}
 	case KindAttempt:
 		entry.Category, entry.Label, entry.Status = "attempt", "upstream_attempt", "info"
 		if decoded.Attempt != nil {

@@ -7,6 +7,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis/decision"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
 // Repository is the persistence the pipeline needs. It is an interface so the gateway can be
@@ -18,16 +19,17 @@ type Repository interface {
 	Project(ctx context.Context, id string) (*entity.Project, error)
 	Rules(ctx context.Context, projectID string) ([]entity.Rule, error)
 	ActivePolicy(ctx context.Context, projectID string) (*entity.PolicyVersion, error)
-	RouteByName(ctx context.Context, projectID, name string) (*entity.Route, error)
-	Routes(ctx context.Context, projectID string) ([]entity.Route, error)
-	Channels(ctx context.Context) ([]entity.Channel, error)
-	ModelsByIDs(ctx context.Context, ids []string) ([]entity.Model, error)
+	ResolveRoute(ctx context.Context, projectID, name string) (repository.RouteResolution, error)
+	DefaultRoute(ctx context.Context, projectID string) (repository.RouteResolution, error)
+	Routes(ctx context.Context, projectID string, includeDeleted bool) ([]repository.RouteRecord, error)
 	EnabledChannelKeys(ctx context.Context) ([]entity.ChannelKey, error)
-	AddCapabilityOverride(ctx context.Context, channelID, modelID, format, field, reason string) error
+	CapabilityOverrides(ctx context.Context, channelIDs []string) ([]entity.CapabilityOverride, error)
+	AddCapabilityOverride(ctx context.Context, override entity.CapabilityOverride) error
 	DeleteResponse(ctx context.Context, agentKeyID, responseID string) error
 	MarkCallCancelled(ctx context.Context, callID string)
 	ReserveTokens(ctx context.Context, projectID string, estimate, limit int64) (bool, time.Time, error)
 	SettleTokens(ctx context.Context, projectID string, day time.Time, estimate, actual int64) error
+	Call(ctx context.Context, projectID, callID string) (*entity.Call, error)
 	CallByResponseID(ctx context.Context, agentKeyID, responseID string) (*entity.Call, error)
 	CallByToolCall(ctx context.Context, projectID, agentKeyID, toolCallID string) (*entity.Call, error)
 	CallByConversationHash(ctx context.Context, agentKeyID, hash string) (*entity.Call, error)

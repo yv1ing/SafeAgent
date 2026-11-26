@@ -8,6 +8,7 @@
 
 export interface ConsoleMonitorTotalsView {
   blocked: number;
+  /** Main-lane calls only */
   calls: number;
   failures: number;
   findings: number;

@@ -16,6 +16,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/analysis/decision"
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/observation"
@@ -75,6 +76,7 @@ func newRigWithTransport(t *testing.T, upstreamFormat string, transport provider
 	upstream := testkit.NewUpstream(t, script)
 	store := testkit.NewMemory(upstream.URL, upstreamFormat)
 	store.Registry = testkit.ProviderRegistryWithTransport(upstreamFormat, upstream.URL, transport)
+	store.UseProvider(store.Registry)
 	breakers := routing.NewBreakers(nil)
 	selector := routing.NewSelector(breakers, routing.NewKeyPool(nil), routing.NewSticky(nil), 3)
 	limiter := limit.New(nil)
@@ -107,12 +109,7 @@ func (rig *rig) send(request pipeline.Request) *recorder {
 
 // addTarget adds a second catalog model and route target on the same channel.
 func (rig *rig) addTarget(modelID, upstreamName string) {
-	rig.store.Models = append(rig.store.Models, entity.Model{
-		ID: modelID, ProviderID: "test", UpstreamName: upstreamName, Kind: entity.ModelGeneration,
-		Formats: []string{rig.format}, Currency: "USD", Enabled: true, Version: 1,
-	})
-	rig.store.Channel[0].ModelIDs = append(rig.store.Channel[0].ModelIDs, modelID)
-	rig.store.Route.Targets = append(rig.store.Route.Targets, entity.Target{ChannelID: "channel_1", ModelID: modelID, Priority: 2, Weight: 1})
+	rig.store.AddTarget(modelID, upstreamName, rig.format)
 }
 
 func eventKinds(events []entity.Event) []string {
@@ -229,7 +226,7 @@ func TestRejectedCallsAreRecordedAndReleaseTheirReservation(t *testing.T) {
 	if response.Code != 404 || !strings.Contains(response.Body.String(), "model_not_found") {
 		t.Fatalf("unexpected response %d %s", response.Code, response.Body)
 	}
-	if len(rig.store.Calls) != 1 || rig.store.Calls[0].State != "rejected" || rig.store.Calls[0].ErrorCode != "model_not_found" {
+	if len(rig.store.Calls) != 1 || rig.store.Calls[0].State != "failed" || rig.store.Calls[0].Outcome != classify.OutcomeClientError || rig.store.Calls[0].ErrorCode != "model_not_found" {
 		t.Fatalf("a rejected call must be recorded: %+v", rig.store.Calls)
 	}
 	if len(rig.upstream.Requests()) != 0 {
@@ -332,7 +329,7 @@ func TestBlockingPolicyHoldsServerToolCalls(t *testing.T) {
 	if strings.Contains(full, "ws_1") || !strings.Contains(full, "tool_call_blocked") {
 		t.Fatalf("server tool call leaked or no error frame: %s", full)
 	}
-	if call := rig.store.Calls[0]; call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+	if call := rig.store.Calls[0]; call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "tool_call_blocked" {
 		t.Fatalf("call %+v", call)
 	}
 }
@@ -489,7 +486,7 @@ func TestBlockingPolicyHoldsToolCallsAndRecordsThem(t *testing.T) {
 		t.Fatalf("held tool call leaked or no error frame: %s", full)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "tool_call_blocked" {
 		t.Fatalf("call %+v", call)
 	}
 	response := string(firstEvent(t, rig.store.EventsOf(call.ID), auditevent.KindResponse))
@@ -528,7 +525,7 @@ func TestBlockingRedactionRuleRecordsADecision(t *testing.T) {
 		t.Fatalf("%d %s", response.Code, response.Body)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "rejected" || call.ErrorCode != "sensitive_content_blocked" {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "sensitive_content_blocked" {
 		t.Fatalf("call %+v", call)
 	}
 	found := false
@@ -774,7 +771,7 @@ func TestRequestPhaseBlocksInjectionAndKeepsTheOutbox(t *testing.T) {
 	if response.Code != 403 || !strings.Contains(response.Body.String(), "request_blocked") {
 		t.Fatalf("injection must be blocked before the upstream: %d %s", response.Code, response.Body)
 	}
-	if len(rig.store.Calls) != 1 || rig.store.Calls[0].State != "rejected" {
+	if len(rig.store.Calls) != 1 || rig.store.Calls[0].State != "completed" || rig.store.Calls[0].Outcome != classify.OutcomeBlocked {
 		t.Fatalf("the rejected call must be sealed: %+v", rig.store.Calls)
 	}
 	if len(rig.store.Analysis) != 1 {
@@ -794,7 +791,7 @@ func TestDecisionModelCanOnlyVetoAnAllowedToolCall(t *testing.T) {
 		return testkit.Reply{Frames: testkit.ChatToolCall("call_1", "http_post", `{"url":"https://api.example/collect"}`)}
 	})
 	response := rig.chat(`{"model":"gpt-5","messages":[{"role":"user","content":"send it"}]}`)
-	if response.Code == 200 || rig.store.Calls[0].State != "blocked" || rig.store.Calls[0].ErrorCode != "tool_call_vetoed" {
+	if response.Code == 200 || rig.store.Calls[0].State != "completed" || rig.store.Calls[0].Outcome != classify.OutcomeBlocked || rig.store.Calls[0].ErrorCode != "tool_call_vetoed" {
 		t.Fatalf("the veto did not block the tool call: %d %s %+v", response.Code, response.Body, rig.store.Calls[0])
 	}
 	if len(rig.store.Analysis) != 1 || len(rig.store.Analysis[0].Decisions) == 0 {
@@ -978,7 +975,7 @@ func TestSameFormatRequestKeepsTheClientWireShape(t *testing.T) {
 
 func TestClientFormatWinsOverChannelEndpointOrder(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
-	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+	rig.store.SetProvider(provider.ProviderSpec{
 		ID: "test", Label: "Test",
 		Endpoints: map[model.Format]provider.EndpointSpec{
 			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
@@ -988,8 +985,6 @@ func TestClientFormatWinsOverChannelEndpointOrder(t *testing.T) {
 			},
 		},
 	})
-	rig.store.Channel[0].Endpoints = []entity.ChannelEndpoint{{Format: string(model.Messages)}, {Format: string(model.Chat)}}
-	rig.store.Models[0].Formats = []string{string(model.Messages), string(model.Chat)}
 	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
 		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
 	})
@@ -1007,7 +1002,7 @@ func TestClientFormatWinsOverChannelEndpointOrder(t *testing.T) {
 
 func TestUnavailableClientFormatFallsBackToTheFirstChannelEndpoint(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Frames: testkit.ChatText("ok")} })
-	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+	rig.store.SetProvider(provider.ProviderSpec{
 		ID: "test", Label: "Test",
 		Endpoints: map[model.Format]provider.EndpointSpec{
 			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
@@ -1017,6 +1012,7 @@ func TestUnavailableClientFormatFallsBackToTheFirstChannelEndpoint(t *testing.T)
 			},
 		},
 	})
+	rig.store.Targets[0].Format = string(model.Chat)
 	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
 		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
 	})
@@ -1193,7 +1189,7 @@ func TestOutputLimitDefaultChain(t *testing.T) {
 	rig = newRigFor(t, string(model.Messages), textFrames)
 	rig.store.Proj.DefaultMaxOutputTokens = 888
 	rig.store.Channel[0].DefaultMaxOutputTokens = 777
-	rig.store.Route.Targets[0].MaxOutputTokens = 999
+	rig.store.Targets[0].MaxOutputTokens = 999
 	rig.send(request())
 	testkit.AssertJSON(t, []byte(rig.upstream.Requests()[0].Body), "max_tokens", 999)
 }
@@ -1333,7 +1329,7 @@ func TestRawRequestPassThroughIsDisabledWhenCompatibilityRewritesTheBody(t *test
 	rig := newRigFor(t, string(model.Responses), func(testkit.Received) testkit.Reply {
 		return testkit.Reply{Body: `{"id":"resp_1","object":"response","created_at":1,"model":"m","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1}}`}
 	})
-	rig.store.Channel[0].CapabilityOverrides = []entity.CapabilityOverride{{ModelID: "model_1", Format: string(model.Responses), Field: "thinking"}}
+	rig.store.Overrides = []entity.CapabilityOverride{{ChannelID: "channel_1", ModelID: "model_1", Format: string(model.Responses), Field: "thinking"}}
 	response := rig.send(pipeline.Request{Kind: model.Responses, Header: http.Header{"Authorization": {"Bearer agent-key"}}, Body: []byte(`{"model":"gpt-5","input":"hi","reasoning":{"effort":"high"},"store":false}`)})
 	if response.Code != 200 {
 		t.Fatalf("%d %s", response.Code, response.Body)

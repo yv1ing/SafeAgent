@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
@@ -52,10 +53,10 @@ var windows = map[string]struct {
 	"30d": {30 * 24 * time.Hour, "1d", 24 * time.Hour},
 }
 
-func (service *MonitorService) Snapshot(ctx context.Context, actor Actor, window string) (MonitorSnapshot, error) {
+func (service *MonitorService) Snapshot(ctx context.Context, actor access.Actor, window string) (MonitorSnapshot, error) {
 	definition, found := windows[window]
 	if window != "" && !found {
-		return MonitorSnapshot{}, Invalid("invalid_window")
+		return MonitorSnapshot{}, access.Invalid("invalid_window")
 	}
 	if window == "" {
 		window, definition = "24h", windows["24h"]

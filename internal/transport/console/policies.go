@@ -8,6 +8,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/observation"
+	access "github.com/yv1ing/SafeAgent/internal/service/access"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
 )
 
@@ -106,9 +107,6 @@ func (console *Console) registerPolicies() {
 		return policyVersionView(&version), nil
 	})
 	console.add("POST", "/projects/{project_id}/policies", "savePolicy", savePolicyInput{}, PolicyVersionView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		var input PolicySaveInput
 		if err := decode(ctx, &input); err != nil {
 			return nil, err
@@ -135,9 +133,6 @@ func (console *Console) registerPolicies() {
 		return policyVersionView(&saved), nil
 	})
 	console.add("POST", "/projects/{project_id}/policies/validate", "validatePolicy", validatePolicyInput{}, PolicyValidateView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		var input PolicyValidateInput
 		if err := decode(ctx, &input); err != nil {
 			return nil, err
@@ -147,8 +142,8 @@ func (console *Console) registerPolicies() {
 			return nil, errInvalidRequest
 		}
 		if err := console.Policy.Validate(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), document); err != nil {
-			var failure *service.Failure
-			if errors.As(err, &failure) && failure.Kind == service.KindInvalid {
+			var failure *access.Failure
+			if errors.As(err, &failure) && failure.Kind == access.KindInvalid {
 				return PolicyValidateView{Valid: false}, nil
 			}
 			return nil, err
@@ -156,9 +151,6 @@ func (console *Console) registerPolicies() {
 		return PolicyValidateView{Valid: true}, nil
 	})
 	console.add("POST", "/projects/{project_id}/policies/test", "testPolicy", testPolicyInput{}, PolicyTestView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		if !console.ruleLimit.Allow("policy:" + identity.User.ID) {
 			return nil, errRateLimited
 		}

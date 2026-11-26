@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import type { ConsoleProjectView } from '../../api/generated/models';
 import { useListProjects } from '../../api/generated/projects/projects';
 import { useCurrentUser } from '../../app/context';
+import { FilterBar } from '../../components/data/FilterBar';
 import { ConfirmDialog } from '../../components/form/ConfirmDialog';
 import { Page } from '../../components/layout/Page';
 import { PageHeader } from '../../components/layout/PageHeader';
@@ -18,12 +19,10 @@ import {
   DropdownTrigger,
 } from '../../components/ui/dropdown';
 import { Empty } from '../../components/ui/empty';
-import { Input } from '../../components/ui/input';
-import { Kbd } from '../../components/ui/kbd';
+import { Progress } from '../../components/ui/progress';
 import { Skeleton } from '../../components/ui/skeleton';
 import { interpolate, useLocale } from '../../i18n';
 import { formatDate, formatNumber } from '../../lib/format';
-import { slashFocusAttribute } from '../../lib/shortcuts';
 import { ProjectDialog } from './components/ProjectDialog';
 import { useProjectMutations } from './hooks';
 
@@ -46,7 +45,7 @@ function ProjectCard({
   const { t, locale } = useLocale();
   const navigate = useNavigate();
   const quota = project.quota_usage_percent ?? 0;
-  const quotaTone = quota >= 90 ? 'bg-danger' : quota >= 70 ? 'bg-warning' : 'bg-accent';
+  const quotaTone = quota >= 90 ? 'danger' : quota >= 70 ? 'warning' : 'accent';
 
   return (
     <Card className="flex flex-col">
@@ -111,14 +110,11 @@ function ProjectCard({
               {project.daily_token_quota > 0 ? `${quota}%` : t.common.unlimited}
             </span>
           </div>
-          <div aria-hidden className="h-1.5 overflow-hidden rounded-full bg-sunken">
-            {project.daily_token_quota > 0 && (
-              <div
-                className={`h-full rounded-full ${quotaTone}`}
-                style={{ width: `${Math.min(100, Math.max(0, quota))}%` }}
-              />
-            )}
-          </div>
+          <Progress
+            value={project.daily_token_quota > 0 ? quota : 0}
+            tone={quotaTone}
+            label={`${t.projects.quotaUsage}: ${project.name}`}
+          />
         </div>
         <Link
           to="/projects/$projectId/overview"
@@ -163,21 +159,14 @@ export function ProjectsPage() {
         }
       />
 
-      <div className="relative w-full sm:max-w-xs">
-        <Search
-          aria-hidden
-          className="pointer-events-none absolute top-2 left-2.5 size-4 text-faint"
-        />
-        <Input
-          {...{ [slashFocusAttribute]: '' }}
-          aria-label={t.projects.search}
-          placeholder={t.projects.searchPlaceholder}
-          className="pr-8 pl-8"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Kbd className="absolute top-1.5 right-2">/</Kbd>
-      </div>
+      <FilterBar
+        searchLabel={t.projects.search}
+        searchPlaceholder={t.projects.searchPlaceholder}
+        search={search}
+        onSearchChange={setSearch}
+        onClear={() => setSearch('')}
+        searchClassName="sm:w-full sm:max-w-xs"
+      />
 
       <QueryState
         query={projects}

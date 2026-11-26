@@ -54,6 +54,44 @@ func (store *Store) CallEvents(ctx context.Context, projectID, callID string) ([
 	return events, checkEventVersions(events)
 }
 
+// EventsOfCalls returns every event of the given calls in one query, ordered for replay. The
+// trajectory reader uses this instead of enumerating kinds, so a new event kind needs no reader
+// change.
+func (store *Store) EventsOfCalls(ctx context.Context, callIDs []string) ([]entity.Event, error) {
+	events := []entity.Event{}
+	if len(callIDs) == 0 {
+		return events, nil
+	}
+	err := store.DB.NewSelect().Model(&events).
+		Where("call_id IN (?)", bun.In(callIDs)).
+		Order("call_id", "sequence").Scan(ctx)
+	if err != nil {
+		return events, err
+	}
+	return events, checkEventVersions(events)
+}
+
+// SessionEventStamp returns, per call, the highest event sequence stored for it. The conversation
+// cache key needs the stamp on every read but never the payloads, so this is one aggregate query.
+func (store *Store) SessionEventStamp(ctx context.Context, callIDs []string) (map[string]int64, error) {
+	states := map[string]int64{}
+	if len(callIDs) == 0 {
+		return states, nil
+	}
+	rows := []struct {
+		CallID   string `bun:"call_id"`
+		Sequence int64  `bun:"sequence"`
+	}{}
+	if err := store.DB.NewRaw(`SELECT call_id, max(sequence) AS sequence FROM events
+		WHERE call_id IN (?) GROUP BY call_id`, bun.In(callIDs)).Scan(ctx, &rows); err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		states[row.CallID] = row.Sequence
+	}
+	return states, nil
+}
+
 // EventsOfKinds returns the given kinds for many calls in one query, ordered for replay.
 func (store *Store) EventsOfKinds(ctx context.Context, callIDs []string, kinds ...string) ([]entity.Event, error) {
 	events := []entity.Event{}

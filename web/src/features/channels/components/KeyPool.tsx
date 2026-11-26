@@ -7,7 +7,7 @@ import { DataTable, TableSkeleton } from '../../../components/data/DataTable';
 import { Field } from '../../../components/form/Field';
 import { FormDialog } from '../../../components/form/FormDialog';
 import { QueryState } from '../../../components/feedback/QueryState';
-import { Badge } from '../../../components/ui/badge';
+import { EnabledBadge } from '../../../components/feedback/Badges';
 import { Button } from '../../../components/ui/button';
 import { Card, CardHeader } from '../../../components/ui/card';
 import { Input } from '../../../components/ui/input';
@@ -61,12 +61,7 @@ export function KeyPool({ channelId }: { channelId: string }) {
               {
                 key: 'status',
                 header: t.common.enabled,
-                cell: (row) =>
-                  row.enabled ? (
-                    <Badge tone="success">{t.common.enabled}</Badge>
-                  ) : (
-                    <Badge>{t.common.disabled}</Badge>
-                  ),
+                cell: (row) => <EnabledBadge enabled={row.enabled} />,
               },
               {
                 key: 'actions',

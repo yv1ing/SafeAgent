@@ -44,10 +44,7 @@ func analysisBatchView(value *entity.AnalysisBatch) AnalysisBatchView {
 
 func (console *Console) registerBatches() {
 	console.add("GET", "/projects/{project_id}/analysis-batches", "listAnalysisBatches", projectPath{}, AnalysisBatchPage{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
-		batches, err := console.Analysis.BatchesOfProject(ctx.Request.Context(), ctx.Param("project_id"), 20)
+		batches, err := console.Analysis.BatchesOfProject(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), 20)
 		if err != nil {
 			return nil, analysisError(err)
 		}
@@ -58,9 +55,6 @@ func (console *Console) registerBatches() {
 		return AnalysisBatchPage{Items: items}, nil
 	})
 	console.add("POST", "/projects/{project_id}/analysis-batches", "createAnalysisBatch", analysisBatchInput{}, AnalysisBatchView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		if !console.analysisLimit.Allow("analysis:" + identity.User.ID) {
 			return nil, errRateLimited
 		}
@@ -88,7 +82,7 @@ func (console *Console) registerBatches() {
 			}
 			scope.To = parsed
 		}
-		batch, err := console.Analysis.Replay(ctx.Request.Context(), ctx.Param("project_id"), scope)
+		batch, err := console.Analysis.Replay(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), scope)
 		if err != nil {
 			return nil, analysisError(err)
 		}

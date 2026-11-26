@@ -18,7 +18,7 @@ import { useMediaQuery } from '../../lib/media';
 import { CallDetail } from './components/CallDetail';
 import { CallFilterBar } from './components/CallFilterBar';
 import { CallList } from './components/CallList';
-import { filtersOf, hasFilters, type CallFilters, type CallsSearch } from './search';
+import { filtersOf, hasFilters, listParams, type CallFilters, type CallsSearch } from './search';
 
 export function CallsPage() {
   const { t } = useLocale();
@@ -27,8 +27,9 @@ export function CallsPage() {
   const navigate = useNavigate();
   const wide = useMediaQuery('(min-width: 80rem)');
   const filters = filtersOf(search);
-  const pages = useCursorPages(JSON.stringify({ projectId, ...filters }));
-  const calls = useListCalls(projectId, { ...filters, ...pages.params });
+  const params = listParams(filters);
+  const pages = useCursorPages(JSON.stringify({ projectId, ...params }));
+  const calls = useListCalls(projectId, { ...params, ...pages.params });
   const setFilters = useCallback(
     (next: CallFilters) =>
       void navigate({
@@ -52,7 +53,15 @@ export function CallsPage() {
     <Page>
       <PageHeader title={t.calls.title} description={t.calls.description} />
       <Card className="p-3">
-        <CallFilterBar projectId={projectId} filters={filters} onChange={setFilters} />
+        <CallFilterBar
+          projectId={projectId}
+          filters={filters}
+          onChange={setFilters}
+          auxiliary={Boolean(filters.include_auxiliary)}
+          onAuxiliaryChange={(enabled) =>
+            setFilters({ ...filters, include_auxiliary: enabled || undefined })
+          }
+        />
       </Card>
       <div className="grid items-start gap-4 xl:grid-cols-5">
         <Card className="xl:col-span-2">

@@ -7,10 +7,20 @@
  */
 
 export interface ConsoleUpdateProjectInput {
+  /**
+   * Days auxiliary calls are kept; 0 keeps them as long as the project retention; omitted keeps the stored value
+   * @nullable
+   */
+  auxiliary_retention_days?: number | null;
   concurrency: number;
   daily_token_quota: number;
   /** Applied when an upstream requires an output limit and the client omits one */
   default_max_output_tokens?: number;
+  /**
+   * Route that serves side and auxiliary calls whose model has no route; empty clears it; omitted keeps the stored value
+   * @nullable
+   */
+  default_route_id?: string | null;
   name: string;
   requests_per_minute: number;
   retention_days: number;

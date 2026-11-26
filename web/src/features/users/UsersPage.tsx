@@ -9,6 +9,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { QueryState } from '../../components/feedback/QueryState';
 import { SecretDialog } from '../../components/form/SecretDialog';
 import { Badge } from '../../components/ui/badge';
+import { EnabledBadge } from '../../components/feedback/Badges';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
@@ -72,7 +73,7 @@ export function UsersPage() {
                       {row.disabled ? (
                         <Badge>{t.common.disabled}</Badge>
                       ) : (
-                        <Badge tone="success">{t.users.active}</Badge>
+                        <EnabledBadge enabled label={t.users.active} />
                       )}
                       {row.must_change_password && (
                         <Badge tone="warning">{t.users.mustChange}</Badge>

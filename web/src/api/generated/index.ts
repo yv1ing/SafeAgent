@@ -3,6 +3,7 @@ export * from './analysis-batches/analysis-batches.ts';
 export * from './calls/calls.ts';
 export * from './channel-options/channel-options.ts';
 export * from './channels/channels.ts';
+export * from './configuration/configuration.ts';
 export * from './conversations/conversations.ts';
 export * from './decision-model/decision-model.ts';
 export * from './detectors/detectors.ts';

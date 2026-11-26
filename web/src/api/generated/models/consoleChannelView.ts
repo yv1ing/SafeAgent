@@ -6,22 +6,25 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { ConsoleCapabilityOverrideView } from './consoleCapabilityOverrideView.ts';
-import type { ConsoleChannelEndpointView } from './consoleChannelEndpointView.ts';
 import type { ConsoleChannelViewHeaders } from './consoleChannelViewHeaders.ts';
 
 export interface ConsoleChannelView {
   allow_private_network?: boolean;
+  base_url?: string;
   capability_overrides?: ConsoleCapabilityOverrideView[];
+  created_at: string;
   default_max_output_tokens?: number;
+  deleted_at?: string;
   enabled?: boolean;
-  endpoints: ConsoleChannelEndpointView[];
   first_byte_timeout_seconds?: number;
   forward_headers?: string[];
   headers?: ConsoleChannelViewHeaders;
   id: string;
-  model_ids: string[];
   name: string;
   provider_id: string;
+  provider_label: string;
+  route_count: number;
   timeout_seconds?: number;
-  version?: number;
+  updated_at: string;
+  version: number;
 }

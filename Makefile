@@ -8,10 +8,10 @@ CONFIG ?= config.toml
 GENERATED := web/src/api/generated
 DOCS_EN := README.md testenv/README.md $(shell find docs -name '*.md' ! -name '*_zh.md' | sort)
 DOCS_ZH := README_zh.md $(shell find docs -name '*_zh.md' | sort)
-LAB_JS := $(shell find testenv -name '*.mjs' | sort)
+LAB_JS := $(sort $(wildcard testenv/protocol/*.mjs testenv/lib/*.mjs))
 
 .PHONY: help deps generate format check contract staticcheck test integration verify build run web dev security clean \
-	lab-setup lab-restart lab-agents lab-protocol lab-auxiliary lab-policy lab-analysis lab-security lab-faults lab-browser lab-integration lab-load lab-audit lab-acceptance lab-down
+	lab-setup lab-restart lab-agents lab-protocol lab-auxiliary lab-trajectory lab-control-plane lab-policy lab-analysis lab-security lab-faults lab-browser lab-integration lab-load lab-audit lab-acceptance lab-down
 
 help:
 	@printf '%s\n' \
@@ -24,9 +24,11 @@ help:
 		'  integration  Run repository tests against SAFEAGENT_TEST_DATABASE' \
 		'  lab-setup    Build and start the acceptance lab: make lab-setup [FRESH=1]' \
 		'  lab-restart  Rebuild the console and binary, then restart the lab gateway' \
+		'  lab-control-plane Check connect, soft delete/restore, impact, aliases and degraded configuration health' \
 		'  lab-agents   Run Claude Code, Codex, Gemini CLI and Pi through every lab route' \
 		'  lab-protocol Run the live client-by-channel protocol matrix' \
 		'  lab-auxiliary Run model, counting, Responses lifecycle and WebSocket checks' \
+		'  lab-trajectory Drive a tool-loop conversation and check the trajectory graph and replay' \
 		'  lab-policy   Check request and tool-call enforcement across client protocols' \
 		'  lab-analysis Check asynchronous diagnosis and reversible redaction' \
 		'  lab-security Check authentication, quotas, isolation, console permissions and stream review settings' \
@@ -101,27 +103,31 @@ lab-agents:
 	testenv/scripts/run-agents.sh
 
 lab-protocol:
-	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; node testenv/protocol/matrix.mjs
+	testenv/scripts/run-suite.sh protocol
 
 lab-auxiliary:
-	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; node testenv/protocol/auxiliary.mjs
+	testenv/scripts/run-suite.sh auxiliary
+
+lab-trajectory:
+	testenv/scripts/run-suite.sh trajectory
+
+lab-control-plane:
+	testenv/suites/control.sh
 
 lab-policy:
-	testenv/scripts/policy-acceptance.sh
+	testenv/suites/policy.sh
 
 lab-analysis:
-	testenv/scripts/analysis-acceptance.sh
+	testenv/suites/analysis.sh
 
 lab-security:
-	testenv/scripts/security-acceptance.sh
+	testenv/suites/security.sh
 
 lab-faults:
-	testenv/scripts/faults-acceptance.sh
+	testenv/suites/faults.sh
 
 lab-browser:
-	@set -a; [ ! -f testenv/.env ] || . testenv/.env; . testenv/runtime/env; set +a; \
-		docker compose -f testenv/docker-compose.yml build browser && \
-		docker compose -f testenv/docker-compose.yml run --rm browser
+	testenv/scripts/run-suite.sh browser
 
 lab-integration:
 	testenv/scripts/integration.sh
@@ -130,7 +136,7 @@ lab-audit: build
 	build/bin/safeagent -config testenv/runtime/config.toml verify-audit
 
 lab-load:
-	testenv/scripts/load-acceptance.sh
+	testenv/suites/load.sh
 
 lab-acceptance:
 	testenv/scripts/acceptance.sh

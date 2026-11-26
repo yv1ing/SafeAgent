@@ -518,7 +518,11 @@ func signatureBlob(state *outputItemState) string {
 	if state.item.Reasoning == nil || state.item.Reasoning.Signature == nil {
 		return ""
 	}
-	return state.peer.WireSignature(state.item.Reasoning.Signature, state.reasoningText())
+	text := state.reasoningText()
+	if !codec.SignatureCoversText(state.item.Reasoning.Signature, model.PartReasoningText, text) {
+		return ""
+	}
+	return state.peer.WireSignature(state.item.Reasoning.Signature, text)
 }
 
 func (state *outputItemState) reasoningText() string {

@@ -8,6 +8,8 @@
 
 export interface ConsoleProjectView {
   active_policy_version: number;
+  /** Days auxiliary calls are kept; 0 keeps them as long as the project retention */
+  auxiliary_retention_days: number;
   blocked_24h?: number;
   calls_24h?: number;
   /** 0 means unlimited */
@@ -17,6 +19,8 @@ export interface ConsoleProjectView {
   daily_token_quota: number;
   /** Applied when an upstream requires an output limit and the client omits one */
   default_max_output_tokens?: number;
+  /** Route that serves side and auxiliary calls whose model has no route */
+  default_route_id?: string;
   failure_rate?: string;
   id: string;
   last_activity_at?: string;

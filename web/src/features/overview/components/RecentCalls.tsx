@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useListCalls } from '../../../api/generated/calls/calls';
 import { TableSkeleton } from '../../../components/data/DataTable';
 import { QueryState } from '../../../components/feedback/QueryState';
-import { SeverityBadge, StateBadge } from '../../../components/feedback/StatusBadge';
+import { SeverityBadge, StateBadge } from '../../../components/feedback/Badges';
 import { Card, CardHeader } from '../../../components/ui/card';
 import { useLocale } from '../../../i18n';
 import { formatDate, formatDuration } from '../../../lib/format';

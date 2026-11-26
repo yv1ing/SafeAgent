@@ -7,15 +7,19 @@
  */
 
 export interface ConsoleTotalsView {
+  /** Main-lane calls whose outcome is blocked */
   blocked: number;
+  /** Main-lane calls only */
   calls: number;
   duration_p50: number;
   duration_p95: number;
+  /** Main-lane calls whose state is failed */
   failures: number;
   first_token_p50: number;
   first_token_p95: number;
   high_severity: number;
   input_tokens: number;
   output_tokens: number;
-  redaction_hits: number;
+  /** Distinct redacted values, not occurrences */
+  redaction_values: number;
 }

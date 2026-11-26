@@ -5,6 +5,12 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
+import type { ConsoleCallViewLane } from './consoleCallViewLane.ts';
+import type { ConsoleCallViewOperation } from './consoleCallViewOperation.ts';
+import type { ConsoleCallViewOutcome } from './consoleCallViewOutcome.ts';
+import type { ConsoleCallViewPurpose } from './consoleCallViewPurpose.ts';
+import type { ConsoleCallViewPurposeSource } from './consoleCallViewPurposeSource.ts';
+import type { ConsoleCallViewResolution } from './consoleCallViewResolution.ts';
 import type { ConsoleCallViewState } from './consoleCallViewState.ts';
 import type { ConsoleLossView } from './consoleLossView.ts';
 
@@ -26,15 +32,31 @@ export interface ConsoleCallView {
   first_token_ms: number;
   id: string;
   input_tokens: number;
+  /** Role of the call in the conversation */
+  lane: ConsoleCallViewLane;
   latest_analysis_id: string;
   losses: ConsoleLossView[];
   max_severity: string;
   model_id: string;
+  /** Endpoint family of the request */
+  operation: ConsoleCallViewOperation;
+  /** Terminal reason independent of the HTTP lifecycle */
+  outcome: ConsoleCallViewOutcome;
   output_tokens: number;
   parent_call_id: string;
   public_model: string;
+  /** Why the client issued the request */
+  purpose: ConsoleCallViewPurpose;
+  /** How the purpose was established */
+  purpose_source: ConsoleCallViewPurposeSource;
   reasoning_tokens: number;
-  redaction_hits: number;
+  /** Distinct redaction labels of this call */
+  redaction_labels: string[];
+  /** Distinct redacted values this call introduced */
+  redaction_values: number;
+  /** How the route was matched; fallback marks the project default route */
+  resolution: ConsoleCallViewResolution;
+  route_id: string;
   session_id: string;
   state: ConsoleCallViewState;
   stream: boolean;

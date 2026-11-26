@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -18,8 +19,8 @@ func (policyAccess) Project(_ context.Context, id string) (*entity.Project, erro
 func (policyAccess) Membership(context.Context, string, string) (bool, error) { return true, nil }
 
 func TestPolicyWritesRequireAnAdministrator(t *testing.T) {
-	service := &PolicyService{access: policyAccess{}}
-	actor := Actor{UserID: "member"}
+	service := &PolicyService{projects: policyAccess{}}
+	actor := access.Actor{UserID: "member"}
 	ctx := context.Background()
 	document := policy.DefaultDocument()
 
@@ -41,8 +42,8 @@ func TestPolicyWritesRequireAnAdministrator(t *testing.T) {
 		},
 	}
 	for name, check := range checks {
-		var failure *Failure
-		if err := check(); !errors.As(err, &failure) || failure.Kind != KindForbidden {
+		var failure *access.Failure
+		if err := check(); !errors.As(err, &failure) || failure.Kind != access.KindForbidden {
 			t.Fatalf("%s must require an administrator: %v", name, err)
 		}
 	}

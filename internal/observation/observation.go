@@ -12,6 +12,18 @@ const (
 	ViewRedacted View = "redacted"
 )
 
+// Section names the part of a call an item belongs to. Together with the owning call id and the
+// item ordinal it is the stable identity a finding, a redaction hit or a trajectory node uses.
+type Section string
+
+const (
+	SectionRequest      Section = "request"
+	SectionResponse     Section = "response"
+	SectionInstructions Section = "instructions"
+	SectionParams       Section = "params"
+	SectionTools        Section = "tools"
+)
+
 // Origin says where a piece of content entered the trajectory. It is the "source" half of the
 // source-to-sink model and the first input of the three-axis derivation.
 type Origin string
@@ -82,18 +94,20 @@ const (
 )
 
 // Value carries both representations of a piece of text. The adapter fills Raw and Shown from the
-// same source; Redactions locates the raw byte ranges that differ.
+// same source; Redactions locates the raw byte ranges that differ and ShownRedactions the same
+// ranges in the shown text, which is what a reader highlights.
 type Value struct {
-	Raw        string `json:"raw"`
-	Shown      string `json:"shown"`
-	Redactions []Span `json:"redactions,omitempty"`
+	Raw             string      `json:"raw"`
+	Shown           string      `json:"shown"`
+	Redactions      []Span      `json:"redactions,omitempty"`
+	ShownRedactions []ShownSpan `json:"shown_redactions,omitempty"`
 }
 
-func NewValue(raw, shown string, spans []Span) Value {
+func NewValue(raw, shown string, spans []Span, shownSpans []ShownSpan) Value {
 	if shown == "" && raw != "" {
 		shown = raw
 	}
-	return Value{Raw: raw, Shown: shown, Redactions: spans}
+	return Value{Raw: raw, Shown: shown, Redactions: spans, ShownRedactions: shownSpans}
 }
 
 func (value Value) Get(view View) string {
@@ -103,18 +117,34 @@ func (value Value) Get(view View) string {
 	return value.Raw
 }
 
-// Span is a redacted range in the raw representation. Label is the redaction label.
+// Span is a redacted range in the raw representation.
 type Span struct {
-	Start  int    `json:"start"`
-	End    int    `json:"end"`
-	Label  string `json:"label"`
-	Secret bool   `json:"secret,omitempty"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	Label   string `json:"label"`
+	ValueID string `json:"value_id,omitempty"`
+	Secret  bool   `json:"secret,omitempty"`
 }
 
+// ShownSpan is the same range in the shown text, so a reader can highlight the placeholder without
+// re-deriving offsets from the rule set.
+type ShownSpan struct {
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	Label   string `json:"label"`
+	Action  string `json:"action,omitempty"`
+	ValueID string `json:"value_id,omitempty"`
+}
+
+// Locator identifies one item of one call. CallID is the call that stored the item, which for an
+// ancestor item is the ancestor call, not the call under analysis. Ordinal is the item ordinal
+// inside its section; Path narrows down a part inside that item.
 type Locator struct {
-	CallID  string `json:"call_id,omitempty"`
-	Section string `json:"section,omitempty"`
-	Path    string `json:"path,omitempty"`
+	CallID  string  `json:"call_id,omitempty"`
+	Section Section `json:"section,omitempty"`
+	Ordinal int     `json:"ordinal,omitempty"`
+	Path    string  `json:"path,omitempty"`
+	ToolID  string  `json:"tool_id,omitempty"`
 }
 
 // Target is the normalized destination of a tool call. Normalization keeps policy attributes stable

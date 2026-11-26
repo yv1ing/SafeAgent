@@ -15,6 +15,8 @@ type ProjectView struct {
 	ID                     string `json:"id" required:"true"`
 	Name                   string `json:"name" required:"true"`
 	RetentionDays          int    `json:"retention_days" required:"true"`
+	AuxiliaryRetentionDays int    `json:"auxiliary_retention_days" required:"true" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
+	DefaultRouteID         string `json:"default_route_id" description:"Route that serves side and auxiliary calls whose model has no route"`
 	RequestsPerMinute      int    `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
 	Concurrency            int    `json:"concurrency" required:"true" description:"0 means unlimited"`
 	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
@@ -36,6 +38,8 @@ type ProjectView struct {
 type ProjectCreate struct {
 	Name                   string `json:"name" required:"true"`
 	RetentionDays          *int   `json:"retention_days,omitempty"`
+	AuxiliaryRetentionDays *int   `json:"auxiliary_retention_days,omitempty" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
+	DefaultRouteID         string `json:"default_route_id,omitempty" description:"Route that serves side and auxiliary calls whose model has no route"`
 	RequestsPerMinute      *int   `json:"requests_per_minute,omitempty"`
 	Concurrency            *int   `json:"concurrency,omitempty"`
 	DailyTokenQuota        *int64 `json:"daily_token_quota,omitempty"`
@@ -45,15 +49,17 @@ type ProjectCreate struct {
 }
 
 type ProjectUpdate struct {
-	Name                   string `json:"name" required:"true"`
-	RetentionDays          int    `json:"retention_days" required:"true"`
-	RequestsPerMinute      int    `json:"requests_per_minute" required:"true"`
-	Concurrency            int    `json:"concurrency" required:"true"`
-	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true"`
-	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
-	StreamReviewBytes      int    `json:"stream_review_bytes" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
-	StreamReviewTimeoutMS  int    `json:"stream_review_timeout_ms" description:"Delay before a partially filled review window is checked on the next frame"`
-	Version                int64  `json:"version" required:"true"`
+	Name                   string  `json:"name" required:"true"`
+	RetentionDays          int     `json:"retention_days" required:"true"`
+	AuxiliaryRetentionDays *int    `json:"auxiliary_retention_days,omitempty" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention; omitted keeps the stored value"`
+	DefaultRouteID         *string `json:"default_route_id,omitempty" description:"Route that serves side and auxiliary calls whose model has no route; empty clears it; omitted keeps the stored value"`
+	RequestsPerMinute      int     `json:"requests_per_minute" required:"true"`
+	Concurrency            int     `json:"concurrency" required:"true"`
+	DailyTokenQuota        int64   `json:"daily_token_quota" required:"true"`
+	DefaultMaxOutputTokens int     `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      int     `json:"stream_review_bytes" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  int     `json:"stream_review_timeout_ms" description:"Delay before a partially filled review window is checked on the next frame"`
+	Version                int64   `json:"version" required:"true"`
 }
 
 type updateProjectInput struct {
@@ -66,6 +72,8 @@ func projectView(value *entity.Project) ProjectView {
 		ID:                     value.ID,
 		Name:                   value.Name,
 		RetentionDays:          value.RetentionDays,
+		AuxiliaryRetentionDays: value.AuxiliaryRetentionDays,
+		DefaultRouteID:         value.DefaultRouteID,
 		RequestsPerMinute:      value.RequestsPerMinute,
 		Concurrency:            value.Concurrency,
 		DailyTokenQuota:        value.DailyTokenQuota,
@@ -151,7 +159,8 @@ func (console *Console) registerProjects() {
 			return nil, err
 		}
 		created, err := console.Project.Create(ctx.Request.Context(), identity.actor(), service.ProjectCreateInput{
-			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
+			Name: input.Name, RetentionDays: input.RetentionDays, AuxiliaryRetentionDays: input.AuxiliaryRetentionDays, DefaultRouteID: input.DefaultRouteID,
+			RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
 			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
 			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS,
 		})
@@ -173,7 +182,8 @@ func (console *Console) registerProjects() {
 			return nil, err
 		}
 		updated, err := console.Project.Update(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), service.ProjectInput{
-			Name: input.Name, RetentionDays: input.RetentionDays, RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
+			Name: input.Name, RetentionDays: input.RetentionDays, AuxiliaryRetentionDays: input.AuxiliaryRetentionDays, DefaultRouteID: input.DefaultRouteID,
+			RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
 			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
 			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, Version: input.Version,
 		})

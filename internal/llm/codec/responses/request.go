@@ -320,7 +320,8 @@ func encodeReasoningItem(item *model.Item, context codec.PartContext) (map[strin
 	if content != nil {
 		entry["content"] = content
 	}
-	if item.Reasoning != nil && item.Reasoning.Signature != nil {
+	if item.Reasoning != nil && item.Reasoning.Signature != nil &&
+		codec.SignatureCoversText(item.Reasoning.Signature, model.PartReasoningText, item.Text()) {
 		if blob := context.Peer.WireSignature(item.Reasoning.Signature, item.Text()); blob != "" {
 			entry["encrypted_content"] = blob
 		}

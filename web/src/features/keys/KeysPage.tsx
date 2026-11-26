@@ -10,6 +10,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { QueryState } from '../../components/feedback/QueryState';
 import { SecretDialog } from '../../components/form/SecretDialog';
 import { Badge } from '../../components/ui/badge';
+import { EnabledBadge } from '../../components/feedback/Badges';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
@@ -67,10 +68,8 @@ export function KeysPage() {
                   cell: (row) =>
                     row.revoked ? (
                       <Badge tone="danger">{t.keys.revoked}</Badge>
-                    ) : row.enabled ? (
-                      <Badge tone="success">{t.common.enabled}</Badge>
                     ) : (
-                      <Badge>{t.common.disabled}</Badge>
+                      <EnabledBadge enabled={row.enabled} />
                     ),
                 },
                 {

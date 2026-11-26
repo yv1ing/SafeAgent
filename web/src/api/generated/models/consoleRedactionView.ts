@@ -7,6 +7,7 @@
  */
 
 export interface ConsoleRedactionView {
-  hits: number;
   label: string;
+  /** Distinct redacted values carrying this label */
+  values: number;
 }

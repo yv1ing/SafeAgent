@@ -96,7 +96,7 @@ func (trace *Trace) RebuildSteps() {
 				step := ToolStep{
 					Turn: turnIndex, Item: itemIndex, CallID: item.ToolResult.CallID,
 					Name: item.ToolResult.Name, IsError: item.ToolResult.IsError,
-					Result: NewValue(ToolResultText(item.ToolResult), "", nil), Sink: SinkNone,
+					Result: NewValue(ToolResultText(item.ToolResult), "", nil, nil), Sink: SinkNone,
 				}
 				if position, found := callIndex[item.ToolResult.CallID]; found {
 					step.Name = steps[position].Name

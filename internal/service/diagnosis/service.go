@@ -14,18 +14,19 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis"
 	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/observation"
-	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/redact"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
 const (
-	ScopeLimitCalls     = 5000
-	maximumHistoryBytes = 32 << 20
+	ScopeLimitCalls = 5000
 )
 
 var (
@@ -60,35 +61,16 @@ func New(store *repository.Store, options Options) *Service {
 
 // RedactorForCall uses the call's immutable redaction snapshot when one exists. A rule edited after
 // the call was admitted must not change how that historical call is shown or analyzed.
-func (service *Service) RedactorForCall(ctx context.Context, project *entity.Project, callID string) (observe.Redactor, func() []redact.Hit, error) {
+func (service *Service) RedactorForCall(ctx context.Context, project *entity.Project, callID string) (adapter.Redactor, error) {
 	rules, err := service.redactionRules(ctx, project, callID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	engine, err := redact.NewEngine(rules, service.store.Secret, project.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	scope := engine.NewScope()
-	hits := []redact.Hit{}
-	redactor := func(text, path string) (string, []observation.Span) {
-		shown, result := scope.Replace(text, path)
-		if result == nil {
-			return shown, nil
-		}
-		if result.Blocked {
-			// Never fall back to the raw text: a member or a redacted decision-model view must
-			// see that the value was withheld, not the value itself.
-			return "[blocked]", []observation.Span{{Start: 0, End: len(text), Label: "blocked"}}
-		}
-		spans := make([]observation.Span, 0, len(result.Hits))
-		for _, hit := range result.Hits {
-			hits = append(hits, hit)
-			spans = append(spans, observation.Span{Start: hit.Start, End: hit.End, Label: hit.Label, Secret: hit.Secret})
-		}
-		return shown, spans
-	}
-	return redactor, func() []redact.Hit { return hits }, nil
+	return adapter.ScopeRedactor(engine.NewScope()), nil
 }
 
 func (service *Service) redactionRules(ctx context.Context, project *entity.Project, callID string) ([]redact.Rule, error) {
@@ -119,20 +101,43 @@ func (service *Service) redactionRules(ctx context.Context, project *entity.Proj
 	return converted, nil
 }
 
-// BuildTrace rebuilds the observation of one call from its stored events, including the ancestor
-// conversation and the principal of the agent key that made the call.
-func (service *Service) BuildTrace(ctx context.Context, call *entity.Call) (*observation.Trace, auditevent.Request, *auditevent.Response, []redact.Hit, error) {
+// Rebuild is one call rebuilt from its stored events. Trace is the ancestor-expanded observation a
+// diagnosis reads; Own holds only the items this call stored; Request and Response are the decoded
+// payloads; Origins carries one locator per leading expanded-history item; Hits are the call's own
+// relocated redaction hits.
+type Rebuild struct {
+	Trace     *observation.Trace
+	Own       *observation.Trace
+	Request   auditevent.Request
+	Response  *auditevent.Response
+	Origins   []observation.Locator
+	Hits      []auditevent.Hit
+	Truncated bool
+}
+
+// BuildCallTrace rebuilds one call addressed by project and call id.
+func (service *Service) BuildCallTrace(ctx context.Context, projectID, callID string) (Rebuild, error) {
+	call, err := service.store.Call(ctx, projectID, callID)
+	if err != nil {
+		return Rebuild{}, err
+	}
+	return service.BuildTrace(ctx, call)
+}
+
+// BuildTrace is the only session rebuild entry point. The online path produces the same observation
+// shapes from the same adapter, so an online verdict and a stored finding describe the same node.
+func (service *Service) BuildTrace(ctx context.Context, call *entity.Call) (Rebuild, error) {
 	project, err := service.store.Project(ctx, call.ProjectID)
 	if err != nil {
-		return nil, auditevent.Request{}, nil, nil, err
+		return Rebuild{}, err
 	}
 	key, err := service.store.AgentKey(ctx, call.ProjectID, call.AgentKeyID)
 	if err != nil {
-		return nil, auditevent.Request{}, nil, nil, err
+		return Rebuild{}, err
 	}
 	events, err := service.store.CallEvents(ctx, call.ProjectID, call.ID)
 	if err != nil {
-		return nil, auditevent.Request{}, nil, nil, err
+		return Rebuild{}, err
 	}
 	var request auditevent.Request
 	var response *auditevent.Response
@@ -140,7 +145,7 @@ func (service *Service) BuildTrace(ctx context.Context, call *entity.Call) (*obs
 	for _, event := range events {
 		decoded, err := auditevent.Decode(event.Kind, event.Payload)
 		if err != nil {
-			return nil, request, response, nil, fmt.Errorf("%s event of %s: %w", event.Kind, call.ID, err)
+			return Rebuild{}, fmt.Errorf("%s event of %s: %w", event.Kind, call.ID, err)
 		}
 		switch event.Kind {
 		case auditevent.KindRequest:
@@ -153,104 +158,129 @@ func (service *Service) BuildTrace(ctx context.Context, call *entity.Call) (*obs
 		}
 	}
 	if !requestFound {
-		return nil, request, response, nil, fmt.Errorf("request event of %s is missing", call.ID)
+		return Rebuild{}, fmt.Errorf("request event of %s is missing", call.ID)
 	}
-	if call.State == "completed" && response == nil {
-		return nil, request, response, nil, fmt.Errorf("response event of completed call %s is missing", call.ID)
+	// A completed protocol exchange of a main call carries a response event. A blocked request
+	// never reached the upstream, so its completed row legitimately has none.
+	completedExchange := call.State == "completed" && (call.Outcome == "" || call.Outcome == classify.OutcomeOK)
+	if call.Lane == classify.LaneMain && completedExchange && response == nil {
+		return Rebuild{}, fmt.Errorf("response event of completed call %s is missing", call.ID)
 	}
-	redactor, hits, err := service.RedactorForCall(ctx, project, call.ID)
+	rules, err := service.redactionRules(ctx, project, call.ID)
 	if err != nil {
-		return nil, request, response, nil, err
+		return Rebuild{}, err
 	}
-	request, historyTruncated := service.expandHistory(ctx, call, request)
-	trace := observe.Stored(request, response, observe.Options{
+	engine, err := redact.NewEngine(rules, service.store.Secret, project.ID)
+	if err != nil {
+		return Rebuild{}, err
+	}
+	options := adapter.Options{
 		TraceID: call.ID,
+		CallID:  call.ID,
 		Principal: observation.Principal{
 			ProjectID: call.ProjectID, AgentKeyID: call.AgentKeyID,
 			TrustLevel: key.TrustLevel, Role: key.Role,
 		},
-		Redactor: redactor,
-	})
+		Redactor: adapter.ScopeRedactor(engine.NewScope()),
+	}
+	own := adapter.Stored(request, response, options)
+	if own.PreviousCallID == "" {
+		own.PreviousCallID = call.ParentCallID
+	}
+	rebuild := Rebuild{
+		Trace: own, Own: own, Request: request, Response: response,
+		Hits: append([]auditevent.Hit{}, request.Hits...),
+	}
+	if call.ParentCallID == "" {
+		return rebuild, nil
+	}
+	expanded, origins, truncated := service.expandHistory(ctx, call, request)
+	if truncated {
+		own.Context["history_truncated"] = true
+	}
+	expandedOptions := options
+	expandedOptions.Origins = origins
+	trace := adapter.Stored(expanded, response, expandedOptions)
 	if trace.PreviousCallID == "" {
 		trace.PreviousCallID = call.ParentCallID
 	}
-	if historyTruncated {
+	if truncated {
 		trace.Context["history_truncated"] = true
 	}
-	return trace, request, response, hits(), nil
+	rebuild.Trace, rebuild.Origins, rebuild.Truncated = trace, origins, truncated
+	return rebuild, nil
 }
 
 // expandHistory prepends the ancestor conversation to the call's own messages. Requests are stored
 // as the messages a call added, so without this step an asynchronous analysis would see a different
 // trajectory from the online gate, which receives the client's full history.
-func (service *Service) expandHistory(ctx context.Context, call *entity.Call, request auditevent.Request) (auditevent.Request, bool) {
+func (service *Service) expandHistory(ctx context.Context, call *entity.Call, request auditevent.Request) (auditevent.Request, []observation.Locator, bool) {
 	if call.ParentCallID == "" {
-		return request, false
+		return request, nil, false
 	}
 	chain, err := service.store.CallChain(ctx, call.ID)
 	if err != nil {
-		return request, true
+		return request, nil, true
 	}
 	if len(chain) == 0 {
-		return request, true
+		return request, nil, true
 	}
 	if len(chain) == 1 {
 		// The call names a parent but the parent was pruned or never existed.
-		return request, chain[0].ParentCallID != ""
+		return request, nil, chain[0].ParentCallID != ""
 	}
 	ancestors := chain[:len(chain)-1]
 	// A non-empty parent id on the oldest loaded ancestor means the recursive walk stopped at
 	// its depth limit or a pruned link; the history is incomplete even when the request exists.
 	truncated := chain[0].ParentCallID != ""
-	if len(ancestors) > 200 {
-		ancestors = ancestors[len(ancestors)-200:]
-		truncated = true
+	ids := make([]string, len(ancestors))
+	for index, ancestor := range ancestors {
+		ids[index] = ancestor.ID
 	}
-	// Load from the nearest ancestor backwards. The byte budget bounds memory when a long
-	// conversation repeatedly approached max_request_bytes; dropping the oldest turns is visible
-	// as history_truncated rather than being presented as complete history.
-	entries := make([]observe.Ancestor, 0, len(ancestors))
-	total := 0
-	for index := len(ancestors) - 1; index >= 0; index-- {
-		ancestor := ancestors[index]
-		events, err := service.store.EventsOfKinds(ctx, []string{ancestor.ID}, auditevent.KindRequest, auditevent.KindResponse)
+	events, err := service.store.EventsOfKinds(ctx, ids, auditevent.KindRequest, auditevent.KindResponse)
+	if err != nil {
+		return request, nil, true
+	}
+	requests := map[string]auditevent.Request{}
+	responses := map[string]*auditevent.Response{}
+	for _, event := range events {
+		decoded, err := auditevent.Decode(event.Kind, event.Payload)
 		if err != nil {
-			return request, true
+			continue
 		}
-		var record auditevent.Request
-		var response *auditevent.Response
-		requestFound := false
-		size := 0
-		for _, event := range events {
-			size += len(event.Payload)
-			decoded, err := auditevent.Decode(event.Kind, event.Payload)
-			if err != nil {
-				continue
+		switch event.Kind {
+		case auditevent.KindRequest:
+			if decoded.Request != nil {
+				requests[event.CallID] = *decoded.Request
 			}
-			switch event.Kind {
-			case auditevent.KindRequest:
-				if decoded.Request != nil {
-					record = *decoded.Request
-					requestFound = true
-				}
-			case auditevent.KindResponse:
-				response = decoded.Response
-			}
+		case auditevent.KindResponse:
+			responses[event.CallID] = decoded.Response
 		}
-		if total+size > maximumHistoryBytes {
-			truncated = true
-			break
-		}
-		total += size
-		entries = append([]observe.Ancestor{{Found: requestFound, Request: record, Response: response}}, entries...)
 	}
-	request, missing := observe.History(request, entries)
-	return request, truncated || missing
+	entries := make([]adapter.Ancestor, 0, len(ancestors))
+	for _, ancestor := range ancestors {
+		record, found := requests[ancestor.ID]
+		if !found {
+			truncated = true
+			continue
+		}
+		entries = append(entries, adapter.Ancestor{Found: true, CallID: ancestor.ID, Request: record, Response: responses[ancestor.ID]})
+	}
+	entries, trimmed := adapter.TrimAncestors(entries)
+	expanded, origins, missing := adapter.History(request, entries)
+	return expanded, origins, truncated || trimmed || missing
 }
 
 // AnalyzeCall diagnoses one call. The identity (call, input hash, detector set, decision model) is
 // unique, so a job retry returns the existing result instead of writing a duplicate.
-func (service *Service) AnalyzeCall(ctx context.Context, projectID, callID, batchID string) (*analysis.Analysis, error) {
+func (service *Service) AnalyzeCall(ctx context.Context, actor access.Actor, projectID, callID, batchID string) (*analysis.Analysis, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
+	return service.analyzeCall(ctx, projectID, callID, batchID)
+}
+
+func (service *Service) analyzeCall(ctx context.Context, projectID, callID, batchID string) (*analysis.Analysis, error) {
 	call, err := service.store.Call(ctx, projectID, callID)
 	if err != nil {
 		return nil, err
@@ -261,19 +291,20 @@ func (service *Service) AnalyzeCall(ctx context.Context, projectID, callID, batc
 	started := time.Now().UTC()
 	detectorVersion := service.engine.Version()
 	versions := analysis.Versions{
-		Adapter: observe.AdapterVersion, Detectors: detectorVersion,
+		Adapter: adapter.AdapterVersion, Detectors: detectorVersion,
 		Catalogue: analysis.CatalogueVersion, Taxonomy: analysis.TaxonomyVersion,
 		DecisionModel: service.decisionModelName(ctx, projectID),
 	}
-	trace, _, _, _, err := service.BuildTrace(ctx, call)
+	rebuild, err := service.BuildTrace(ctx, call)
 	if err != nil {
 		return service.recordFailure(ctx, call, batchID, versions, "", started, err)
 	}
+	trace := rebuild.Trace
 	inputHash := analysis.InputHash(trace)
 	if existing, err := service.store.AnalysisByIdentity(ctx, call.ID, inputHash, detectorVersion, versions.DecisionModel); err != nil {
 		return nil, err
 	} else if existing != nil {
-		view, err := service.AnalysisView(ctx, projectID, existing.ID)
+		view, err := service.analysisView(ctx, projectID, existing.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -281,17 +312,18 @@ func (service *Service) AnalyzeCall(ctx context.Context, projectID, callID, batc
 	}
 	record := analysis.NewAnalysis(service.ids(), projectID, call.ID, call.AgentKeyID, batchID, versions, inputHash, started)
 	options := analysis.Options{}
-	if truncated, _ := trace.Context["history_truncated"].(bool); truncated {
+	if rebuild.Truncated {
 		options.CoverageErrors = []string{"history_truncated"}
 	}
 	result := service.engine.Evaluate(ctx, trace, options)
+	anchorFindings(trace, result.Findings)
 	coverage := analysis.BuildCoverage(result)
 	labels, modelState, modelErr := service.Evaluate(ctx, projectID, trace)
 	if modelErr != nil {
 		service.logger.Error("decision model failed", "call", call.ID, "error", modelErr)
 	}
 	record.Complete(result.Findings, flowsOf(result.Findings), coverage, labels, modelState)
-	if err := service.save(ctx, record); err != nil {
+	if err := service.save(ctx, record, trace); err != nil {
 		return nil, err
 	}
 	return service.storedAnalysis(ctx, projectID, call.ID, inputHash, detectorVersion, versions.DecisionModel, record)
@@ -307,7 +339,7 @@ func (service *Service) storedAnalysis(ctx context.Context, projectID, callID, i
 	if stored == nil {
 		return candidate, nil
 	}
-	view, err := service.AnalysisView(ctx, projectID, stored.ID)
+	view, err := service.analysisView(ctx, projectID, stored.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -325,16 +357,16 @@ func (service *Service) decisionModelName(ctx context.Context, projectID string)
 func (service *Service) recordFailure(ctx context.Context, call *entity.Call, batchID string, versions analysis.Versions, inputHash string, started time.Time, cause error) (*analysis.Analysis, error) {
 	record := analysis.NewAnalysis(service.ids(), call.ProjectID, call.ID, call.AgentKeyID, batchID, versions, inputHash, started)
 	record.Fail(cause.Error())
-	if err := service.save(ctx, record); err != nil {
+	if err := service.save(ctx, record, nil); err != nil {
 		return nil, err
 	}
 	return service.storedAnalysis(ctx, call.ProjectID, call.ID, inputHash, versions.Detectors, versions.DecisionModel, record)
 }
 
-func (service *Service) save(ctx context.Context, record *analysis.Analysis) error {
+func (service *Service) save(ctx context.Context, record *analysis.Analysis, trace *observation.Trace) error {
 	row := analysisRow(record)
-	findings := findingRows(record)
-	flows := flowRows(record)
+	findings := findingRows(record, trace)
+	flows := flowRows(record, trace)
 	return service.store.SaveAnalysis(ctx, row, findings, flows)
 }
 
@@ -345,7 +377,14 @@ type AnalysisView struct {
 	Flows    []analysis.Flow
 }
 
-func (service *Service) AnalysisView(ctx context.Context, projectID, analysisID string) (*AnalysisView, error) {
+func (service *Service) AnalysisView(ctx context.Context, actor access.Actor, projectID, analysisID string) (*AnalysisView, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
+	return service.analysisView(ctx, projectID, analysisID)
+}
+
+func (service *Service) analysisView(ctx context.Context, projectID, analysisID string) (*AnalysisView, error) {
 	row, err := service.store.Analysis(ctx, projectID, analysisID)
 	if err != nil {
 		return nil, err
@@ -361,14 +400,17 @@ func (service *Service) AnalysisView(ctx context.Context, projectID, analysisID 
 	return &AnalysisView{Analysis: analysisFromEntity(row, findings, flows), Findings: analysisOfFindings(findings), Flows: analysisOfFlows(flows)}, nil
 }
 
-func (service *Service) AnalysesOfCall(ctx context.Context, projectID, callID string) ([]*AnalysisView, error) {
+func (service *Service) AnalysesOfCall(ctx context.Context, actor access.Actor, projectID, callID string) ([]*AnalysisView, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	rows, err := service.store.AnalysesOfCall(ctx, projectID, callID, 20)
 	if err != nil {
 		return nil, err
 	}
 	views := make([]*AnalysisView, 0, len(rows))
 	for index := range rows {
-		view, err := service.AnalysisView(ctx, projectID, rows[index].ID)
+		view, err := service.analysisView(ctx, projectID, rows[index].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -377,12 +419,15 @@ func (service *Service) AnalysesOfCall(ctx context.Context, projectID, callID st
 	return views, nil
 }
 
-func (service *Service) Diff(ctx context.Context, projectID, beforeID, afterID string) (analysis.AnalysisDiff, error) {
-	before, err := service.AnalysisView(ctx, projectID, beforeID)
+func (service *Service) Diff(ctx context.Context, actor access.Actor, projectID, beforeID, afterID string) (analysis.AnalysisDiff, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return analysis.AnalysisDiff{}, err
+	}
+	before, err := service.analysisView(ctx, projectID, beforeID)
 	if err != nil {
 		return analysis.AnalysisDiff{}, err
 	}
-	after, err := service.AnalysisView(ctx, projectID, afterID)
+	after, err := service.analysisView(ctx, projectID, afterID)
 	if err != nil {
 		return analysis.AnalysisDiff{}, err
 	}
@@ -409,6 +454,10 @@ func flowsOf(findings []analysis.Finding) []analysis.Flow {
 }
 
 func flowLocationKey(flow analysis.Flow) string {
+	if flow.SourceLocator.CallID != "" || flow.SourceLocator.Section != "" {
+		return fmt.Sprintf("%s/%s/%d/%s/%s/%s/%s", flow.SourceLocator.CallID, flow.SourceLocator.Section,
+			flow.SourceLocator.Ordinal, flow.SourceOrigin, flow.SinkToolCallID, flow.Relation, flow.ContentHash)
+	}
 	return fmt.Sprintf("%d/%d/%s/%s/%s/%s", flow.SourceTurn, flow.SourceItem, flow.SourceOrigin, flow.SinkToolCallID, flow.Relation, flow.ContentHash)
 }
 

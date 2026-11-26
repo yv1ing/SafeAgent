@@ -1,4 +1,4 @@
-// Package format implements codecs for the four supported wire protocols and the shared helpers
+// Package codec implements codecs for the four supported wire protocols and the shared helpers
 // used to convert between them: sampling parameters, tools, media, reasoning, raw overlays and SSE.
 package codec
 

@@ -70,7 +70,7 @@ func DecodeContentItems(kind model.Format, role model.Role, content any, peer Pe
 			items = append(items, nested...)
 			continue
 		}
-		if media, err := DecodeMedia(entry); err != nil {
+		if media, err := decodeMedia(entry); err != nil {
 			return nil, err
 		} else if media != nil {
 			part := model.Part{Kind: model.PartMedia, Media: media, CacheControl: DecodeCacheControl(entry["cache_control"])}
@@ -133,7 +133,7 @@ func decodeBlockPart(kind model.Format, entry map[string]any) (*model.Item, *mod
 	case "tool_use":
 		return &model.Item{
 			Kind: model.ItemToolCall, Role: model.RoleAssistant, ID: model.String(entry["id"]),
-			ToolCall:     &model.ToolCall{Kind: model.ToolFunction, ID: model.String(entry["id"]), Name: model.String(entry["name"]), Arguments: EmptyObjectIfBlank(InputJSON(entry["input"]))},
+			ToolCall:     &model.ToolCall{Kind: model.ToolFunction, ID: model.String(entry["id"]), Name: model.String(entry["name"]), Arguments: EmptyObjectIfBlank(inputJSON(entry["input"]))},
 			CacheControl: cache,
 			Raw:          CaptureRaw(kind, entry, "type", "id", "name", "input", "cache_control"),
 		}, nil, nil
@@ -141,7 +141,7 @@ func decodeBlockPart(kind model.Format, entry map[string]any) (*model.Item, *mod
 		server := &model.ServerInfo{Format: kind, Type: blockType, Capability: model.ServerCapability(&model.ServerTool{Format: kind, Type: blockType}), Config: model.Marshal(entry)}
 		return &model.Item{
 			Kind: model.ItemServerToolCall, Role: model.RoleAssistant, ID: model.String(entry["id"]),
-			ToolCall: &model.ToolCall{Kind: model.ToolServer, ID: model.String(entry["id"]), Name: FirstNonEmpty(model.String(entry["name"]), blockType), Arguments: EmptyObjectIfBlank(InputJSON(entry["input"]))},
+			ToolCall: &model.ToolCall{Kind: model.ToolServer, ID: model.String(entry["id"]), Name: FirstNonEmpty(model.String(entry["name"]), blockType), Arguments: EmptyObjectIfBlank(inputJSON(entry["input"]))},
 			Server:   server,
 			Raw:      nativeRaw(kind, entry),
 		}, nil, nil
@@ -186,7 +186,7 @@ func decodeBlockPart(kind model.Format, entry map[string]any) (*model.Item, *mod
 		server := &model.ServerInfo{Format: kind, Type: blockType, Capability: model.ServerCapability(&model.ServerTool{Format: kind, Type: blockType}), Config: model.Marshal(entry)}
 		return &model.Item{
 			Kind: model.ItemServerToolCall, Role: model.RoleAssistant, ID: id,
-			ToolCall: &model.ToolCall{Kind: model.ToolServer, ID: id, Name: FirstNonEmpty(model.String(entry["name"]), blockType), Arguments: EmptyObjectIfBlank(InputJSON(entry["input"]))},
+			ToolCall: &model.ToolCall{Kind: model.ToolServer, ID: id, Name: FirstNonEmpty(model.String(entry["name"]), blockType), Arguments: EmptyObjectIfBlank(inputJSON(entry["input"]))},
 			Server:   server,
 			Raw:      nativeRaw(kind, entry),
 		}, nil, nil
@@ -254,7 +254,7 @@ func DecodeToolResultParts(kind model.Format, content any) ([]model.Part, error)
 			parts = append(parts, model.Part{Kind: model.PartText, Text: model.String(value)})
 			continue
 		}
-		if media, err := DecodeMedia(entry); err != nil {
+		if media, err := decodeMedia(entry); err != nil {
 			return nil, err
 		} else if media != nil {
 			part := model.Part{Kind: model.PartMedia, Media: media}

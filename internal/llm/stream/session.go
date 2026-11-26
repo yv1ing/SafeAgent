@@ -301,7 +301,7 @@ func (session *Session) Handle(events []model.Event, frame *codec.Frame) *model.
 	}
 	if session.raw {
 		if len(events) == 0 {
-			if frame != nil && usageOnly(*frame) {
+			if frame != nil && usageOnly(session.format, *frame) {
 				if !session.includeUsage {
 					return nil
 				}
@@ -364,22 +364,42 @@ func (session *Session) rawSafe(events []model.Event) bool {
 }
 
 // usageOnly reports a frame that carries nothing but a usage total, which a client that did not ask
-// for stream usage must not receive.
-func usageOnly(frame codec.Frame) bool {
+// for stream usage must not receive. Only the shapes the protocols actually send are recognised: a
+// Chat chunk whose choices are empty or carry no data, and a Messages message_delta whose delta
+// carries no stop metadata. A message_delta that closes the message is terminal output, not usage.
+func usageOnly(format model.Format, frame codec.Frame) bool {
 	root, err := model.DecodeObject(frame.Data)
 	if err != nil || root["usage"] == nil {
 		return false
 	}
-	for _, choice := range model.Array(root["choices"]) {
-		entry := model.Object(choice)
-		if delta := model.Object(entry["delta"]); len(delta) > 0 {
+	switch format {
+	case model.Messages:
+		kind := model.String(root["type"])
+		if kind == "" {
+			kind = frame.Event
+		}
+		if kind != "message_delta" {
 			return false
 		}
-		if model.String(entry["finish_reason"]) != "" {
+		delta := model.Object(root["delta"])
+		return model.String(delta["stop_reason"]) == "" && model.String(delta["stop_sequence"]) == ""
+	case model.Chat:
+		choices, ok := root["choices"].([]any)
+		if !ok {
 			return false
 		}
+		for _, choice := range choices {
+			entry := model.Object(choice)
+			if delta := model.Object(entry["delta"]); len(delta) > 0 {
+				return false
+			}
+			if model.String(entry["finish_reason"]) != "" {
+				return false
+			}
+		}
+		return true
 	}
-	return true
+	return false
 }
 
 func rawPart(kind model.PartKind) bool {

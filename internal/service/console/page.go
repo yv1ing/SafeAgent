@@ -3,6 +3,8 @@ package console
 import (
 	"strconv"
 	"time"
+
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 )
 
 const (
@@ -25,7 +27,7 @@ func ParseCursor(limit, before, beforeID string) (Cursor, error) {
 	if limit != "" {
 		parsed, err := strconv.Atoi(limit)
 		if err != nil || parsed < 1 || parsed > MaximumPageSize {
-			return cursor, Invalid("invalid_limit")
+			return cursor, access.Invalid("invalid_limit")
 		}
 		cursor.Limit = parsed
 	}
@@ -33,11 +35,11 @@ func ParseCursor(limit, before, beforeID string) (Cursor, error) {
 		return cursor, nil
 	}
 	if before == "" || beforeID == "" {
-		return cursor, Invalid("invalid_cursor")
+		return cursor, access.Invalid("invalid_cursor")
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, before)
 	if err != nil {
-		return cursor, Invalid("invalid_cursor")
+		return cursor, access.Invalid("invalid_cursor")
 	}
 	cursor.Before, cursor.BeforeID = parsed.UTC(), beforeID
 	return cursor, nil

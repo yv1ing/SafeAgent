@@ -349,6 +349,118 @@ export const useDeleteRoute = <TError = ConsoleAPIError, TContext = unknown>(
 > => {
   return useMutation(getDeleteRouteMutationOptions(options), queryClient);
 };
+export const getGetRouteUrl = (projectId: string, routeId: string) => {
+  return `/console/api/projects/${projectId}/routes/${routeId}`;
+};
+
+export const getRoute = async (
+  projectId: string,
+  routeId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleRouteView> => {
+  return request<ConsoleRouteView>(getGetRouteUrl(projectId, routeId), {
+    ...options,
+    method: 'GET',
+  });
+};
+
+export const getGetRouteQueryKey = (projectId: string, routeId: string) => {
+  return [`/console/api/projects/${projectId}/routes/${routeId}`] as const;
+};
+
+export const getGetRouteQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRoute>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  routeId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRouteQueryKey(projectId, routeId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getRoute>>> = ({ signal }) =>
+    getRoute(projectId, routeId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      projectId !== null && projectId !== undefined && routeId !== null && routeId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+};
+
+export type GetRouteQueryResult = NonNullable<Awaited<ReturnType<typeof getRoute>>>;
+export type GetRouteQueryError = ConsoleAPIError;
+
+export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = ConsoleAPIError>(
+  projectId: string,
+  routeId: string,
+  options: {
+    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>> &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRoute>>,
+          TError,
+          Awaited<ReturnType<typeof getRoute>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = ConsoleAPIError>(
+  projectId: string,
+  routeId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>> &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRoute>>,
+          TError,
+          Awaited<ReturnType<typeof getRoute>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = ConsoleAPIError>(
+  projectId: string,
+  routeId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = ConsoleAPIError>(
+  projectId: string,
+  routeId: string,
+  options?: {
+    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+  const queryOptions = getGetRouteQueryOptions(projectId, routeId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getUpdateRouteUrl = (projectId: string, routeId: string) => {
   return `/console/api/projects/${projectId}/routes/${routeId}`;
 };
@@ -432,4 +544,81 @@ export const useUpdateRoute = <TError = ConsoleAPIError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getUpdateRouteMutationOptions(options), queryClient);
+};
+export const getRestoreRouteUrl = (projectId: string, routeId: string) => {
+  return `/console/api/projects/${projectId}/routes/${routeId}/restore`;
+};
+
+export const restoreRoute = async (
+  projectId: string,
+  routeId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleRouteView> => {
+  return request<ConsoleRouteView>(getRestoreRouteUrl(projectId, routeId), {
+    ...options,
+    method: 'POST',
+  });
+};
+
+export const getRestoreRouteMutationKey = () => ['restoreRoute'] as const;
+
+export const getRestoreRouteMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreRoute>>,
+    TError,
+    RestoreRouteMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreRoute>>,
+  TError,
+  RestoreRouteMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRestoreRouteMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreRoute>>,
+    RestoreRouteMutationVariables
+  > = (props) => {
+    const { projectId, routeId } = props ?? {};
+
+    return restoreRoute(projectId, routeId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreRouteMutationResult = NonNullable<Awaited<ReturnType<typeof restoreRoute>>>;
+
+export type RestoreRouteMutationError = ConsoleAPIError;
+export type RestoreRouteMutationVariables = { projectId: string; routeId: string };
+
+export const useRestoreRoute = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreRoute>>,
+      TError,
+      RestoreRouteMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreRoute>>,
+  TError,
+  RestoreRouteMutationVariables,
+  TContext
+> => {
+  return useMutation(getRestoreRouteMutationOptions(options), queryClient);
 };

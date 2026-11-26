@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/../.." && pwd)
-lab="$root/testenv"
-runtime="$lab/runtime"
-log="$runtime/acceptance/acceptance.log"
-# shellcheck source=lib.sh
-. "$lab/scripts/lib.sh"
-lab_env "$lab"
-cd "$root"
+# shellcheck source=../lib/lab.sh
+. "$(dirname "$0")/../lib/lab.sh"
+lab_env
+mkdir -p "$LAB_EVIDENCE"
+log="$LAB_EVIDENCE/acceptance.log"
+: > "$log"
+cd "$LAB_ROOT"
 
-if [ ! -f "$runtime/env" ]; then
+if [ ! -f "$LAB_RUNTIME/env" ]; then
   make lab-setup
 fi
-mkdir -p "$runtime/acceptance"
-: > "$log"
 
 run() {
   local name=$1
@@ -31,6 +28,7 @@ run() {
 
 run verify make verify
 run integration make lab-integration
+run control-plane make lab-control-plane
 run protocol make lab-protocol
 run auxiliary make lab-auxiliary
 run agents make lab-agents
@@ -38,6 +36,7 @@ run policy make lab-policy
 run analysis make lab-analysis
 run security make lab-security
 run faults make lab-faults
+run trajectory make lab-trajectory
 run browser make lab-browser
 run performance make lab-load
 run audit make lab-audit

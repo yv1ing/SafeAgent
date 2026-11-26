@@ -91,7 +91,9 @@ services:
     environment:
       SAFEAGENT_BASE_URL: http://host.docker.internal:8080
       SAFEAGENT_ADMIN_PASSWORD: ${SAFEAGENT_ADMIN_PASSWORD:-}
+      SAFEAGENT_ADMIN_NEW_PASSWORD: ${SAFEAGENT_ADMIN_NEW_PASSWORD:-}
       SAFEAGENT_PROJECT: ${SAFEAGENT_PROJECT:-}
+      SAFEAGENT_SCREENSHOTS: ${SAFEAGENT_SCREENSHOTS:-/screenshots}
     volumes:
       - ./runtime/screenshots:/screenshots
     networks: [lab]

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/pipeline"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
@@ -56,7 +57,7 @@ func TestSessionConflictRejectsContinuation(t *testing.T) {
 		t.Fatalf("status=%d body=%s", second.Code, second.Body)
 	}
 	call := rig.store.Calls[1]
-	if call.State != "rejected" || call.ParentCallID != rig.store.Calls[0].ID {
+	if call.State != "failed" || call.Outcome != classify.OutcomeClientError || call.ParentCallID != rig.store.Calls[0].ID {
 		t.Fatalf("conflicting call=%+v", call)
 	}
 }
@@ -73,7 +74,7 @@ func TestToolResultPolicyBlocksBeforeUpstream(t *testing.T) {
 		t.Fatal("a blocked tool result must not reach the upstream")
 	}
 	call := rig.store.Calls[0]
-	if call.State != "rejected" || call.ErrorCode != "tool_result_blocked" || len(rig.store.Reserved) != 0 {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "tool_result_blocked" || len(rig.store.Reserved) != 0 {
 		t.Fatalf("call=%+v reserved=%v", call, rig.store.Reserved)
 	}
 	kinds := eventKinds(rig.store.EventsOf(call.ID))
@@ -96,7 +97,7 @@ func TestResponsePolicyBlocksJSONResponse(t *testing.T) {
 		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "blocked" || call.ErrorCode != "response_blocked" || call.ResponseID != "" {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "response_blocked" || call.ResponseID != "" {
 		t.Fatalf("call=%+v", call)
 	}
 	if len(rig.store.Settled) == 0 {
@@ -121,7 +122,7 @@ func TestAuxiliaryLifecycleIsAudited(t *testing.T) {
 		t.Fatal(failure)
 	}
 	auxiliary := rig.store.Calls[len(rig.store.Calls)-1]
-	if auxiliary.Kind != "responses_retrieve" || auxiliary.State != "completed" {
+	if auxiliary.Operation != classify.ResponsesRetrieve || auxiliary.State != "completed" {
 		t.Fatalf("auxiliary call=%+v", auxiliary)
 	}
 	if kinds := eventKinds(rig.store.EventsOf(auxiliary.ID)); !slices.Contains(kinds, auditevent.KindRequest) {
@@ -131,7 +132,7 @@ func TestAuxiliaryLifecycleIsAudited(t *testing.T) {
 		t.Fatal(failure)
 	}
 	deleted := rig.store.Calls[len(rig.store.Calls)-1]
-	if deleted.Kind != "responses_delete" || deleted.State != "completed" {
+	if deleted.Operation != classify.ResponsesDelete || deleted.State != "completed" {
 		t.Fatalf("delete call=%+v", deleted)
 	}
 }
@@ -148,7 +149,7 @@ func TestStreamReviewBlocksBeforeTheFirstByte(t *testing.T) {
 		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "blocked" || call.ErrorCode != "response_blocked" {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "response_blocked" {
 		t.Fatalf("call=%+v", call)
 	}
 	if call.FirstTokenMilliseconds != 0 {
@@ -172,7 +173,7 @@ func TestStreamReviewBlocksAShortResponse(t *testing.T) {
 	if writer.Code != http.StatusForbidden || strings.Contains(writer.Body.String(), "short bad") {
 		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
 	}
-	if call := rig.store.Calls[0]; call.State != "blocked" || call.ErrorCode != "response_blocked" || call.FirstTokenMilliseconds != 0 {
+	if call := rig.store.Calls[0]; call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "response_blocked" || call.FirstTokenMilliseconds != 0 {
 		t.Fatalf("call=%+v", call)
 	}
 }
@@ -227,7 +228,7 @@ func TestBlockedParallelToolCallIsNotStoredAsDelivered(t *testing.T) {
 		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "blocked" || call.ErrorCode != "tool_call_blocked" {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "tool_call_blocked" {
 		t.Fatalf("call=%+v", call)
 	}
 	response := firstEvent(t, rig.store.EventsOf(call.ID), auditevent.KindResponse)
@@ -251,7 +252,7 @@ func TestResponsePolicyBlocksJSONUpstream(t *testing.T) {
 		t.Fatalf("status=%d body=%s", writer.Code, writer.Body)
 	}
 	call := rig.store.Calls[0]
-	if call.State != "blocked" || call.ErrorCode != "response_blocked" || len(rig.store.Settled) == 0 {
+	if call.State != "completed" || call.Outcome != classify.OutcomeBlocked || call.ErrorCode != "response_blocked" || len(rig.store.Settled) == 0 {
 		t.Fatalf("call=%+v settled=%v", call, rig.store.Settled)
 	}
 }

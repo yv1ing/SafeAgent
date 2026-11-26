@@ -218,3 +218,49 @@ func TestStreamedThoughtSignatureCoversTheWholeText(t *testing.T) {
 	}
 	t.Fatal("no signature part was sent")
 }
+
+func signatureEvents(signature *model.Signature) []model.Event {
+	reasoning := &model.Reasoning{Visibility: "full", Signature: signature}
+	return []model.Event{
+		{Kind: model.EventItemStart, ItemIndex: 0, Item: &model.Item{Kind: model.ItemReasoning, Role: model.RoleAssistant, Reasoning: reasoning}},
+		{Kind: model.EventPartStart, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText}},
+		{Kind: model.EventPartDelta, ItemIndex: 0, PartIndex: 0, Delta: "kept thought"},
+		{Kind: model.EventPartStop, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText, Text: "kept thought"}},
+		{Kind: model.EventItemStop, ItemIndex: 0, Item: &model.Item{Kind: model.ItemReasoning, Role: model.RoleAssistant, Reasoning: reasoning}},
+	}
+}
+
+func thoughtSignatureOf(t *testing.T, events []model.Event) (string, []model.Loss) {
+	t.Helper()
+	output, losses := testkit.EncodeEvents(t, gemini.New().NewStreamEncoder(model.ResponseMeta{ID: "resp_1", Model: "m"}, upstream), events)
+	sealed := ""
+	for _, frame := range output {
+		for _, part := range model.Array(testkit.JSONValue(t, frame.Data, "candidates.0.content.parts")) {
+			if signature := model.String(model.Object(part)["thoughtSignature"]); signature != "" {
+				sealed = signature
+			}
+		}
+	}
+	return sealed, losses
+}
+
+func TestThoughtSignatureForDifferentTextIsReportedAsDropped(t *testing.T) {
+	signature := &model.Signature{Vendor: model.VendorGoogle, Blob: "opaque", TextDigest: model.TextDigest("another thought")}
+	sealed, losses := thoughtSignatureOf(t, signatureEvents(signature))
+	if sealed != "" {
+		t.Fatalf("a signature that does not cover the part must not be sent: %q", sealed)
+	}
+	found := false
+	for _, loss := range losses {
+		found = found || loss.Code == model.LossSignatureStripped
+	}
+	if !found {
+		t.Fatalf("a dropped thought signature must be a visible loss: %+v", losses)
+	}
+
+	signature.TextDigest = model.TextDigest("kept thought")
+	sealed, _ = thoughtSignatureOf(t, signatureEvents(signature))
+	if sealed != "opaque" {
+		t.Fatalf("a signature covering the part must be sent: %q", sealed)
+	}
+}

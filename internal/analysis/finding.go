@@ -45,17 +45,21 @@ type Evidence struct {
 	Item    int    `json:"item"`
 	Section string `json:"section"`
 	Path    string `json:"path"`
-	View    string `json:"view"`
-	Start   int    `json:"start,omitempty"`
-	End     int    `json:"end,omitempty"`
-	Quote   string `json:"quote,omitempty"`
+	// Locator is the stable identity of the item the evidence belongs to. Turn and Item stay for
+	// detector logic and for analyses written before item identity existed.
+	Locator observation.Locator `json:"locator,omitempty"`
+	View    string              `json:"view"`
+	Start   int                 `json:"start,omitempty"`
+	End     int                 `json:"end,omitempty"`
+	Quote   string              `json:"quote,omitempty"`
 }
 
 type Attribution struct {
-	Turn       int    `json:"turn,omitempty"`
-	Item       int    `json:"item,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Source     string `json:"source,omitempty"`
+	Turn       int                 `json:"turn,omitempty"`
+	Item       int                 `json:"item,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
+	Source     string              `json:"source,omitempty"`
+	Locator    observation.Locator `json:"locator,omitempty"`
 }
 
 type DetectorRef struct {
@@ -83,15 +87,18 @@ type Finding struct {
 
 // Flow is one edge from external content to a tool call that can act on it.
 type Flow struct {
-	SourceTurn     int                `json:"source_turn"`
-	SourceItem     int                `json:"source_item"`
-	SourceOrigin   observation.Origin `json:"source_origin"`
-	SourcePath     string             `json:"source_path"`
-	SinkToolCallID string             `json:"sink_tool_call_id"`
-	Sink           observation.Sink   `json:"sink"`
-	Relation       string             `json:"relation"`
-	ContentHash    string             `json:"content_hash"`
-	Confidence     float64            `json:"confidence"`
+	SourceTurn int `json:"source_turn"`
+	SourceItem int `json:"source_item"`
+	// SourceLocator is the stored item identity of the flow source. Detectors fill the turn/item
+	// position only; the diagnosis service resolves it against the rebuilt trace before persisting.
+	SourceLocator  observation.Locator `json:"source_locator,omitempty"`
+	SourceOrigin   observation.Origin  `json:"source_origin"`
+	SourcePath     string              `json:"source_path"`
+	SinkToolCallID string              `json:"sink_tool_call_id"`
+	Sink           observation.Sink    `json:"sink"`
+	Relation       string              `json:"relation"`
+	ContentHash    string              `json:"content_hash"`
+	Confidence     float64             `json:"confidence"`
 	// Matched is the source snippet used for evidence formatting. It is not stored: a persisted
 	// flow carries only its hash.
 	Matched string `json:"-"`
@@ -163,8 +170,10 @@ func fingerprint(detector, code string, origin observation.Origin, sink observat
 	return hex.EncodeToString(sum[:16])
 }
 
-// EvidenceAt locates a match inside a value. When the match overlaps a redacted span the quote is
-// replaced with the label, so the evidence remains useful without revealing what was hidden.
+// EvidenceAt locates a match inside a value. Start and End always name a range in the view named by
+// View and Quote is always a safe excerpt of that view: a match overlapping a redacted span is
+// replaced by the label, and a value-level match (start == end) is expressed in the shown view
+// because it describes the whole value rather than one raw range.
 func EvidenceAt(ref observation.ItemRef, section, path string, value observation.Value, start, end int) Evidence {
 	if start < 0 {
 		start = 0
@@ -178,19 +187,25 @@ func EvidenceAt(ref observation.ItemRef, section, path string, value observation
 	if end < start {
 		end = start
 	}
-	quote := ""
-	switch {
-	case start == end:
-		quote = truncateQuote(value.Shown)
-	case overlapsRedaction(value.Redactions, start, end):
-		quote = "[redacted]"
-	default:
-		quote = truncateQuote(value.Raw[start:end])
+	if start == end {
+		return Evidence{
+			Turn: ref.Turn, Item: ref.Position, Section: section, Path: path, Locator: ref.Item.Locator,
+			View: string(observation.ViewRedacted), Start: 0, End: len(value.Shown), Quote: truncateQuote(value.Shown),
+		}
 	}
 	return Evidence{
-		Turn: ref.Turn, Item: ref.Position, Section: section, Path: path,
-		View: string(observation.ViewRaw), Start: start, End: end, Quote: quote,
+		Turn: ref.Turn, Item: ref.Position, Section: section, Path: path, Locator: ref.Item.Locator,
+		View: string(observation.ViewRaw), Start: start, End: end, Quote: rawQuote(value, start, end),
 	}
+}
+
+// rawQuote reads an excerpt from the raw representation only when no redacted span crosses it, so a
+// stored finding can never quote hidden content.
+func rawQuote(value observation.Value, start, end int) string {
+	if overlapsRedaction(value.Redactions, start, end) {
+		return "[redacted]"
+	}
+	return truncateQuote(value.Raw[start:end])
 }
 
 func overlapsRedaction(spans []observation.Span, start, end int) bool {

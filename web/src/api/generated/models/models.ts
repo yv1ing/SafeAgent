@@ -23,6 +23,7 @@ import type {
 
 import type {
   ConsoleAPIError,
+  ConsoleCatalogModelBatchInput,
   ConsoleCatalogModelInput,
   ConsoleCatalogModelView,
   ConsoleUpdateCatalogModelInput,
@@ -259,6 +260,86 @@ export const useCreateModel = <TError = ConsoleAPIError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getCreateModelMutationOptions(options), queryClient);
+};
+export const getCreateModelBatchUrl = () => {
+  return `/console/api/models/batch`;
+};
+
+export const createModelBatch = async (
+  consoleCatalogModelBatchInput: ConsoleCatalogModelBatchInput,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleCatalogModelView[]> => {
+  return request<ConsoleCatalogModelView[]>(getCreateModelBatchUrl(), {
+    ...options,
+    method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
+    body: JSON.stringify(consoleCatalogModelBatchInput),
+  });
+};
+
+export const getCreateModelBatchMutationKey = () => ['createModelBatch'] as const;
+
+export const getCreateModelBatchMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createModelBatch>>,
+    TError,
+    CreateModelBatchMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createModelBatch>>,
+  TError,
+  CreateModelBatchMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateModelBatchMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createModelBatch>>,
+    CreateModelBatchMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createModelBatch(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateModelBatchMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createModelBatch>>
+>;
+export type CreateModelBatchMutationBody = ConsoleCatalogModelBatchInput;
+export type CreateModelBatchMutationError = ConsoleAPIError;
+export type CreateModelBatchMutationVariables = { data: ConsoleCatalogModelBatchInput };
+
+export const useCreateModelBatch = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createModelBatch>>,
+      TError,
+      CreateModelBatchMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createModelBatch>>,
+  TError,
+  CreateModelBatchMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreateModelBatchMutationOptions(options), queryClient);
 };
 export const getDeleteModelUrl = (modelId: string) => {
   return `/console/api/models/${modelId}`;
@@ -522,4 +603,158 @@ export const useUpdateModel = <TError = ConsoleAPIError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getUpdateModelMutationOptions(options), queryClient);
+};
+export const getRestoreModelUrl = (modelId: string) => {
+  return `/console/api/models/${modelId}/restore`;
+};
+
+export const restoreModel = async (
+  modelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleCatalogModelView> => {
+  return request<ConsoleCatalogModelView>(getRestoreModelUrl(modelId), {
+    ...options,
+    method: 'POST',
+  });
+};
+
+export const getRestoreModelMutationKey = () => ['restoreModel'] as const;
+
+export const getRestoreModelMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreModel>>,
+    TError,
+    RestoreModelMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreModel>>,
+  TError,
+  RestoreModelMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRestoreModelMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreModel>>,
+    RestoreModelMutationVariables
+  > = (props) => {
+    const { modelId } = props ?? {};
+
+    return restoreModel(modelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreModelMutationResult = NonNullable<Awaited<ReturnType<typeof restoreModel>>>;
+
+export type RestoreModelMutationError = ConsoleAPIError;
+export type RestoreModelMutationVariables = { modelId: string };
+
+export const useRestoreModel = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreModel>>,
+      TError,
+      RestoreModelMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreModel>>,
+  TError,
+  RestoreModelMutationVariables,
+  TContext
+> => {
+  return useMutation(getRestoreModelMutationOptions(options), queryClient);
+};
+export const getDetachModelTargetsUrl = (modelId: string) => {
+  return `/console/api/models/${modelId}/targets`;
+};
+
+export const detachModelTargets = async (
+  modelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<void> => {
+  return request<void>(getDetachModelTargetsUrl(modelId), {
+    ...options,
+    method: 'DELETE',
+  });
+};
+
+export const getDetachModelTargetsMutationKey = () => ['detachModelTargets'] as const;
+
+export const getDetachModelTargetsMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof detachModelTargets>>,
+    TError,
+    DetachModelTargetsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof detachModelTargets>>,
+  TError,
+  DetachModelTargetsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDetachModelTargetsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof detachModelTargets>>,
+    DetachModelTargetsMutationVariables
+  > = (props) => {
+    const { modelId } = props ?? {};
+
+    return detachModelTargets(modelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DetachModelTargetsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof detachModelTargets>>
+>;
+
+export type DetachModelTargetsMutationError = ConsoleAPIError;
+export type DetachModelTargetsMutationVariables = { modelId: string };
+
+export const useDetachModelTargets = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof detachModelTargets>>,
+      TError,
+      DetachModelTargetsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof detachModelTargets>>,
+  TError,
+  DetachModelTargetsMutationVariables,
+  TContext
+> => {
+  return useMutation(getDetachModelTargetsMutationOptions(options), queryClient);
 };

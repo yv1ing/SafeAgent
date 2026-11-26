@@ -1,7 +1,7 @@
-import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useGetProject } from '../api/generated/projects/projects';
+import { Sheet } from '../components/ui/sheet';
 import { useLocale } from '../i18n';
 import { slashFocusAttribute } from '../lib/shortcuts';
 import { ProjectProvider, useCurrentProjectId } from './context';
@@ -35,16 +35,17 @@ function MobileNavigation({
   title: string;
 }) {
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-40 animate-fade-in bg-overlay lg:hidden" />
-        <DialogPrimitive.Content className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] border-r bg-surface shadow-pop lg:hidden">
-          <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
-          <DialogPrimitive.Description className="sr-only">{title}</DialogPrimitive.Description>
-          <Sidebar collapsed={false} mobile onNavigate={() => onOpenChange(false)} />
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      side="left"
+      showHeader={false}
+      className="w-72 max-w-[85vw] bg-surface lg:hidden"
+      overlayClassName="lg:hidden"
+    >
+      <Sidebar collapsed={false} mobile onNavigate={() => onOpenChange(false)} />
+    </Sheet>
   );
 }
 

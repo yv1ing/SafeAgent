@@ -173,7 +173,7 @@ func (encoder *streamEncoder) signatureChunk(state *encodeItemState, part *encod
 		signature = &model.Signature{Vendor: model.VendorSafeAgent, Blob: "gateway"}
 		losses = append(losses, model.Loss{Path: "reasoning.signature", Code: model.LossGeminiDummySignature, Class: model.LossDegraded, Detail: "the upstream returned no thought signature; the gateway envelope keeps the reasoning replayable", To: model.Gemini})
 	} else if !codec.SignatureCoversText(signature, part.kind, part.text.String()) {
-		return nil, nil
+		return nil, []model.Loss{{Path: "reasoning.signature", Code: model.LossSignatureStripped, Class: model.LossDegraded, Detail: "the reasoning signature was issued for different text; the text is retained without a signature", To: model.Gemini}}
 	}
 	encoded := encoder.peer.WireSignature(signature, part.text.String())
 	if encoded == "" {

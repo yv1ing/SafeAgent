@@ -12,7 +12,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/stream"
-	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
@@ -34,7 +34,7 @@ func (state *call) blockReviewedStream(session *stream.Session, upstream *upstre
 func (state *call) recordBlockedResponse(response *model.Response, ledger model.Ledger, failure *model.Error, upstream *upstreamCall) *model.Error {
 	state.recordResponse(response, ledger, responseMeta{Blocked: true})
 	state.applyLossHeaders(ledger.Losses)
-	if !state.settle("blocked", failure, response.Usage, upstream.endpoint.model) {
+	if !state.settle(failure, response.Usage, upstream.endpoint.model) {
 		failure = internal("audit_unavailable", "The response could not be recorded.")
 	}
 	state.reply(failure)
@@ -52,7 +52,7 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 		response := journal.Response(state.kind)
 		state.decorate(response)
 		session.StageFailure(response.Failure)
-		state.finishStream(session, upstream, "failed", response, response.Failure)
+		state.finishStream(session, upstream, response, response.Failure)
 		return attemptEnded, response.Failure
 	}
 	response := journal.Response(state.kind)
@@ -67,7 +67,7 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 	}
 	ledger := state.ledger(journal)
 	state.recordResponse(response, ledger, responseMeta{Committed: true, Identify: true, Stored: state.responseStore()})
-	if !state.settle("completed", nil, response.Usage, upstream.endpoint.model) {
+	if !state.settle(nil, response.Usage, upstream.endpoint.model) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		if session.Committed() {
 			session.StageFailure(failure)
@@ -82,17 +82,17 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 	return attemptCompleted, nil
 }
 
-func (state *call) failStream(session *stream.Session, upstream *upstreamCall, stateName string, failure *model.Error) {
+func (state *call) failStream(session *stream.Session, upstream *upstreamCall, failure *model.Error) {
 	session.PruneUndelivered()
 	response := session.Journal().Response(state.kind)
 	state.decorate(response)
 	response.Failure = failure
 	response.Status = "failed"
 	session.StageFailure(failure)
-	state.finishStream(session, upstream, stateName, response, failure)
+	state.finishStream(session, upstream, response, failure)
 }
 
-func (state *call) finishStream(session *stream.Session, upstream *upstreamCall, stateName string, response *model.Response, failure *model.Error) {
+func (state *call) finishStream(session *stream.Session, upstream *upstreamCall, response *model.Response, failure *model.Error) {
 	state.streamCommitted = session.Committed()
 	state.streamTruncated = failure != nil && failure.Code == "upstream_stream_truncated"
 	ledger := state.ledger(session.Journal())
@@ -101,7 +101,7 @@ func (state *call) finishStream(session *stream.Session, upstream *upstreamCall,
 		Partial:   state.streamCommitted,
 		Truncated: state.streamTruncated,
 	})
-	if !state.settle(stateName, failure, response.Usage, upstream.endpoint.model) {
+	if !state.settle(failure, response.Usage, upstream.endpoint.model) {
 		state.pipeline.logger.Error("failed stream could not be sealed", "call", state.recorder.Call().ID)
 	}
 	session.WriteStaged()
@@ -157,7 +157,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 	ledger := model.Ledger{Losses: mergeLosses(state.failureLedger.Losses, nil), Repairs: mergeRepairs(state.failureLedger.Repairs, nil)}
 	state.recordResponse(response, ledger, responseMeta{Identify: true, Stored: state.responseStore()})
 	state.applyLossHeaders(ledger.Losses)
-	if !state.settle("completed", nil, response.Usage, upstream.endpoint.model) {
+	if !state.settle(nil, response.Usage, upstream.endpoint.model) {
 		failure := internal("audit_unavailable", "The response could not be recorded.")
 		state.reply(failure)
 		return attemptEnded, failure
@@ -173,7 +173,7 @@ func (state *call) collectResponse(ctx context.Context, upstream *upstreamCall, 
 // client. It uses the same content detector and response-phase rules as a non-streaming response;
 // the preview's status is in_progress because its finish is not known yet.
 func (state *call) reviewStream(input stream.ReviewInput) *model.Error {
-	shown, _ := state.redactor()(input.Text, "response.preview")
+	shown := state.redactor()(input.Text, "response.preview").Shown
 	shown = truncatePolicyText(shown, maxPolicyResultBytes)
 	trace := state.baseTrace()
 	preview := &model.Response{
@@ -184,7 +184,7 @@ func (state *call) reviewStream(input stream.ReviewInput) *model.Error {
 			Parts: []model.Part{{Kind: model.PartText, Text: input.Text}},
 		}},
 	}
-	observe.AppendResponse(trace, preview, state.observeOptions())
+	adapter.AppendResponse(trace, preview, state.observeOptions())
 	failure := state.evaluateResponse(trace, policy.Response{
 		Status: "in_progress", Text: shown, ItemCount: input.Items, ToolCalls: input.ToolCalls,
 	})
@@ -207,7 +207,7 @@ func (state *call) evaluateCollectedResponse(response *model.Response) *model.Er
 			if part.Text == "" {
 				continue
 			}
-			shown, _ := redactor(part.Text, "response.items["+strconv.Itoa(index)+"].text")
+			shown := redactor(part.Text, "response.items["+strconv.Itoa(index)+"].text").Shown
 			text += shown
 		}
 	}
@@ -215,7 +215,7 @@ func (state *call) evaluateCollectedResponse(response *model.Response) *model.Er
 		text = truncatePolicyText(text, maxPolicyResultBytes)
 	}
 	trace := state.baseTrace()
-	observe.AppendResponse(trace, response, state.observeOptions())
+	adapter.AppendResponse(trace, response, state.observeOptions())
 	return state.evaluateResponse(trace, policy.Response{
 		Status: response.Status, Finish: string(response.Finish.Kind), Text: text,
 		ItemCount: len(response.Items), ToolCalls: toolCalls, Truncated: response.Finish.Kind == model.FinishLength,
@@ -296,7 +296,7 @@ func (state *call) recordResponse(response *model.Response, ledger model.Ledger,
 		record.ConversationHash = model.ConversationFingerprint(state.pipeline.secret, state.client, response)
 	}
 	if !meta.Blocked {
-		state.recordTools(response)
+		state.recordToolCalls(response)
 	}
 	state.recorder.Event(auditevent.KindResponse, auditevent.Response{
 		Response: *response, Ledger: ledger, Committed: meta.Committed,
@@ -311,9 +311,9 @@ func (state *call) responseStore() bool {
 	return state.request.Store == nil || *state.request.Store
 }
 
-// recordTools writes one event per tool call the model issued and per tool result this request
-// added; calls of earlier turns were recorded by the turns that issued them.
-func (state *call) recordTools(response *model.Response) {
+// recordToolCalls writes one event per tool call the model issued. Tool results this request added
+// are recorded once at admission, so this does not repeat them.
+func (state *call) recordToolCalls(response *model.Response) {
 	for index := range response.Items {
 		item := &response.Items[index]
 		if item.Kind == model.ItemToolCall && item.ToolCall != nil {
@@ -321,12 +321,6 @@ func (state *call) recordTools(response *model.Response) {
 				ID: item.ToolCall.ID, Kind: string(item.ToolCall.Kind), Name: item.ToolCall.Name,
 				Arguments: item.ToolCall.Arguments,
 			})
-		}
-	}
-	for index := min(state.offset, len(state.request.Items)); index < len(state.request.Items); index++ {
-		item := &state.request.Items[index]
-		if item.Kind == model.ItemToolResult {
-			state.recorder.ToolResult(auditevent.ToolResult{CallID: item.CallID, Name: item.Name, IsError: item.IsError})
 		}
 	}
 }

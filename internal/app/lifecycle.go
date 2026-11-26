@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
-	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
+	"github.com/yv1ing/SafeAgent/internal/service/control"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
@@ -41,11 +40,22 @@ func Run(ctx context.Context, configuration config.Config, database *repository.
 	} else if interrupted > 0 {
 		slog.Warn("calls left running by a previous process were marked interrupted", "calls", interrupted)
 	}
-	if err := serviceconsole.ValidateConfiguration(ctx, database, provider.NewRegistry(builtin.All()...)); err != nil {
-		return fmt.Errorf("configuration is inconsistent: %w", err)
+	if err := control.SeedProviders(ctx, database, builtin.All()); err != nil {
+		return fmt.Errorf("seed the built-in providers: %w", err)
+	}
+	providers, err := control.NewRegistry(ctx, database)
+	if err != nil {
+		return fmt.Errorf("load the provider catalog: %w", err)
+	}
+	if health, healthErr := control.Health(ctx, database, providers); healthErr != nil {
+		return fmt.Errorf("evaluate the configuration: %w", healthErr)
+	} else {
+		for _, warning := range health.Warnings {
+			slog.Warn("configuration is degraded", "code", warning.Code, "subject", warning.Subject, "detail", warning.Message)
+		}
 	}
 
-	server, diagnosisService := NewServer(configuration, database, frontend)
+	server, diagnosisService := NewServer(configuration, database, providers, frontend)
 	if err := diagnosisService.ValidatePolicies(ctx); err != nil {
 		return err
 	}

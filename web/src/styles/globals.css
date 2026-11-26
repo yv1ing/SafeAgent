@@ -60,6 +60,7 @@
   --animate-fade-in: fade-in 120ms ease-out;
   --animate-pop-in: pop-in 140ms ease-out;
   --animate-slide-in: slide-in 180ms ease-out;
+  --animate-slide-in-left: slide-in-left 180ms ease-out;
 }
 
 /* Light is the default; dark applies when data-theme=dark. The attribute is set before first paint
@@ -183,5 +184,11 @@
 @keyframes slide-in {
   from {
     transform: translateX(100%);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
   }
 }

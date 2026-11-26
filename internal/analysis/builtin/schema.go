@@ -37,11 +37,12 @@ func evaluateSchema(_ context.Context, trace *observation.Trace) []analysis.Find
 				continue
 			}
 			// tool_choice and the declared tool set describe the response this request asks for.
-			// They must not be retroactively applied to tool calls in earlier messages.
-			if item.Locator.Section != "response" {
+			// They must not be retroactively applied to tool calls in earlier messages or in an
+			// ancestor call's response that the expanded trace merged into the request side.
+			if item.Locator.Section != observation.SectionResponse || item.Locator.CallID != trace.ID {
 				continue
 			}
-			name := observation.NewValue(call.Name, call.Name, nil)
+			name := observation.NewValue(call.Name, call.Name, nil, nil)
 			if _, found := declared[call.Name]; !found {
 				findings = append(findings, makeWholeFinding("schema", analysis.CodeUndeclaredTool, ref, item.Origin, call.Sink,
 					"message", "tool_call.name", name))
@@ -187,7 +188,7 @@ func (checker *schemaChecker) add(code, path, detail string) {
 		confidenceFor(code), locationKey(checker.ref, path), ordinal,
 		analysis.EvidenceAt(checker.ref, "message", path, checker.item.ToolCall.Arguments, start, end),
 	)
-	finding.Attribution = []analysis.Attribution{{Turn: checker.ref.Turn, Item: checker.ref.Position, ToolCallID: checker.item.Locator.CallID, Source: "message"}}
+	finding.Attribution = []analysis.Attribution{{Turn: checker.ref.Turn, Item: checker.ref.Position, ToolCallID: checker.item.Locator.CallID, Source: "message", Locator: checker.item.Locator}}
 	if !checker.probe {
 		checker.findings = append(checker.findings, finding)
 	}

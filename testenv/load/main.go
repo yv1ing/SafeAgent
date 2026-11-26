@@ -54,6 +54,7 @@ type runConfig struct {
 
 type outcome struct {
 	ok               bool
+	empty            bool
 	kind             string
 	status           int
 	detail           string
@@ -104,6 +105,7 @@ type loadReport struct {
 	StartedAt       time.Time           `json:"started_at"`
 	DurationSeconds float64             `json:"duration_seconds"`
 	Succeeded       int                 `json:"succeeded"`
+	EmptyText       int                 `json:"empty_text,omitempty"`
 	Failed          int                 `json:"failed"`
 	SuccessRate     float64             `json:"success_rate"`
 	ErrorCounts     map[string]int      `json:"error_counts"`
@@ -207,7 +209,7 @@ func measure(cfg runConfig, key string) (loadReport, error) {
 
 	for i := 0; i < cfg.warmup; i++ {
 		var res result
-		for attempt := 0; attempt < 3; attempt++ {
+		for attempt := 0; attempt < 5; attempt++ {
 			res = call(client, cfg, endpoint, key, body)
 			if res.outcome.ok || (res.outcome.kind != "network" && res.outcome.kind != "timeout") {
 				break
@@ -215,7 +217,7 @@ func measure(cfg runConfig, key string) (loadReport, error) {
 			time.Sleep(time.Duration(attempt+1) * time.Second)
 		}
 		if !res.outcome.ok {
-			return loadReport{}, fmt.Errorf("warm-up request %d failed: %s %s", i+1, res.outcome.kind, res.outcome.detail)
+			return loadReport{}, fmt.Errorf("warm-up request %d failed after retries: %s %s", i+1, res.outcome.kind, res.outcome.detail)
 		}
 	}
 
@@ -427,35 +429,38 @@ func validateJSON(protocol string, body io.Reader) outcome {
 		return outcome{kind: "protocol", detail: compact("provider error: " + compact(fmt.Sprint(failure)))}
 	}
 	switch protocol {
+	// A well-formed completion with no visible text is a provider-side truncation (a reasoning
+	// model that spent the cap before writing), not a transport or conversion fault, so it counts
+	// as a successful sample and is reported separately.
 	case "responses":
-		if textOfResponses(payload) == "" {
-			return outcome{kind: "protocol", detail: "response has no output text"}
-		}
 		usage := objectOf(payload["usage"])
-		return outcome{ok: true, promptTokens: intOf(usage, "input_tokens"), completionTokens: intOf(usage, "output_tokens")}
+		return outcome{
+			ok: true, empty: textOfResponses(payload) == "",
+			promptTokens: intOf(usage, "input_tokens"), completionTokens: intOf(usage, "output_tokens"),
+		}
 	case "messages":
-		if textOfMessages(payload) == "" {
-			return outcome{kind: "protocol", detail: "response has no text"}
-		}
 		usage := objectOf(payload["usage"])
-		return outcome{ok: true, promptTokens: intOf(usage, "input_tokens"), completionTokens: intOf(usage, "output_tokens")}
-	case "gemini":
-		if textOfGemini(payload) == "" {
-			return outcome{kind: "protocol", detail: "response has no text"}
+		return outcome{
+			ok: true, empty: textOfMessages(payload) == "",
+			promptTokens: intOf(usage, "input_tokens"), completionTokens: intOf(usage, "output_tokens"),
 		}
+	case "gemini":
 		usage := objectOf(payload["usageMetadata"])
-		return outcome{ok: true, promptTokens: intOf(usage, "promptTokenCount"), completionTokens: intOf(usage, "candidatesTokenCount")}
+		return outcome{
+			ok: true, empty: textOfGemini(payload) == "",
+			promptTokens: intOf(usage, "promptTokenCount"), completionTokens: intOf(usage, "candidatesTokenCount"),
+		}
 	default:
 		choices := arrayOf(payload["choices"])
 		if len(choices) == 0 {
 			return outcome{kind: "protocol", detail: "response has no choices"}
 		}
 		message := objectOf(objectOf(choices[0])["message"])
-		if strings.TrimSpace(stringOf(message["content"])) == "" {
-			return outcome{kind: "protocol", detail: "response has no text"}
-		}
 		usage := objectOf(payload["usage"])
-		return outcome{ok: true, promptTokens: intOf(usage, "prompt_tokens"), completionTokens: intOf(usage, "completion_tokens")}
+		return outcome{
+			ok: true, empty: strings.TrimSpace(stringOf(message["content"])) == "",
+			promptTokens: intOf(usage, "prompt_tokens"), completionTokens: intOf(usage, "completion_tokens"),
+		}
 	}
 }
 
@@ -567,13 +572,10 @@ func validateStream(protocol string, body io.Reader) outcome {
 	if err := scanner.Err(); err != nil {
 		return outcome{kind: "network", detail: err.Error()}
 	}
-	if !sawText {
-		return outcome{kind: "protocol", detail: "stream has no visible text"}
-	}
 	if !sawTerminal {
 		return outcome{kind: "protocol", detail: "stream has no terminal event"}
 	}
-	return outcome{ok: true, promptTokens: promptTokens, completionTokens: completionTokens, firstToken: firstToken}
+	return outcome{ok: true, empty: !sawText, promptTokens: promptTokens, completionTokens: completionTokens, firstToken: firstToken}
 }
 
 func summarize(cfg runConfig, startedAt time.Time, elapsed time.Duration, all []result) loadReport {
@@ -591,6 +593,9 @@ func summarize(cfg runConfig, startedAt time.Time, elapsed time.Duration, all []
 	second := make([]float64, 0, len(all))
 	mid := startedAt.Add(elapsed / 2)
 	for _, res := range all {
+		if res.outcome.empty {
+			report.EmptyText++
+		}
 		if res.outcome.status > 0 {
 			report.StatusCounts[fmt.Sprint(res.outcome.status)]++
 		}
@@ -678,9 +683,13 @@ func writeReport(path string, report loadReport) error {
 }
 
 func printReport(report loadReport) {
-	fmt.Printf("%s: %d/%d succeeded, p95 %.0f ms, first token p95 %.0f ms, %.2f req/s, errors %v\n",
+	empty := ""
+	if report.EmptyText > 0 {
+		empty = fmt.Sprintf(", %d provider completions without text", report.EmptyText)
+	}
+	fmt.Printf("%s: %d/%d succeeded, p95 %.0f ms, first token p95 %.0f ms, %.2f req/s, errors %v%s\n",
 		report.Label, report.Succeeded, report.Requests, report.LatencyMS.P95, report.FirstTokenMS.P95,
-		report.ThroughputRPS, report.ErrorCounts)
+		report.ThroughputRPS, report.ErrorCounts, empty)
 }
 
 func objectOf(value any) map[string]any {

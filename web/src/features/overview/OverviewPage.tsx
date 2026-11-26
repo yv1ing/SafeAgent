@@ -4,11 +4,13 @@ import type { GetProjectStatsWindow } from '../../api/generated/models';
 import { useGetProjectSeries } from '../../api/generated/series/series';
 import { useGetProjectStats } from '../../api/generated/stats/stats';
 import { useProjectId } from '../../app/context';
-import { Page } from '../../components/layout/Page';
-import { PageHeader } from '../../components/layout/PageHeader';
+import { ChartCard } from '../../components/charts/ChartCard';
+import { SeverityChart } from '../../components/charts/SeverityChart';
 import { QueryState } from '../../components/feedback/QueryState';
 import { Segmented } from '../../components/feedback/Segmented';
-import { Card, CardHeader } from '../../components/ui/card';
+import { Page } from '../../components/layout/Page';
+import { PageHeader } from '../../components/layout/PageHeader';
+import { Card } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useLocale } from '../../i18n';
@@ -16,7 +18,6 @@ import { ChannelTraffic } from './components/ChannelTraffic';
 import { Breakdowns, TrafficCharts } from './components/Charts';
 import { KpiTiles } from './components/KpiTiles';
 import { RecentCalls } from './components/RecentCalls';
-import { SeverityChart } from './components/SeverityChart';
 
 const windows: GetProjectStatsWindow[] = ['24h', '7d', '30d'];
 
@@ -87,12 +88,9 @@ export function OverviewPage() {
                         <RecentCalls projectId={projectId} />
                       </div>
                       <div className="flex min-w-0 flex-col gap-4">
-                        <Card className="overflow-visible">
-                          <CardHeader title={t.overview.severityChart} />
-                          <div className="p-4">
-                            <SeverityChart severities={loaded.severities} />
-                          </div>
-                        </Card>
+                        <ChartCard title={t.overview.severityChart}>
+                          <SeverityChart severities={loaded.severities} />
+                        </ChartCard>
                         <ChannelTraffic series={loaded} />
                       </div>
                     </div>

@@ -10,26 +10,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
-	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
 	"github.com/yv1ing/SafeAgent/internal/pipeline"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
+	"github.com/yv1ing/SafeAgent/internal/service/control"
 	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 	"github.com/yv1ing/SafeAgent/internal/transport/console"
-	apigateway "github.com/yv1ing/SafeAgent/internal/transport/http"
+	"github.com/yv1ing/SafeAgent/internal/transport/gateway"
 )
 
-type dependencies struct {
-	database  *repository.Store
-	selector  *routing.Selector
-	settings  pipeline.Settings
-	diagnosis *diagnosis.Service
-}
-
-func assemble(configuration config.Config, database *repository.Store) (*gin.Engine, dependencies) {
+func assemble(configuration config.Config, database *repository.Store, providers *provider.Registry) (*gin.Engine, *diagnosis.Service) {
 	selector := routing.NewSelector(routing.NewBreakers(nil), routing.NewKeyPool(nil), routing.NewSticky(nil), configuration.MaxAttempts)
 	settings := pipeline.Settings{
 		MaxRequestBytes:  configuration.MaxRequestBytes,
@@ -40,24 +33,40 @@ func assemble(configuration config.Config, database *repository.Store) (*gin.Eng
 		ToolHoldBytes:    configuration.ToolHoldBytes,
 		MaxAttempts:      configuration.MaxAttempts,
 	}
-	providers := provider.NewRegistry(builtin.All()...)
+	controlService := control.New(database, providers, selector)
 	diagnosisService := diagnosis.New(database, diagnosis.Options{})
 	online := pipeline.New(database, database.Secret, pipeline.Options{Settings: settings, Providers: providers, Selector: selector, Limiter: limit.New(nil), Veto: diagnosisService})
-	services := serviceconsole.NewServices(database, selector, providers, diagnosisService)
+	calls := serviceconsole.NewCallService(database, diagnosisService)
+	trajectory := serviceconsole.NewTrajectoryService(database, diagnosisService)
+	services := console.Services{
+		Account:    serviceconsole.NewAccountService(database),
+		Project:    serviceconsole.NewProjectService(database),
+		Control:    controlService,
+		Key:        serviceconsole.NewKeyService(database),
+		Rule:       serviceconsole.NewRuleService(database),
+		Calls:      calls,
+		Stats:      serviceconsole.NewStatsService(database, selector),
+		Operations: serviceconsole.NewOperationService(database),
+		Analysis:   diagnosisService,
+		Policy:     serviceconsole.NewPolicyService(database),
+		Monitor:    serviceconsole.NewMonitorService(database),
+		Trajectory: trajectory,
+		Redaction:  serviceconsole.NewRedactionService(trajectory),
+	}
 
 	router := gin.New()
 	router.ContextWithFallback = true
 	_ = router.SetTrustedProxies(configuration.TrustedProxies)
 	router.Use(securityHeaders, recoverPanic)
-	apigateway.NewHandler(online, settings).Register(router)
+	gateway.NewHandler(online, settings).Register(router)
 	console.New(services, console.Options{SecureCookies: configuration.SecureCookies, PublicOrigin: configuration.PublicOrigin}).Register(router)
 	router.GET("/health", health(database))
-	return router, dependencies{database: database, selector: selector, settings: settings, diagnosis: diagnosisService}
+	return router, diagnosisService
 }
 
-func NewServer(configuration config.Config, database *repository.Store, frontend fs.FS) (*http.Server, *diagnosis.Service) {
+func NewServer(configuration config.Config, database *repository.Store, providers *provider.Registry, frontend fs.FS) (*http.Server, *diagnosis.Service) {
 	gin.SetMode(gin.ReleaseMode)
-	router, dependencies := assemble(configuration, database)
+	router, diagnosisService := assemble(configuration, database, providers)
 	serveFrontend(router, frontend)
 	return &http.Server{
 		Addr:              configuration.Listen,
@@ -66,7 +75,7 @@ func NewServer(configuration config.Config, database *repository.Store, frontend
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		MaxHeaderBytes:    64 << 10,
-	}, dependencies.diagnosis
+	}, diagnosisService
 }
 
 func health(database *repository.Store) gin.HandlerFunc {

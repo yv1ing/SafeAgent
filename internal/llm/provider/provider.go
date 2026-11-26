@@ -4,8 +4,11 @@
 package provider
 
 import (
+	"encoding/json"
+	"fmt"
 	neturl "net/url"
 	"strings"
+	"sync"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 )
@@ -89,9 +92,52 @@ func (spec ProviderSpec) Endpoint(format model.Format) (EndpointSpec, bool) {
 
 func (spec ProviderSpec) Formats() []model.Format {
 	formats := make([]model.Format, 0, len(spec.Endpoints))
-	for _, format := range []model.Format{model.Chat, model.Responses, model.Messages, model.Gemini} {
+	for _, format := range formatOrder {
 		if _, found := spec.Endpoints[format]; found {
 			formats = append(formats, format)
+		}
+	}
+	return formats
+}
+
+// KindGeneration, KindEmbedding and KindModeration are the model kinds a catalog entry can have. A
+// generation model may use any endpoint format the provider exposes; an embedding or moderation
+// model may only use a format whose endpoint declares the matching auxiliary path.
+const (
+	KindGeneration = "generation"
+	KindEmbedding  = "embedding"
+	KindModeration = "moderation"
+)
+
+var formatOrder = []model.Format{model.Chat, model.Responses, model.Messages, model.Gemini}
+
+// FormatsForKind derives the formats a catalog model of one kind can use on a provider. The order is
+// the canonical format order, so a stored listing is stable.
+func FormatsForKind(endpoints map[model.Format]EndpointSpec, kind string) []model.Format {
+	formats := make([]model.Format, 0, len(endpoints))
+	switch kind {
+	case KindGeneration:
+		for _, format := range formatOrder {
+			if _, found := endpoints[format]; found {
+				formats = append(formats, format)
+			}
+		}
+	case KindEmbedding, KindModeration:
+		wanted := AuxiliaryEmbeddings
+		if kind == KindModeration {
+			wanted = AuxiliaryModerations
+		}
+		for _, format := range formatOrder {
+			endpoint, found := endpoints[format]
+			if !found {
+				continue
+			}
+			for _, auxiliary := range endpoint.Auxiliary {
+				if auxiliary.Kind == wanted {
+					formats = append(formats, format)
+					break
+				}
+			}
 		}
 	}
 	return formats
@@ -176,31 +222,61 @@ func (endpoint EndpointSpec) ApplyAuth(headers map[string]string, secret string)
 	}
 }
 
+// Registry is the live provider catalog. The console replaces it after a provider mutation, so
+// readers take the read lock and see either the old or the new catalog, never a partial one.
 type Registry struct {
+	mu    sync.RWMutex
 	specs map[string]ProviderSpec
 	order []string
 }
 
 func NewRegistry(specs ...ProviderSpec) *Registry {
-	registry := &Registry{specs: make(map[string]ProviderSpec, len(specs))}
-	for _, spec := range specs {
-		registry.specs[spec.ID] = spec
-		registry.order = append(registry.order, spec.ID)
-	}
+	registry := &Registry{}
+	registry.Replace(specs)
 	return registry
 }
 
+func (registry *Registry) Replace(specs []ProviderSpec) {
+	replacement := make(map[string]ProviderSpec, len(specs))
+	order := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		replacement[spec.ID] = spec
+		order = append(order, spec.ID)
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.specs = replacement
+	registry.order = order
+}
+
 func (registry *Registry) Get(id string) (ProviderSpec, bool) {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
 	spec, found := registry.specs[id]
 	return spec, found
 }
 
-func (registry *Registry) List() []ProviderSpec {
-	specs := make([]ProviderSpec, 0, len(registry.order))
-	for _, id := range registry.order {
-		specs = append(specs, registry.specs[id])
+// MarshalEndpoints stores the endpoint catalog in the providers table. Capability, compatibility,
+// discovery and auxiliary declarations travel with their endpoint, so one column is the whole
+// provider definition apart from its identity and label.
+func MarshalEndpoints(spec ProviderSpec) ([]byte, error) {
+	payload, err := json.Marshal(spec.Endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("marshal provider %s endpoints: %w", spec.ID, err)
 	}
-	return specs
+	return payload, nil
+}
+
+// UnmarshalEndpoints rebuilds the endpoint catalog from its stored form.
+func UnmarshalEndpoints(payload []byte) (map[model.Format]EndpointSpec, error) {
+	endpoints := map[model.Format]EndpointSpec{}
+	if len(payload) == 0 {
+		return endpoints, nil
+	}
+	if err := json.Unmarshal(payload, &endpoints); err != nil {
+		return nil, fmt.Errorf("decode provider endpoints: %w", err)
+	}
+	return endpoints, nil
 }
 
 func firstNonEmpty(values ...string) string {

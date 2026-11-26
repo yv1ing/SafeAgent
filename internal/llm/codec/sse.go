@@ -120,10 +120,10 @@ func (frame Frame) Encode() ([]byte, error) {
 	if frame.Comment != "" && len(frame.Data) == 0 {
 		return []byte(": " + frame.Comment + "\n\n"), nil
 	}
-	return EncodeFrame(frame.Event, string(frame.Data))
+	return encodeFrame(frame.Event, string(frame.Data))
 }
 
-func EncodeFrame(event string, value any) ([]byte, error) {
+func encodeFrame(event string, value any) ([]byte, error) {
 	var payload []byte
 	if text, ok := value.(string); ok {
 		payload = []byte(text)

@@ -29,7 +29,7 @@ const (
 )
 
 const (
-	LabelPattern             = `^[A-Z][A-Z0-9_]{1,22}$`
+	labelPattern             = `^[A-Z][A-Z0-9_]{1,22}$`
 	MaximumRules             = 100
 	MaximumPattern           = 4096
 	maximumPlaceholderBytes  = 1 + 23 + 1 + longDigestLength + 1
@@ -41,7 +41,7 @@ const (
 var (
 	ErrImmutablePosition = errors.New("sensitive content appears in a position that cannot be redacted")
 
-	labelExpression = regexp.MustCompile(LabelPattern)
+	labelExpression = regexp.MustCompile(labelPattern)
 )
 
 type Rule struct {
@@ -142,23 +142,49 @@ func Validate(rules []Rule) error {
 	return err
 }
 
+// Hit is one masked value at one position. ValueID is the placeholder digest of the value, stable
+// for the whole project, so the console can deduplicate repeated hits and highlight occurrences
+// without re-running the rule set.
 type Hit struct {
-	Label  string `json:"label"`
-	Action Action `json:"action"`
-	Path   string `json:"path"`
-	Start  int    `json:"start"`
-	End    int    `json:"end"`
-	Secret bool   `json:"secret,omitempty"`
+	Label   string `json:"label"`
+	Action  Action `json:"action"`
+	Path    string `json:"path"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	ValueID string `json:"value_id,omitempty"`
+	Secret  bool   `json:"secret,omitempty"`
+}
+
+// Mark is one masked range in both representations of the same text. The shown range covers the
+// placeholder that replaced the value.
+type Mark struct {
+	Start       int    `json:"start"`
+	End         int    `json:"end"`
+	ShownStart  int    `json:"shown_start"`
+	ShownEnd    int    `json:"shown_end"`
+	Label       string `json:"label"`
+	Action      Action `json:"action"`
+	ValueID     string `json:"value_id"`
+	Placeholder string `json:"placeholder"`
+	Secret      bool   `json:"secret,omitempty"`
 }
 
 type Result struct {
 	Hits    []Hit
+	Marks   []Mark
 	Blocked bool
-	values  int
 }
 
+// Values is the number of distinct replaced values. A value repeated in one request counts once,
+// and an alert hit does not count because it leaves the content unchanged.
 func (result *Result) Values() int {
-	return result.values
+	seen := make(map[string]struct{}, len(result.Hits))
+	for _, hit := range result.Hits {
+		if hit.ValueID != "" && hit.Action == ActionReplace {
+			seen[hit.ValueID] = struct{}{}
+		}
+	}
+	return len(seen)
 }
 
 type Engine struct {
@@ -241,10 +267,17 @@ func (engine *Engine) NewScope() *Scope {
 	}
 }
 
+type occurrence struct {
+	start, end int
+	label      string
+	action     Action
+	secret     bool
+}
+
 type scanned struct {
-	hits    []Hit
-	spans   []span
-	blocked bool
+	occurrences []occurrence
+	spans       []span
+	blocked     bool
 }
 
 func (scope *Scope) scan(text, path string) scanned {
@@ -252,7 +285,7 @@ func (scope *Scope) scan(text, path string) scanned {
 	for _, rule := range scope.engine.rules {
 		for _, item := range rule.find(text) {
 			label := rule.rule.Label
-			found.hits = append(found.hits, Hit{Label: label, Action: rule.rule.Action, Path: path, Start: item.start, End: item.end, Secret: rule.detector.Secret})
+			found.occurrences = append(found.occurrences, occurrence{start: item.start, end: item.end, label: label, action: rule.rule.Action, secret: rule.detector.Secret})
 			switch rule.rule.Action {
 			case ActionBlock:
 				found.blocked = true
@@ -263,6 +296,12 @@ func (scope *Scope) scan(text, path string) scanned {
 	}
 	found.spans = mergeSpans(found.spans)
 	return found
+}
+
+// valueID is the identity of one masked value. Replace rules register the value before issuing a
+// placeholder; alert and block rules only need the digest.
+func (scope *Scope) valueID(label, value string) string {
+	return scope.engine.digest(label, value)
 }
 
 func mergeSpans(spans []span) []span {
@@ -312,16 +351,26 @@ func (scope *Scope) entry(label, value string, secret bool) *placeholderEntry {
 
 // An issued placeholder is never withdrawn: a value that already holds its short form keeps it even
 // if a later, unregistered value collides with it.
-func (scope *Scope) render(text string, spans []span) string {
+func (scope *Scope) render(text string, spans []span) (string, []Mark) {
 	var output strings.Builder
+	marks := make([]Mark, 0, len(spans))
 	position := 0
 	for _, item := range spans {
 		output.WriteString(text[position:item.start])
-		output.WriteString(scope.issue(scope.entry(item.label, text[item.start:item.end], item.secret)))
+		entry := scope.entry(item.label, text[item.start:item.end], item.secret)
+		token := scope.issue(entry)
+		shownStart := output.Len()
+		output.WriteString(token)
+		marks = append(marks, Mark{
+			Start: item.start, End: item.end,
+			ShownStart: shownStart, ShownEnd: shownStart + len(token),
+			Label: item.label, Action: ActionReplace, ValueID: entry.digest,
+			Placeholder: token, Secret: item.secret,
+		})
 		position = item.end
 	}
 	output.WriteString(text[position:])
-	return output.String()
+	return output.String(), marks
 }
 
 func (scope *Scope) issue(entry *placeholderEntry) string {
@@ -335,12 +384,6 @@ func (scope *Scope) issue(entry *placeholderEntry) string {
 	entry.token = "[" + entry.label + "_" + entry.digest[:length] + "]"
 	scope.byToken[entry.token] = entry
 	return entry.token
-}
-
-// Replace redacts one text on its own; ApplyRequest is the entry point for whole requests.
-func (scope *Scope) Replace(text, path string) (string, *Result) {
-	applier := &applier{scope: scope, result: &Result{}}
-	return applier.text(text, path), applier.result
 }
 
 func (scope *Scope) isPlaceholder(value string) bool {

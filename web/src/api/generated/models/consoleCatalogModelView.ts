@@ -12,6 +12,7 @@ export interface ConsoleCatalogModelView {
   cache_write_price?: number;
   created_at: string;
   currency: string;
+  deleted_at?: string;
   display_name?: string;
   enabled?: boolean;
   formats: string[];
@@ -20,6 +21,7 @@ export interface ConsoleCatalogModelView {
   kind: ConsoleCatalogModelViewKind;
   output_price?: number;
   provider_id: string;
+  updated_at: string;
   upstream_name: string;
   version: number;
 }

@@ -212,7 +212,10 @@ func InputHash(trace *observation.Trace) string {
 		Outcome        observation.Outcome   `json:"outcome"`
 		PreviousCallID string                `json:"previous_call_id,omitempty"`
 	}{trace.Task, trace.Principal, turns, tools, trace.Context, trace.Outcome, trace.PreviousCallID}
-	payload, _ := json.Marshal(canonical)
+	payload, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -236,8 +239,9 @@ type AnalysisDiff struct {
 	AfterCount  int             `json:"after_count"`
 }
 
-// CompareAnalyses aligns two analyses by fingerprint. A different input, catalogue or detector
-// version makes the comparison display-only: the counts are shown, the diff is not claimed.
+// CompareAnalyses aligns two analyses by fingerprint. A different input or a different adapter,
+// detector, catalogue or taxonomy version makes the comparison display-only: the counts are shown,
+// the diff is not claimed.
 func CompareAnalyses(before, after *Analysis) AnalysisDiff {
 	diff := AnalysisDiff{BeforeID: before.ID, AfterID: after.ID, BeforeCount: len(before.Findings), AfterCount: len(after.Findings)}
 	diff.Added, diff.Removed, diff.Changed = []Finding{}, []Finding{}, []FindingChange{}
@@ -248,10 +252,16 @@ func CompareAnalyses(before, after *Analysis) AnalysisDiff {
 	case before.CallID != after.CallID:
 		diff.Reason = "different_call"
 		return diff
+	case before.InputHash == "" || after.InputHash == "":
+		diff.Reason = "input_unavailable"
+		return diff
 	case before.InputHash != after.InputHash:
 		diff.Reason = "different_input"
 		return diff
-	case before.Versions.Detectors != after.Versions.Detectors || before.Versions.Catalogue != after.Versions.Catalogue:
+	case before.Versions.Adapter != after.Versions.Adapter ||
+		before.Versions.Detectors != after.Versions.Detectors ||
+		before.Versions.Catalogue != after.Versions.Catalogue ||
+		before.Versions.Taxonomy != after.Versions.Taxonomy:
 		diff.Reason = "different_versions"
 		return diff
 	}

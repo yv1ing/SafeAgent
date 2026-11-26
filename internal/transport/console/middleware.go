@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
-	service "github.com/yv1ing/SafeAgent/internal/service/console"
+	access "github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -23,8 +23,8 @@ type Identity struct {
 	Token string
 }
 
-func (identity *Identity) actor() service.Actor {
-	return service.Actor{UserID: identity.User.ID, Administrator: identity.User.Administrator}
+func (identity *Identity) actor() access.Actor {
+	return access.Actor{UserID: identity.User.ID, Administrator: identity.User.Administrator}
 }
 
 func (console *Console) authenticate(ctx *gin.Context) (*Identity, error) {

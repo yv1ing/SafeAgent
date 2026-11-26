@@ -287,11 +287,14 @@ func (encoder *streamEncoder) stopPart(event model.Event) ([]codec.Frame, []mode
 	return append(frames, encoder.frame("content_block_stop", map[string]any{"index": part.block})...), losses, nil
 }
 
-func (encoder *streamEncoder) signature(state *encodeItem, part *encodePart) string {
-	if state.reasoning == nil || !codec.SignatureCoversText(state.reasoning.Signature, part.kind, part.text.String()) {
-		return ""
+func (encoder *streamEncoder) signature(state *encodeItem, part *encodePart) (string, []model.Loss) {
+	if state.reasoning == nil || state.reasoning.Signature == nil {
+		return "", nil
 	}
-	return encoder.peer.WireSignature(state.reasoning.Signature, part.text.String())
+	if !codec.SignatureCoversText(state.reasoning.Signature, part.kind, part.text.String()) {
+		return "", []model.Loss{{Path: "signature", Code: model.LossSignatureStripped, Class: model.LossDegraded, Detail: "the reasoning signature was issued for different text; the text is retained without a signature", To: model.Messages}}
+	}
+	return encoder.peer.WireSignature(state.reasoning.Signature, part.text.String()), nil
 }
 
 func (encoder *streamEncoder) stopItem(event model.Event) ([]codec.Frame, []model.Loss, error) {
@@ -317,7 +320,9 @@ func (encoder *streamEncoder) stopItem(event model.Event) ([]codec.Frame, []mode
 		block := encoder.blocks
 		encoder.blocks++
 		frames = append(frames, encoder.frame("content_block_start", map[string]any{"index": block, "content_block": map[string]any{"type": "thinking", "thinking": ""}})...)
-		if signature := encoder.signature(state, &encodePart{kind: model.PartReasoningText}); signature != "" {
+		signature, nested := encoder.signature(state, &encodePart{kind: model.PartReasoningText})
+		losses = append(losses, nested...)
+		if signature != "" {
 			frames = append(frames, encoder.frame("content_block_delta", map[string]any{"index": block, "delta": map[string]any{"type": "signature_delta", "signature": signature}})...)
 		}
 		frames = append(frames, encoder.frame("content_block_stop", map[string]any{"index": block})...)
@@ -326,7 +331,9 @@ func (encoder *streamEncoder) stopItem(event model.Event) ([]codec.Frame, []mode
 		if part.kind != model.PartReasoningText && part.kind != model.PartReasoningSummary {
 			continue
 		}
-		if signature := encoder.signature(state, part); signature != "" {
+		signature, nested := encoder.signature(state, part)
+		losses = append(losses, nested...)
+		if signature != "" {
 			frames = append(frames, encoder.frame("content_block_delta", map[string]any{"index": part.block, "delta": map[string]any{"type": "signature_delta", "signature": signature}})...)
 		}
 		if !part.blockClosed {

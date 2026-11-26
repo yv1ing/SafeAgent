@@ -24,12 +24,28 @@ func (scope *Scope) ApplyRequest(request *model.Request) (*Result, error) {
 	if err := applier.request(request); err != nil {
 		return nil, err
 	}
+	applier.result.Marks = applier.marks
 	return applier.result, nil
+}
+
+// Replace redacts one text on its own; ApplyRequest is the entry point for whole requests. The text
+// is registered in a dry pass before any placeholder is issued, exactly like ApplyRequest, so both
+// paths choose the same long or short form for colliding digests.
+func (scope *Scope) Replace(text, path string) (string, *Result) {
+	if scope.engine.Empty() {
+		return text, &Result{}
+	}
+	(&applier{scope: scope, result: &Result{}, dry: true}).text(text, path)
+	applier := &applier{scope: scope, result: &Result{}}
+	shown := applier.text(text, path)
+	applier.result.Marks = applier.marks
+	return shown, applier.result
 }
 
 type applier struct {
 	scope  *Scope
 	result *Result
+	marks  []Mark
 	dry    bool
 }
 
@@ -45,13 +61,25 @@ func (applier *applier) text(text, path string) string {
 		return text
 	}
 	if found.blocked {
-		applier.result.Hits = append(applier.result.Hits, found.hits...)
+		applier.recordHits(text, path, found.occurrences)
 		applier.result.Blocked = true
 		return ""
 	}
-	applier.result.Hits = append(applier.result.Hits, found.hits...)
-	applier.result.values += len(found.spans)
-	return applier.scope.render(text, found.spans)
+	shown, marks := applier.scope.render(text, found.spans)
+	applier.marks = append(applier.marks, marks...)
+	applier.recordHits(text, path, found.occurrences)
+	return shown
+}
+
+func (applier *applier) recordHits(text, path string, occurrences []occurrence) {
+	for _, item := range occurrences {
+		applier.result.Hits = append(applier.result.Hits, Hit{
+			Label: item.label, Action: item.action, Path: path,
+			Start: item.start, End: item.end,
+			ValueID: applier.scope.valueID(item.label, text[item.start:item.end]),
+			Secret:  item.secret,
+		})
+	}
 }
 
 func (applier *applier) immutable(value string) error {

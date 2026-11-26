@@ -3,50 +3,23 @@ import { Activity, AlertTriangle, Gauge, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { GetMonitorWindow } from '../../api/generated/models';
 import { useGetMonitor } from '../../api/generated/monitor/monitor';
-import { Page } from '../../components/layout/Page';
-import { usePollingInterval } from '../../hooks/usePolling';
-import { PageHeader } from '../../components/layout/PageHeader';
+import { ChartCard } from '../../components/charts/ChartCard';
+import { TimeChart } from '../../components/charts/TimeChart';
+import { DataTable } from '../../components/data/DataTable';
+import { StatTile } from '../../components/data/StatTile';
 import { QueryState } from '../../components/feedback/QueryState';
 import { Segmented } from '../../components/feedback/Segmented';
+import { Page } from '../../components/layout/Page';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
 import { Skeleton } from '../../components/ui/skeleton';
-import { ChartCard } from '../overview/components/ChartCard';
-import { TimeChart } from '../overview/components/TimeChart';
-import { formatBucket, formatNumber } from '../../lib/format';
 import { interpolate, useLocale } from '../../i18n';
+import { formatBucket, formatDate, formatNumber } from '../../lib/format';
+import { usePollingInterval } from '../../hooks/usePolling';
 
 const windows: GetMonitorWindow[] = ['24h', '7d', '30d'];
-
-function Tile({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  icon: typeof Activity;
-  tone?: 'danger';
-}) {
-  return (
-    <Card className="flex items-start gap-3 p-3.5">
-      <span
-        className={`grid size-8 place-items-center rounded-md ${tone === 'danger' ? 'bg-danger-soft text-danger' : 'bg-accent-soft text-accent'}`}
-      >
-        <Icon className="size-4" aria-hidden />
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs text-muted">{label}</p>
-        <p className="num text-xl font-semibold tracking-tight">{value}</p>
-        {hint && <p className="text-[11px] text-faint">{hint}</p>}
-      </div>
-    </Card>
-  );
-}
 
 export function MonitorPage() {
   const { t, locale } = useLocale();
@@ -95,40 +68,49 @@ export function MonitorPage() {
           return (
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <Tile
-                  label={t.monitor.calls}
-                  value={formatNumber(snapshot.totals.calls)}
-                  icon={Activity}
-                />
-                <Tile
-                  label={t.monitor.failures}
-                  value={formatNumber(snapshot.totals.failures)}
-                  icon={AlertTriangle}
-                  tone="danger"
-                />
-                <Tile
-                  label={t.monitor.blocked}
-                  value={formatNumber(snapshot.totals.blocked)}
-                  icon={ShieldAlert}
-                />
-                <Tile
-                  label={t.monitor.highFindings}
-                  value={formatNumber(snapshot.totals.high_findings)}
-                  icon={Gauge}
-                  tone="danger"
-                  hint={interpolate(
-                    snapshot.totals.projects === 1
-                      ? t.monitor.projectCountOne
-                      : t.monitor.projectCount,
-                    { count: formatNumber(snapshot.totals.projects) },
-                  )}
-                />
+                <Card>
+                  <StatTile
+                    label={t.monitor.calls}
+                    value={formatNumber(snapshot.totals.calls)}
+                    icon={Activity}
+                  />
+                </Card>
+                <Card>
+                  <StatTile
+                    label={t.monitor.failures}
+                    value={formatNumber(snapshot.totals.failures)}
+                    icon={AlertTriangle}
+                    alert
+                  />
+                </Card>
+                <Card>
+                  <StatTile
+                    label={t.monitor.blocked}
+                    value={formatNumber(snapshot.totals.blocked)}
+                    icon={ShieldAlert}
+                  />
+                </Card>
+                <Card>
+                  <StatTile
+                    label={t.monitor.highFindings}
+                    value={formatNumber(snapshot.totals.high_findings)}
+                    icon={Gauge}
+                    alert
+                    detail={interpolate(
+                      snapshot.totals.projects === 1
+                        ? t.monitor.projectCountOne
+                        : t.monitor.projectCount,
+                      { count: formatNumber(snapshot.totals.projects) },
+                    )}
+                  />
+                </Card>
               </div>
+              <p className="text-[11px] text-faint">{t.monitor.mainLaneNote}</p>
               <ChartCard
                 title={t.monitor.traffic}
                 legend={series}
                 table={{
-                  columns: [t.overview.time, ...series.map((entry) => entry.label)],
+                  columns: [t.table.time, ...series.map((entry) => entry.label)],
                   rows: rows.map((row) => [row.time, row.requests, row.errors, row.blocked]),
                 }}
               >
@@ -141,88 +123,91 @@ export function MonitorPage() {
               <div className="grid items-start gap-4 xl:grid-cols-2">
                 <Card>
                   <CardHeader title={t.monitor.projectsTable} />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b text-left text-xs text-muted">
-                          <th className="px-3 py-2 font-medium">{t.monitor.name}</th>
-                          <th className="px-3 py-2 text-right font-medium">{t.monitor.calls}</th>
-                          <th className="px-3 py-2 text-right font-medium">{t.monitor.blocked}</th>
-                          <th className="px-3 py-2 text-right font-medium">
-                            {t.monitor.highFindings}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {snapshot.projects.map((project) => (
-                          <tr key={project.project_id} className="border-b last:border-0">
-                            <td className="px-3 py-2">
-                              <Link
-                                to="/projects/$projectId/risk"
-                                params={{ projectId: project.project_id }}
-                                className="font-medium hover:text-accent"
-                              >
-                                {project.name}
-                              </Link>
-                            </td>
-                            <td className="num px-3 py-2 text-right">
-                              {formatNumber(project.calls)}
-                            </td>
-                            <td className="num px-3 py-2 text-right">
-                              {formatNumber(project.blocked)}
-                            </td>
-                            <td className="num px-3 py-2 text-right text-danger">
-                              {formatNumber(project.high_findings)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTable
+                    rows={snapshot.projects}
+                    rowKey={(project) => project.project_id}
+                    empty={<p className="px-3 py-6 text-sm text-muted">{t.monitor.noTraffic}</p>}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: t.monitor.name,
+                        cell: (project) => (
+                          <Link
+                            to="/projects/$projectId/risk"
+                            params={{ projectId: project.project_id }}
+                            className="font-medium hover:text-accent"
+                          >
+                            {project.name}
+                          </Link>
+                        ),
+                      },
+                      {
+                        key: 'calls',
+                        header: t.monitor.calls,
+                        align: 'right',
+                        className: 'num',
+                        cell: (project) => formatNumber(project.calls),
+                      },
+                      {
+                        key: 'blocked',
+                        header: t.monitor.blocked,
+                        align: 'right',
+                        className: 'num',
+                        cell: (project) => formatNumber(project.blocked),
+                      },
+                      {
+                        key: 'high',
+                        header: t.monitor.highFindings,
+                        align: 'right',
+                        className: 'num text-danger',
+                        cell: (project) => formatNumber(project.high_findings),
+                      },
+                    ]}
+                  />
                 </Card>
                 <Card>
                   <CardHeader title={t.monitor.agentsTable} />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b text-left text-xs text-muted">
-                          <th className="px-3 py-2 font-medium">{t.monitor.agent}</th>
-                          <th className="px-3 py-2 text-right font-medium">{t.monitor.calls}</th>
-                          <th className="px-3 py-2 text-right font-medium">
-                            {t.monitor.highFindings}
-                          </th>
-                          <th className="px-3 py-2 text-right font-medium">{t.monitor.lastSeen}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {snapshot.agents.map((agent) => (
-                          <tr
-                            key={`${agent.project_id}:${agent.agent_key_id}`}
-                            className="border-b last:border-0"
+                  <DataTable
+                    rows={snapshot.agents}
+                    rowKey={(agent) => `${agent.project_id}:${agent.agent_key_id}`}
+                    empty={<p className="px-3 py-6 text-sm text-muted">{t.monitor.noTraffic}</p>}
+                    columns={[
+                      {
+                        key: 'agent',
+                        header: t.monitor.agent,
+                        cell: (agent) => (
+                          <Link
+                            to="/projects/$projectId/risk"
+                            params={{ projectId: agent.project_id }}
+                            className="font-mono text-xs hover:text-accent"
                           >
-                            <td className="px-3 py-2">
-                              <Link
-                                to="/projects/$projectId/risk"
-                                params={{ projectId: agent.project_id }}
-                                className="font-mono text-xs hover:text-accent"
-                              >
-                                {agent.label}
-                              </Link>
-                            </td>
-                            <td className="num px-3 py-2 text-right">
-                              {formatNumber(agent.calls)}
-                            </td>
-                            <td className="num px-3 py-2 text-right text-danger">
-                              {formatNumber(agent.high_findings)}
-                            </td>
-                            <td className="px-3 py-2 text-right text-xs text-faint">
-                              {new Date(agent.last_at).toLocaleString(locale)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                            {agent.label}
+                          </Link>
+                        ),
+                      },
+                      {
+                        key: 'calls',
+                        header: t.monitor.calls,
+                        align: 'right',
+                        className: 'num',
+                        cell: (agent) => formatNumber(agent.calls),
+                      },
+                      {
+                        key: 'high',
+                        header: t.monitor.highFindings,
+                        align: 'right',
+                        className: 'num text-danger',
+                        cell: (agent) => formatNumber(agent.high_findings),
+                      },
+                      {
+                        key: 'last',
+                        header: t.monitor.lastSeen,
+                        align: 'right',
+                        className: 'text-xs text-faint',
+                        cell: (agent) => formatDate(agent.last_at, locale),
+                      },
+                    ]}
+                  />
                 </Card>
               </div>
               <Card>
@@ -237,16 +222,18 @@ export function MonitorPage() {
                         className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
                       >
                         <Link
-                          to="/projects/$projectId/calls"
-                          params={{ projectId: call.project_id }}
-                          search={{ call: call.call_id }}
+                          to="/projects/$projectId/conversations/node/$nodeId"
+                          params={{
+                            projectId: call.project_id,
+                            nodeId: call.node_id || `call:${call.call_id}`,
+                          }}
                           className="font-mono text-xs text-accent hover:underline"
                         >
                           {call.call_id}
                         </Link>
                         <span className="text-muted">{call.model}</span>
                         <span className="ml-auto text-xs text-faint">
-                          {new Date(call.created_at).toLocaleString(locale)}
+                          {formatDate(call.created_at, locale)}
                         </span>
                       </li>
                     ))}

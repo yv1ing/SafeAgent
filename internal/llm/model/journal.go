@@ -142,15 +142,6 @@ func (journal *Journal) Items() []Item {
 	return items
 }
 
-func (journal *Journal) Item(index int) *Item {
-	state := journal.items[index]
-	if state == nil {
-		return nil
-	}
-	item := state.item.Clone()
-	return &item
-}
-
 // Remove drops an item that was folded while it streamed but never released to the client. A gate
 // refusal uses it so the stored response describes what the client saw, not what was withheld.
 func (journal *Journal) Remove(index int) {
@@ -168,8 +159,6 @@ func (journal *Journal) Remove(index int) {
 }
 
 func (journal *Journal) SetMeta(meta ResponseMeta) { journal.meta = meta }
-
-func (journal *Journal) Meta() ResponseMeta { return journal.meta }
 
 func (journal *Journal) Usage() *Usage { return journal.usage }
 

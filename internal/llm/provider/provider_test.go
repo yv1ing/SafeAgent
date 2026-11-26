@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
@@ -176,5 +177,54 @@ func TestParseModelsShapes(t *testing.T) {
 	gemini, err := provider.ParseModels(provider.DiscoveryGemini, []byte(`{"models":[{"name":"models/gemini-pro"}]}`))
 	if err != nil || len(gemini) != 1 || gemini[0] != "gemini-pro" {
 		t.Fatalf("gemini shape: %v %v", gemini, err)
+	}
+}
+
+func spec(t *testing.T, id string) provider.ProviderSpec {
+	t.Helper()
+	for _, candidate := range builtin.All() {
+		if candidate.ID == id {
+			return candidate
+		}
+	}
+	t.Fatalf("provider %s is not in the builtin catalog", id)
+	return provider.ProviderSpec{}
+}
+
+func formatStrings(formats []model.Format) []string {
+	names := make([]string, 0, len(formats))
+	for _, format := range formats {
+		names = append(names, string(format))
+	}
+	return names
+}
+
+func TestFormatsForKindGenerationFollowsCanonicalOrder(t *testing.T) {
+	openai := spec(t, "openai")
+	formats := provider.FormatsForKind(openai.Endpoints, provider.KindGeneration)
+	if !slices.Equal(formatStrings(formats), []string{"openai_chat", "openai_responses"}) {
+		t.Fatalf("generation formats = %v", formatStrings(formats))
+	}
+}
+
+func TestFormatsForKindAuxiliaryKindsNeedAnAuxiliaryEndpoint(t *testing.T) {
+	openai := spec(t, "openai")
+	embedding := provider.FormatsForKind(openai.Endpoints, provider.KindEmbedding)
+	if !slices.Equal(formatStrings(embedding), []string{"openai_chat"}) {
+		t.Fatalf("embedding formats = %v", formatStrings(embedding))
+	}
+	moderation := provider.FormatsForKind(openai.Endpoints, provider.KindModeration)
+	if !slices.Equal(formatStrings(moderation), []string{"openai_chat"}) {
+		t.Fatalf("moderation formats = %v", formatStrings(moderation))
+	}
+	responses := provider.FormatsForKind(openai.Endpoints, provider.KindEmbedding)
+	if slices.Contains(formatStrings(responses), "openai_responses") {
+		t.Fatalf("a Responses endpoint declares no embeddings path: %v", formatStrings(responses))
+	}
+}
+
+func TestFormatsForKindUnknownKindHasNoFormats(t *testing.T) {
+	if formats := provider.FormatsForKind(spec(t, "openai").Endpoints, "video"); len(formats) != 0 {
+		t.Fatalf("unknown kind formats = %v", formatStrings(formats))
 	}
 }

@@ -13,7 +13,6 @@ export interface ConsoleUpdateCatalogModelInput {
   currency?: string;
   display_name?: string;
   enabled?: boolean;
-  formats: string[];
   input_price?: number;
   kind: ConsoleUpdateCatalogModelInputKind;
   output_price?: number;

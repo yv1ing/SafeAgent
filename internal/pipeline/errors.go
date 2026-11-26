@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
@@ -39,6 +40,14 @@ func sentence(value string) string {
 		return value
 	}
 	return value + "."
+}
+
+func unavailableChannel() *model.Error {
+	return failure("upstream_failure", model.ClassNoChannel, "no_available_channel", "No channel is available for this model.", http.StatusServiceUnavailable)
+}
+
+func quotaExceeded() *model.Error {
+	return failure("rate_limited", model.ClassRateLimit, "daily_quota_exceeded", "The daily token quota has been exhausted.", http.StatusTooManyRequests)
 }
 
 func cancelled() *model.Error {
@@ -223,7 +232,14 @@ func truncate(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
-	return value[:limit] + "…"
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		return "…"
+	}
+	return value[:cut] + "…"
 }
 
 func retryAfter(value string) time.Duration {

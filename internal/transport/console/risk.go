@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	access "github.com/yv1ing/SafeAgent/internal/service/access"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
 	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
 )
@@ -39,6 +40,7 @@ type RiskAgentView struct {
 
 type RiskCallView struct {
 	CallID     string `json:"call_id" required:"true"`
+	NodeID     string `json:"node_id" required:"true" description:"Trajectory call node; the inspector opens it when available"`
 	AgentKeyID string `json:"agent_key_id" required:"true"`
 	Model      string `json:"model" required:"true"`
 	Severity   string `json:"severity" required:"true"`
@@ -94,7 +96,7 @@ func riskView(report diagnosis.RiskReport) RiskView {
 		view.Agents = append(view.Agents, RiskAgentView{AgentKeyID: agent.AgentKeyID, Label: agent.Label, Findings: agent.Findings, High: agent.High, Flows: agent.Flows, LastAt: stamp(agent.LastAt)})
 	}
 	for _, call := range report.HighRecent {
-		view.HighRecent = append(view.HighRecent, RiskCallView{CallID: call.CallID, AgentKeyID: call.AgentKeyID, Model: call.Model, Severity: call.Severity, State: call.State, CreatedAt: stamp(call.CreatedAt)})
+		view.HighRecent = append(view.HighRecent, RiskCallView{CallID: call.CallID, NodeID: service.CallNodeID(call.CallID), AgentKeyID: call.AgentKeyID, Model: call.Model, Severity: call.Severity, State: call.State, CreatedAt: stamp(call.CreatedAt)})
 	}
 	return view
 }
@@ -108,30 +110,24 @@ func windowSince(window string) (time.Time, error) {
 	case "30d":
 		duration = 30 * 24 * time.Hour
 	default:
-		return time.Time{}, service.Invalid("invalid_window")
+		return time.Time{}, access.Invalid("invalid_window")
 	}
 	return time.Now().UTC().Add(-duration), nil
 }
 
 func (console *Console) registerRisk() {
 	console.add("GET", "/projects/{project_id}/risk", "getProjectRisk", riskInput{}, RiskView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		since, err := windowSince(ctx.Query("window"))
 		if err != nil {
 			return nil, err
 		}
-		report, err := console.Analysis.Risk(ctx.Request.Context(), ctx.Param("project_id"), since)
+		report, err := console.Analysis.Risk(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), since)
 		if err != nil {
 			return nil, analysisError(err)
 		}
 		return riskView(report), nil
 	})
 	console.add("GET", "/projects/{project_id}/flows", "listProjectFlows", flowsInput{}, FlowPage{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		if ctx.Query("agent_key_id") == "" {
 			return nil, errInvalidRequest
 		}
@@ -139,15 +135,16 @@ func (console *Console) registerRisk() {
 		if err != nil {
 			return nil, err
 		}
-		flows, err := console.Analysis.FlowsOfAgent(ctx.Request.Context(), ctx.Param("project_id"), ctx.Query("agent_key_id"), since)
+		flows, err := console.Analysis.FlowsOfAgent(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), ctx.Query("agent_key_id"), since)
 		if err != nil {
 			return nil, analysisError(err)
 		}
 		items := make([]FlowView, 0, len(flows))
 		for index := range flows {
 			items = append(items, FlowView{
-				SourceTurn: flows[index].SourceTurn, SourceItem: flows[index].SourceItem,
-				SourceOrigin: flows[index].SourceOrigin, SourcePath: flows[index].SourcePath,
+				SourceCallID: flows[index].SourceCallID, SourceSection: flows[index].SourceSection,
+				SourceOrdinal: flows[index].SourceOrdinal,
+				SourceOrigin:  flows[index].SourceOrigin, SourcePath: flows[index].SourcePath,
 				SinkToolCallID: flows[index].SinkToolCallID, Sink: flows[index].Sink,
 				Relation: flows[index].Relation, ContentHash: flows[index].ContentHash,
 				Confidence: flows[index].Confidence,
@@ -160,9 +157,9 @@ func (console *Console) registerRisk() {
 func analysisError(err error) error {
 	switch {
 	case errors.Is(err, diagnosis.ErrScopeTooLarge):
-		return service.Invalid("scope_too_large")
+		return access.Invalid("scope_too_large")
 	case errors.Is(err, diagnosis.ErrCallRunning):
-		return service.Conflict("call_running")
+		return access.Conflict("call_running")
 	}
-	return service.Translate(err)
+	return access.Translate(err)
 }

@@ -2,70 +2,58 @@ import { Link } from '@tanstack/react-router';
 import { PanelLeftClose, PanelLeftOpen, ShieldCheck, X } from 'lucide-react';
 import { useLocale } from '../i18n';
 import { cn } from '../lib/cn';
+import { Badge } from '../components/ui/badge';
 import { Tooltip } from '../components/ui/tooltip';
 import { useCurrentProjectId, useCurrentUser } from './context';
-import {
-  administrationNav,
-  projectNav,
-  workspaceNav,
-  type GlobalNavItem,
-  type ProjectNavItem,
-} from './navigation';
+import { globalGroups, globalItems, projectGroups, visibleItems, type NavItem } from './navigation';
 
 const navItemClass =
   'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted transition-colors hover:bg-sunken hover:text-ink aria-[current=page]:bg-accent-soft aria-[current=page]:font-medium aria-[current=page]:text-accent';
 
-function ProjectLink({
+function NavLink({
   item,
   projectId,
   collapsed,
   onNavigate,
 }: {
-  item: ProjectNavItem;
-  projectId: string;
+  item: NavItem;
+  projectId?: string;
   collapsed: boolean;
   onNavigate?: () => void;
 }) {
   const { t } = useLocale();
   const label = item.label(t);
-  const link = (
-    <Link
-      to={item.to}
-      params={{ projectId }}
-      onClick={onNavigate}
-      aria-label={collapsed ? label : undefined}
-      className={navItemClass}
-    >
+  const badge = item.badge?.(t);
+  const content = (
+    <>
       <item.icon aria-hidden className="size-4 shrink-0" />
       <span className={cn('truncate', collapsed && 'sr-only')}>{label}</span>
-    </Link>
+      {badge && <Badge className={cn('ml-auto', collapsed && 'sr-only')}>{badge}</Badge>}
+    </>
   );
-  return collapsed ? <Tooltip label={label}>{link}</Tooltip> : link;
-}
-
-function GlobalLink({
-  item,
-  collapsed,
-  onNavigate,
-}: {
-  item: GlobalNavItem;
-  collapsed: boolean;
-  onNavigate?: () => void;
-}) {
-  const { t } = useLocale();
-  const label = item.label(t);
-  const link = (
-    <Link
-      to={item.to}
-      activeOptions={{ exact: item.key === 'projects' }}
-      onClick={onNavigate}
-      aria-label={collapsed ? label : undefined}
-      className={navItemClass}
-    >
-      <item.icon aria-hidden className="size-4 shrink-0" />
-      <span className={cn('truncate', collapsed && 'sr-only')}>{label}</span>
-    </Link>
-  );
+  const link =
+    item.scope === 'project' && projectId ? (
+      <Link
+        to={item.to}
+        params={{ projectId }}
+        onClick={onNavigate}
+        aria-label={collapsed ? label : undefined}
+        className={navItemClass}
+      >
+        {content}
+      </Link>
+    ) : item.scope === 'global' ? (
+      <Link
+        to={item.to}
+        activeOptions={{ exact: item.exact }}
+        onClick={onNavigate}
+        aria-label={collapsed ? label : undefined}
+        className={navItemClass}
+      >
+        {content}
+      </Link>
+    ) : null;
+  if (!link) return null;
   return collapsed ? <Tooltip label={label}>{link}</Tooltip> : link;
 }
 
@@ -97,7 +85,6 @@ export function Sidebar({
   const user = useCurrentUser();
   const projectId = useCurrentProjectId();
   const inProject = Boolean(projectId);
-  const administration = administrationNav.filter((item) => !item.admin || user.administrator);
   const compact = collapsed && !mobile;
 
   return (
@@ -134,60 +121,44 @@ export function Sidebar({
       <nav aria-label={t.app.navigation} className="scroll-thin flex-1 overflow-y-auto px-2 pb-4">
         {inProject ? (
           <>
-            {projectNav.map((group) => (
-              <div key={group.key} className="flex flex-col gap-0.5">
-                <SectionTitle collapsed={compact}>{group.title(t)}</SectionTitle>
-                {group.items.map((item) => (
-                  <ProjectLink
-                    key={item.section}
-                    item={item}
-                    projectId={projectId!}
-                    collapsed={compact}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              </div>
-            ))}
+            {projectGroups.map((group) => {
+              const items = visibleItems(group.items, user.administrator);
+              if (items.length === 0) return null;
+              return (
+                <div key={group.key} className="flex flex-col gap-0.5">
+                  <SectionTitle collapsed={compact}>{group.title(t)}</SectionTitle>
+                  {items.map((item) => (
+                    <NavLink
+                      key={item.key}
+                      item={item}
+                      projectId={projectId}
+                      collapsed={compact}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                </div>
+              );
+            })}
             <div className="mt-3 flex flex-col gap-0.5 border-t pt-1">
               <SectionTitle collapsed={compact}>{t.app.consoleGroup}</SectionTitle>
-              {workspaceNav.map((item) => (
-                <GlobalLink
-                  key={item.key}
-                  item={item}
-                  collapsed={compact}
-                  onNavigate={onNavigate}
-                />
-              ))}
-              {administration.map((item) => (
-                <GlobalLink
-                  key={item.key}
-                  item={item}
-                  collapsed={compact}
-                  onNavigate={onNavigate}
-                />
+              {visibleItems(globalItems, user.administrator).map((item) => (
+                <NavLink key={item.key} item={item} collapsed={compact} onNavigate={onNavigate} />
               ))}
             </div>
           </>
         ) : (
-          <>
-            <SectionTitle collapsed={compact}>{t.app.workspaceGroup}</SectionTitle>
-            {workspaceNav.map((item) => (
-              <GlobalLink key={item.key} item={item} collapsed={compact} onNavigate={onNavigate} />
-            ))}
-            {administration.length > 0 && (
-              <div className="flex flex-col gap-0.5">
-                <SectionTitle collapsed={compact}>{t.app.adminGroup}</SectionTitle>
-                {administration.map((item) => (
-                  <GlobalLink
-                    key={item.key}
-                    item={item}
-                    collapsed={compact}
-                    onNavigate={onNavigate}
-                  />
+          globalGroups.map((group) => {
+            const items = visibleItems(group.items, user.administrator);
+            if (items.length === 0) return null;
+            return (
+              <div key={group.key} className="flex flex-col gap-0.5">
+                <SectionTitle collapsed={compact}>{group.title(t)}</SectionTitle>
+                {items.map((item) => (
+                  <NavLink key={item.key} item={item} collapsed={compact} onNavigate={onNavigate} />
                 ))}
               </div>
-            )}
-          </>
+            );
+          })
         )}
       </nav>
 

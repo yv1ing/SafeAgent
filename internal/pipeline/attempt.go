@@ -11,7 +11,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/stream"
 	"github.com/yv1ing/SafeAgent/internal/observation"
-	"github.com/yv1ing/SafeAgent/internal/observe"
+	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
@@ -36,7 +36,7 @@ func (state *call) run() {
 		}
 		if state.ctx.Err() != nil {
 			state.pipeline.selector.RecordNeutral(admission)
-			state.finish(cancelled(), "cancelled")
+			state.finish(cancelled())
 			return
 		}
 		outcome := state.try(channel, admission)
@@ -51,15 +51,7 @@ func (state *call) run() {
 	if last == nil {
 		last = failure("upstream_failure", model.ClassNoChannel, "no_available_channel", "No channel could serve the request.", http.StatusServiceUnavailable)
 	}
-	if last.Class == model.ClassPolicy {
-		state.finish(last, "blocked")
-		return
-	}
-	if last.Class == model.ClassCancelled {
-		state.finish(last, "cancelled")
-		return
-	}
-	state.finish(last, "failed")
+	state.finish(last)
 }
 
 type outcome struct {
@@ -77,7 +69,7 @@ func (state *call) try(channel *entity.Channel, admission routing.Admission) out
 		}
 		if state.ctx.Err() != nil {
 			selector.RecordNeutral(admission)
-			state.finish(cancelled(), "cancelled")
+			state.finish(cancelled())
 			return outcome{done: true}
 		}
 		state.attempts++
@@ -144,7 +136,7 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	}
 	if failure != nil {
 		if failure.Class == model.ClassCancelled {
-			state.finish(failure, "cancelled")
+			state.finish(failure)
 			return attemptEnded, failure
 		}
 		return attemptFailed, failure
@@ -153,7 +145,7 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	record := state.recorder.Call()
 	record.ChannelID, record.ModelID, record.UpstreamModel = channel.ID, candidate.Target.ModelID, candidate.Target.UpstreamModel
 	record.Currency = upstream.endpoint.model.Currency
-	record.EndpointFormat = string(upstream.endpoint.format)
+	record.UpstreamFormat = string(upstream.endpoint.format)
 	if state.stream {
 		state.applyLossHeaders(prepared.losses)
 		return state.streamResponse(ctx, upstream, candidate)
@@ -179,7 +171,10 @@ func (state *call) retryWithoutField(ctx context.Context, candidate routing.Cand
 	removed := model.Loss{Path: field, Code: model.LossCapabilityRemoved, Class: model.LossDegraded, Detail: "the upstream rejected this field; it is now omitted for this channel", To: endpoint.format}
 	state.failureLedger.Losses = append(state.failureLedger.Losses, removed)
 	persist, cancel := persistenceContext()
-	if err := state.pipeline.repository.AddCapabilityOverride(persist, endpoint.channel.ID, endpoint.model.ID, string(endpoint.format), field, "rejected by the upstream"); err != nil {
+	if err := state.pipeline.repository.AddCapabilityOverride(persist, entity.CapabilityOverride{
+		ChannelID: endpoint.channel.ID, ModelID: endpoint.model.ID, Format: string(endpoint.format),
+		Field: field, Reason: "rejected by the upstream",
+	}); err != nil {
 		state.pipeline.logger.Warn("capability override could not be stored", "channel", endpoint.channel.ID, "field", field, "error", err)
 	}
 	cancel()
@@ -243,7 +238,7 @@ func (state *call) streamResponse(ctx context.Context, upstream *upstreamCall, c
 }
 
 func (state *call) rawResponseSafe() bool {
-	return len(state.hits) == 0 && !state.unsealed
+	return state.redactedOccurrences == 0 && !state.hasSignatures
 }
 
 func (state *call) clientPeer() codec.Peer {
@@ -299,11 +294,11 @@ func (state *call) endSessionFailure(session *stream.Session, upstream *upstream
 			}
 			session.Close()
 			state.recordBlocked(auditevent.Decision{Action: "block", Blocked: true, Reason: failure.Code})
-			state.finish(failure, "blocked")
+			state.finish(failure)
 			return attemptEnded, failure
 		case failure.Class == model.ClassCancelled:
 			session.Close()
-			state.finish(failure, "cancelled")
+			state.finish(failure)
 			return attemptEnded, failure
 		}
 		session.Close()
@@ -311,24 +306,24 @@ func (state *call) endSessionFailure(session *stream.Session, upstream *upstream
 	}
 	if failure.Class == model.ClassPolicy {
 		state.recordBlocked(auditevent.Decision{Action: "block", Blocked: true, Reason: failure.Code})
-		state.failStream(session, upstream, "blocked", failure)
+		state.failStream(session, upstream, failure)
 		return attemptEnded, failure
 	}
 	if failure.Class == model.ClassCancelled {
-		state.failStream(session, upstream, "cancelled", failure)
+		state.failStream(session, upstream, failure)
 		return attemptEnded, failure
 	}
-	state.failStream(session, upstream, "failed", failure)
+	state.failStream(session, upstream, failure)
 	return attemptEnded, failure
 }
 
 func (state *call) toolGate(item model.Item) *model.Error {
 	trace := state.baseTrace()
-	translated, ok := observe.ItemOf(item, "response.items", state.observeOptions())
+	translated, ok := adapter.ItemOf(item, "response.items", state.observeOptions())
 	if !ok || translated.ToolCall == nil {
 		return nil
 	}
-	observe.AddAssistantItem(trace, translated)
+	adapter.AddAssistantItem(trace, translated)
 	tags := observation.ToolTags{}
 	if spec, found := trace.ToolSpecByName(item.ToolCall.Name); found {
 		tags = spec.Tags

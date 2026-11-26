@@ -18,7 +18,7 @@ import type {
   UseQueryResult,
 } from '@tanstack/react-query';
 
-import type { ConsoleAPIError, ConsoleChannelOption } from '../models';
+import type { ConsoleAPIError, ConsoleChannelOptionView } from '../models';
 
 import { request } from '../../client.ts';
 
@@ -46,8 +46,8 @@ export const getListChannelOptionsUrl = (projectId: string) => {
 export const listChannelOptions = async (
   projectId: string,
   options?: Parameters<typeof request>[1],
-): Promise<ConsoleChannelOption[]> => {
-  return request<ConsoleChannelOption[]>(getListChannelOptionsUrl(projectId), {
+): Promise<ConsoleChannelOptionView[]> => {
+  return request<ConsoleChannelOptionView[]>(getListChannelOptionsUrl(projectId), {
     ...options,
     method: 'GET',
   });

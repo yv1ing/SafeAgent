@@ -22,7 +22,6 @@ import (
 // candidate.
 type upstreamCall struct {
 	endpoint endpoint
-	key      routing.Key
 	reader   *codec.Reader
 	decoder  codec.StreamDecoder
 	response *model.Response
@@ -71,7 +70,7 @@ func (state *call) openUpstream(ctx context.Context, prepared *prepared, key rou
 		failure, field := state.pipeline.upstreamFailure(response, endpoint.channel, key)
 		return nil, failure, field
 	}
-	call := &upstreamCall{endpoint: endpoint, key: key}
+	call := &upstreamCall{endpoint: endpoint}
 	if prepared.stream || strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
 		stream := newIdleReader(response.Body, state.pipeline.settings.StreamIdle)
 		reader, err := codec.NewReader(stream, state.pipeline.settings.MaxStreamBytes)

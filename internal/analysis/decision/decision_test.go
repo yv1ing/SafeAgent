@@ -13,11 +13,11 @@ import (
 
 func TestInterpretReadsTheTypedAnswers(t *testing.T) {
 	labels, err := decision.Interpret(decision.Answers{
-		decision.QuestionUnsafe:   {Probability: 0.91, Confidence: 0.82},
-		decision.QuestionSource:   {Choice: string(analysis.SourceIndirectPromptInjection), Confidence: 0.7},
-		decision.QuestionMode:     {Choice: string(analysis.ModeInsecureInteraction)},
-		decision.QuestionHarm:     {Choice: string(analysis.HarmSystemIntegrity)},
-		decision.QuestionSeverity: {Score: 1},
+		"unsafe":   {Probability: 0.91, Confidence: 0.82},
+		"source":   {Choice: string(analysis.SourceIndirectPromptInjection), Confidence: 0.7},
+		"mode":     {Choice: string(analysis.ModeInsecureInteraction)},
+		"harm":     {Choice: string(analysis.HarmSystemIntegrity)},
+		"severity": {Score: 1},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -27,12 +27,12 @@ func TestInterpretReadsTheTypedAnswers(t *testing.T) {
 		labels.Severity != analysis.SeverityHigh {
 		t.Fatalf("unexpected labels: %+v", labels)
 	}
-	if _, err := decision.Interpret(decision.Answers{decision.QuestionUnsafe: {Probability: 0.1}}); err != nil {
+	if _, err := decision.Interpret(decision.Answers{"unsafe": {Probability: 0.1}}); err != nil {
 		t.Fatalf("a safe answer with no axes is valid: %v", err)
 	}
 	if _, err := decision.Interpret(decision.Answers{
-		decision.QuestionUnsafe: {Probability: 0.9},
-		decision.QuestionSource: {Choice: "invented_source"},
+		"unsafe": {Probability: 0.9},
+		"source": {Choice: "invented_source"},
 	}); err == nil {
 		t.Fatal("an unknown option must be rejected")
 	}
@@ -55,10 +55,10 @@ func TestTypeSafeAdapterSendsSystemOneQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.Total() != 16 || answers[decision.QuestionUnsafe].Probability != 0.2 {
+	if usage.Total() != 16 || answers["unsafe"].Probability != 0.2 {
 		t.Fatalf("unexpected answers: %+v %+v", answers, usage)
 	}
-	if answers[decision.QuestionUnsafe].ConfidenceKnown {
+	if answers["unsafe"].ConfidenceKnown {
 		t.Fatal("a Noul answer has no separate confidence")
 	}
 	labels, err := decision.Interpret(answers)
@@ -75,7 +75,7 @@ func TestTypeSafeAdapterSendsSystemOneQuestions(t *testing.T) {
 	if !ok || len(questions) != 5 {
 		t.Fatalf("the fixed question set must be sent as a map: %+v", received["questions"])
 	}
-	severity, _ := questions[decision.QuestionSeverity].(map[string]any)
+	severity, _ := questions["severity"].(map[string]any)
 	if severity["type"] != "score" || len(severity["criteria"].([]any)) != 3 {
 		t.Fatalf("the score question is not in System One form: %+v", severity)
 	}
@@ -83,7 +83,7 @@ func TestTypeSafeAdapterSendsSystemOneQuestions(t *testing.T) {
 
 func TestNoulProbabilityCarriesNoConfidence(t *testing.T) {
 	labels, err := decision.Interpret(decision.Answers{
-		decision.QuestionUnsafe: {Probability: 0.9},
+		"unsafe": {Probability: 0.9},
 	})
 	if err != nil {
 		t.Fatal(err)

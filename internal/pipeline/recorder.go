@@ -17,7 +17,7 @@ type EventWriter interface {
 	CreateCall(ctx context.Context, call *entity.Call) error
 	SealCall(ctx context.Context, call *entity.Call, state, code string, toolCallIDs []string, analysis entity.SealAnalysis) error
 	AbandonCall(callID string)
-	FailCall(ctx context.Context, callID, code string) error
+	FailCall(ctx context.Context, call *entity.Call, code string) error
 }
 
 const CodeAuditFailed = "audit_failed"
@@ -101,10 +101,11 @@ func (recorder *Recorder) SetAnalysis(analysis entity.SealAnalysis) { recorder.a
 
 func (recorder *Recorder) Seal(ctx context.Context, state, code string) error {
 	if recorder.writeFailure != nil {
+		recorder.call.Outcome = settlementFor(&model.Error{Class: model.ClassInternal, Code: CodeAuditFailed}, recorder.call.Lane).outcome
 		recorder.writer.AbandonCall(recorder.call.ID)
 		marking, cancel := context.WithTimeout(context.WithoutCancel(ctx), failMarkTimeout)
 		defer cancel()
-		_ = recorder.writer.FailCall(marking, recorder.call.ID, CodeAuditFailed)
+		_ = recorder.writer.FailCall(marking, recorder.call, CodeAuditFailed)
 		return recorder.writeFailure
 	}
 	recorder.Event(auditevent.KindTerminal, auditevent.Terminal{State: state, Code: code})
@@ -113,10 +114,11 @@ func (recorder *Recorder) Seal(ctx context.Context, state, code string) error {
 	recorder.call.AuditEvents = recorder.sequence
 	recorder.mu.Unlock()
 	if recorder.writeFailure != nil {
+		recorder.call.Outcome = settlementFor(&model.Error{Class: model.ClassInternal, Code: CodeAuditFailed}, recorder.call.Lane).outcome
 		recorder.writer.AbandonCall(recorder.call.ID)
 		marking, cancel := context.WithTimeout(context.WithoutCancel(ctx), failMarkTimeout)
 		defer cancel()
-		_ = recorder.writer.FailCall(marking, recorder.call.ID, CodeAuditFailed)
+		_ = recorder.writer.FailCall(marking, recorder.call, CodeAuditFailed)
 		return recorder.writeFailure
 	}
 	err := recorder.writer.SealCall(ctx, recorder.call, state, code, recorder.toolCallIDs, recorder.analysis)
@@ -126,7 +128,7 @@ func (recorder *Recorder) Seal(ctx context.Context, state, code string) error {
 	recorder.writer.AbandonCall(recorder.call.ID)
 	marking, cancel := context.WithTimeout(context.WithoutCancel(ctx), failMarkTimeout)
 	defer cancel()
-	if markErr := recorder.writer.FailCall(marking, recorder.call.ID, CodeAuditFailed); markErr != nil {
+	if markErr := recorder.writer.FailCall(marking, recorder.call, CodeAuditFailed); markErr != nil {
 		recorder.logger.Error("unsealed call could not be marked failed", "call", recorder.call.ID, "error", markErr)
 	}
 	return err

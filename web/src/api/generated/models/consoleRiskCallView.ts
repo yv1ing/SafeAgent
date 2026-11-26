@@ -11,6 +11,8 @@ export interface ConsoleRiskCallView {
   call_id: string;
   created_at: string;
   model: string;
+  /** Trajectory call node; the inspector opens it when available */
+  node_id: string;
   severity: string;
   state: string;
 }

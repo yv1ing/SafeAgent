@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -17,7 +18,7 @@ func NewOperationService(store *repository.Store) *OperationService {
 }
 
 // Operations lists the administration log newest first.
-func (service *OperationService) Operations(ctx context.Context, actor Actor, cursor Cursor) (Page[entity.OperationLog], error) {
+func (service *OperationService) Operations(ctx context.Context, actor access.Actor, cursor Cursor) (Page[entity.OperationLog], error) {
 	if err := actor.RequireAdmin(); err != nil {
 		return Page[entity.OperationLog]{}, err
 	}
@@ -31,7 +32,7 @@ func (service *OperationService) Operations(ctx context.Context, actor Actor, cu
 }
 
 // ProjectOperations lists operations for a specific project, newest first.
-func (service *OperationService) ProjectOperations(ctx context.Context, actor Actor, projectID string, cursor Cursor) (Page[entity.OperationLog], error) {
+func (service *OperationService) ProjectOperations(ctx context.Context, actor access.Actor, projectID string, cursor Cursor) (Page[entity.OperationLog], error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return Page[entity.OperationLog]{}, err
 	}
@@ -49,5 +50,3 @@ func (service *OperationService) ProjectOperations(ctx context.Context, actor Ac
 func (service *OperationService) RecordOperation(ctx context.Context, entry *entity.OperationLog) error {
 	return service.store.RecordOperation(ctx, entry)
 }
-
-// ProjectSummaries returns the 24h traffic aggregate of each project in one query.

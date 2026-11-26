@@ -66,9 +66,11 @@ type AnalysisFinding struct {
 	DetectorVersion    string          `json:"detector_version"`
 	Evidence           json.RawMessage `bun:"type:jsonb" json:"evidence"`
 	Attribution        json.RawMessage `bun:"type:jsonb" json:"attribution"`
-	FlowSourceTurn     int             `json:"flow_source_turn"`
-	FlowSourceItem     int             `json:"flow_source_item"`
+	FlowSourceCallID   string          `json:"flow_source_call_id"`
+	FlowSourceSection  string          `json:"flow_source_section"`
+	FlowSourceOrdinal  int             `json:"flow_source_ordinal"`
 	FlowSourceOrigin   string          `json:"flow_source_origin"`
+	FlowSourcePath     string          `json:"flow_source_path"`
 	FlowRelation       string          `json:"flow_relation"`
 	FlowSinkToolCallID string          `json:"flow_sink_tool_call_id"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -81,8 +83,9 @@ type AnalysisFlow struct {
 	ProjectID      string    `json:"project_id"`
 	CallID         string    `json:"call_id"`
 	AgentKeyID     string    `json:"agent_key_id"`
-	SourceTurn     int       `json:"source_turn"`
-	SourceItem     int       `json:"source_item"`
+	SourceCallID   string    `json:"source_call_id"`
+	SourceSection  string    `json:"source_section"`
+	SourceOrdinal  int       `json:"source_ordinal"`
 	SourceOrigin   string    `json:"source_origin"`
 	SourcePath     string    `json:"source_path"`
 	SinkToolCallID string    `json:"sink_tool_call_id"`
@@ -148,6 +151,10 @@ type SealAnalysis struct {
 	Decisions []Decision
 	Job       *AnalysisJob
 	Snapshot  *RedactionSnapshot
+	// RulesVersion and RulesHash identify the redaction rule set of the call, so replay can prove
+	// which rules produced the stored snapshot.
+	RulesVersion int64
+	RulesHash    string
 }
 
 // DecisionModelConfig is one project's optional decision model. The API key is stored sealed; only

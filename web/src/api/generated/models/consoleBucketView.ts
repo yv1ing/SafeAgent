@@ -13,7 +13,8 @@ export interface ConsoleBucketView {
   findings_high: number;
   input_tokens: number;
   output_tokens: number;
-  redaction_hits: number;
+  /** Distinct redacted values, not occurrences */
+  redaction_values: number;
   requests: number;
   start: string;
 }

@@ -9,8 +9,10 @@ import {
 } from '@tanstack/react-router';
 import { Loader2 } from 'lucide-react';
 import { ApiError } from '../api/client';
+import { getGetCallQueryOptions } from '../api/generated/calls/calls';
 import { getMeQueryOptions } from '../api/generated/session/session';
 import { validateCallsSearch } from '../features/calls/search';
+import { validateTrajectorySearch } from '../features/conversations/search';
 import { useLocale } from '../i18n';
 import { NotFoundPage } from './NotFoundPage';
 import { ProjectScope } from './ProjectScope';
@@ -43,9 +45,9 @@ const ConversationsPage = lazyRouteComponent(
   () => import('../features/conversations/ConversationsPage'),
   'ConversationsPage',
 );
-const ConversationPage = lazyRouteComponent(
-  () => import('../features/conversations/ConversationPage'),
-  'ConversationPage',
+const TrajectoryPage = lazyRouteComponent(
+  () => import('../features/conversations/TrajectoryPage'),
+  'TrajectoryPage',
 );
 const MonitorPage = lazyRouteComponent(
   () => import('../features/monitor/MonitorPage'),
@@ -65,6 +67,10 @@ const RoutesPage = lazyRouteComponent(() => import('../features/routes/RoutesPag
 const MembersPage = lazyRouteComponent(
   () => import('../features/members/MembersPage'),
   'MembersPage',
+);
+const ProvidersPage = lazyRouteComponent(
+  () => import('../features/providers/ProvidersPage'),
+  'ProvidersPage',
 );
 const ModelsPage = lazyRouteComponent(() => import('../features/models/ModelsPage'), 'ModelsPage');
 const ChannelsPage = lazyRouteComponent(
@@ -168,7 +174,47 @@ const callsRoute = createRoute({
 const conversationRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'conversations/$sessionId',
-  component: ConversationPage,
+  validateSearch: validateTrajectorySearch,
+  component: TrajectoryPage,
+});
+
+// Risk and monitor rows only carry the stable trajectory node id, not the session id. This route
+// resolves the owning conversation once and forwards to the canonical deep link.
+const trajectoryNodeRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'conversations/node/$nodeId',
+  beforeLoad: async ({ params, context }) => {
+    const { projectId, nodeId } = params;
+    const callId = nodeId.startsWith('call:') ? nodeId.slice('call:'.length) : '';
+    if (callId) {
+      try {
+        const detail = await context.queryClient.ensureQueryData(
+          getGetCallQueryOptions(projectId, callId),
+        );
+        if (detail.call.session_id) {
+          throw redirect({
+            to: '/projects/$projectId/conversations/$sessionId',
+            params: { projectId, sessionId: detail.call.session_id },
+            search: { node: nodeId },
+          });
+        }
+      } catch (error) {
+        if (error instanceof ApiError) {
+          throw redirect({
+            to: '/projects/$projectId/calls',
+            params: { projectId },
+            search: { call: callId },
+          });
+        }
+        throw error;
+      }
+    }
+    throw redirect({
+      to: '/projects/$projectId/calls',
+      params: { projectId },
+      search: callId ? { call: callId } : {},
+    });
+  },
 });
 
 const adminRoute = createRoute({
@@ -202,6 +248,7 @@ const routeTree = rootRoute.addChildren([
           component: ConversationsPage,
         }),
         conversationRoute,
+        trajectoryNodeRoute,
         createRoute({
           getParentRoute: () => projectRoute,
           path: 'risk',
@@ -245,6 +292,11 @@ const routeTree = rootRoute.addChildren([
       ]),
     ]),
     adminRoute.addChildren([
+      createRoute({
+        getParentRoute: () => adminRoute,
+        path: 'providers',
+        component: ProvidersPage,
+      }),
       createRoute({
         getParentRoute: () => adminRoute,
         path: 'models',

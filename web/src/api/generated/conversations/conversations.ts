@@ -21,7 +21,8 @@ import type {
 import type {
   ConsoleAPIError,
   ConsoleConversationPage,
-  ConsoleConversationTreeView,
+  ConsoleRedactionIndexView,
+  ConsoleTrajectoryView,
   ListConversationsParams,
 } from '../models';
 
@@ -184,42 +185,46 @@ export function useListConversations<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getGetConversationUrl = (projectId: string, sessionId: string) => {
-  return `/console/api/projects/${projectId}/conversations/${sessionId}`;
+export const getGetConversationRedactionsUrl = (projectId: string, sessionId: string) => {
+  return `/console/api/projects/${projectId}/conversations/${sessionId}/redactions`;
 };
 
-export const getConversation = async (
+export const getConversationRedactions = async (
   projectId: string,
   sessionId: string,
   options?: Parameters<typeof request>[1],
-): Promise<ConsoleConversationTreeView> => {
-  return request<ConsoleConversationTreeView>(getGetConversationUrl(projectId, sessionId), {
+): Promise<ConsoleRedactionIndexView> => {
+  return request<ConsoleRedactionIndexView>(getGetConversationRedactionsUrl(projectId, sessionId), {
     ...options,
     method: 'GET',
   });
 };
 
-export const getGetConversationQueryKey = (projectId: string, sessionId: string) => {
-  return [`/console/api/projects/${projectId}/conversations/${sessionId}`] as const;
+export const getGetConversationRedactionsQueryKey = (projectId: string, sessionId: string) => {
+  return [`/console/api/projects/${projectId}/conversations/${sessionId}/redactions`] as const;
 };
 
-export const getGetConversationQueryOptions = <
-  TData = Awaited<ReturnType<typeof getConversation>>,
+export const getGetConversationRedactionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConversationRedactions>>,
   TError = ConsoleAPIError,
 >(
   projectId: string,
   sessionId: string,
   options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>;
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData>
+    >;
     request?: SecondParameter<typeof request>;
   },
 ) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetConversationQueryKey(projectId, sessionId);
+  const queryKey =
+    queryOptions?.queryKey ?? getGetConversationRedactionsQueryKey(projectId, sessionId);
 
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversation>>> = ({ signal }) =>
-    getConversation(projectId, sessionId, { signal, ...requestOptions });
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationRedactions>>> = ({
+    signal,
+  }) => getConversationRedactions(projectId, sessionId, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -230,27 +235,31 @@ export const getGetConversationQueryOptions = <
       sessionId !== null &&
       sessionId !== undefined,
     ...queryOptions,
-  } as UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData> & {
+  } as UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData> & {
     queryKey: DataTag<QueryKey, TData, TError>;
   };
 };
 
-export type GetConversationQueryResult = NonNullable<Awaited<ReturnType<typeof getConversation>>>;
-export type GetConversationQueryError = ConsoleAPIError;
+export type GetConversationRedactionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConversationRedactions>>
+>;
+export type GetConversationRedactionsQueryError = ConsoleAPIError;
 
-export function useGetConversation<
-  TData = Awaited<ReturnType<typeof getConversation>>,
+export function useGetConversationRedactions<
+  TData = Awaited<ReturnType<typeof getConversationRedactions>>,
   TError = ConsoleAPIError,
 >(
   projectId: string,
   sessionId: string,
   options: {
-    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>> &
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData>
+    > &
       Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getConversation>>,
+          Awaited<ReturnType<typeof getConversationRedactions>>,
           TError,
-          Awaited<ReturnType<typeof getConversation>>
+          Awaited<ReturnType<typeof getConversationRedactions>>
         >,
         'initialData'
       >;
@@ -258,19 +267,21 @@ export function useGetConversation<
   },
   queryClient?: QueryClient,
 ): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useGetConversation<
-  TData = Awaited<ReturnType<typeof getConversation>>,
+export function useGetConversationRedactions<
+  TData = Awaited<ReturnType<typeof getConversationRedactions>>,
   TError = ConsoleAPIError,
 >(
   projectId: string,
   sessionId: string,
   options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>> &
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData>
+    > &
       Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getConversation>>,
+          Awaited<ReturnType<typeof getConversationRedactions>>,
           TError,
-          Awaited<ReturnType<typeof getConversation>>
+          Awaited<ReturnType<typeof getConversationRedactions>>
         >,
         'initialData'
       >;
@@ -278,31 +289,176 @@ export function useGetConversation<
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useGetConversation<
-  TData = Awaited<ReturnType<typeof getConversation>>,
+export function useGetConversationRedactions<
+  TData = Awaited<ReturnType<typeof getConversationRedactions>>,
   TError = ConsoleAPIError,
 >(
   projectId: string,
   sessionId: string,
   options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>;
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData>
+    >;
     request?: SecondParameter<typeof request>;
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useGetConversation<
-  TData = Awaited<ReturnType<typeof getConversation>>,
+export function useGetConversationRedactions<
+  TData = Awaited<ReturnType<typeof getConversationRedactions>>,
   TError = ConsoleAPIError,
 >(
   projectId: string,
   sessionId: string,
   options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>;
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationRedactions>>, TError, TData>
+    >;
     request?: SecondParameter<typeof request>;
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-  const queryOptions = getGetConversationQueryOptions(projectId, sessionId, options);
+  const queryOptions = getGetConversationRedactionsQueryOptions(projectId, sessionId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetConversationTrajectoryUrl = (projectId: string, sessionId: string) => {
+  return `/console/api/projects/${projectId}/conversations/${sessionId}/trajectory`;
+};
+
+export const getConversationTrajectory = async (
+  projectId: string,
+  sessionId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleTrajectoryView> => {
+  return request<ConsoleTrajectoryView>(getGetConversationTrajectoryUrl(projectId, sessionId), {
+    ...options,
+    method: 'GET',
+  });
+};
+
+export const getGetConversationTrajectoryQueryKey = (projectId: string, sessionId: string) => {
+  return [`/console/api/projects/${projectId}/conversations/${sessionId}/trajectory`] as const;
+};
+
+export const getGetConversationTrajectoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConversationTrajectory>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  sessionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetConversationTrajectoryQueryKey(projectId, sessionId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationTrajectory>>> = ({
+    signal,
+  }) => getConversationTrajectory(projectId, sessionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      projectId !== null &&
+      projectId !== undefined &&
+      sessionId !== null &&
+      sessionId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+};
+
+export type GetConversationTrajectoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConversationTrajectory>>
+>;
+export type GetConversationTrajectoryQueryError = ConsoleAPIError;
+
+export function useGetConversationTrajectory<
+  TData = Awaited<ReturnType<typeof getConversationTrajectory>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  sessionId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversationTrajectory>>,
+          TError,
+          Awaited<ReturnType<typeof getConversationTrajectory>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetConversationTrajectory<
+  TData = Awaited<ReturnType<typeof getConversationTrajectory>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  sessionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversationTrajectory>>,
+          TError,
+          Awaited<ReturnType<typeof getConversationTrajectory>>
+        >,
+        'initialData'
+      >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetConversationTrajectory<
+  TData = Awaited<ReturnType<typeof getConversationTrajectory>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  sessionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useGetConversationTrajectory<
+  TData = Awaited<ReturnType<typeof getConversationTrajectory>>,
+  TError = ConsoleAPIError,
+>(
+  projectId: string,
+  sessionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getConversationTrajectory>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+  const queryOptions = getGetConversationTrajectoryQueryOptions(projectId, sessionId, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
     queryKey: DataTag<QueryKey, TData, TError>;

@@ -39,6 +39,7 @@ func makeFinding(detectorID, code string, ref observation.ItemRef, origin observ
 	)
 	finding.Attribution = []analysis.Attribution{{
 		Turn: ref.Turn, Item: ref.Position, ToolCallID: ref.Item.Locator.CallID, Source: section,
+		Locator: ref.Item.Locator,
 	}}
 	return finding
 }

@@ -1104,3 +1104,157 @@ export const useDeleteChannelKey = <TError = ConsoleAPIError, TContext = unknown
 > => {
   return useMutation(getDeleteChannelKeyMutationOptions(options), queryClient);
 };
+export const getRestoreChannelUrl = (channelId: string) => {
+  return `/console/api/channels/${channelId}/restore`;
+};
+
+export const restoreChannel = async (
+  channelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<ConsoleChannelView> => {
+  return request<ConsoleChannelView>(getRestoreChannelUrl(channelId), {
+    ...options,
+    method: 'POST',
+  });
+};
+
+export const getRestoreChannelMutationKey = () => ['restoreChannel'] as const;
+
+export const getRestoreChannelMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreChannel>>,
+    TError,
+    RestoreChannelMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreChannel>>,
+  TError,
+  RestoreChannelMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRestoreChannelMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreChannel>>,
+    RestoreChannelMutationVariables
+  > = (props) => {
+    const { channelId } = props ?? {};
+
+    return restoreChannel(channelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreChannelMutationResult = NonNullable<Awaited<ReturnType<typeof restoreChannel>>>;
+
+export type RestoreChannelMutationError = ConsoleAPIError;
+export type RestoreChannelMutationVariables = { channelId: string };
+
+export const useRestoreChannel = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreChannel>>,
+      TError,
+      RestoreChannelMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreChannel>>,
+  TError,
+  RestoreChannelMutationVariables,
+  TContext
+> => {
+  return useMutation(getRestoreChannelMutationOptions(options), queryClient);
+};
+export const getDetachChannelTargetsUrl = (channelId: string) => {
+  return `/console/api/channels/${channelId}/targets`;
+};
+
+export const detachChannelTargets = async (
+  channelId: string,
+  options?: Parameters<typeof request>[1],
+): Promise<void> => {
+  return request<void>(getDetachChannelTargetsUrl(channelId), {
+    ...options,
+    method: 'DELETE',
+  });
+};
+
+export const getDetachChannelTargetsMutationKey = () => ['detachChannelTargets'] as const;
+
+export const getDetachChannelTargetsMutationOptions = <
+  TError = ConsoleAPIError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof detachChannelTargets>>,
+    TError,
+    DetachChannelTargetsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof request>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof detachChannelTargets>>,
+  TError,
+  DetachChannelTargetsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDetachChannelTargetsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof detachChannelTargets>>,
+    DetachChannelTargetsMutationVariables
+  > = (props) => {
+    const { channelId } = props ?? {};
+
+    return detachChannelTargets(channelId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DetachChannelTargetsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof detachChannelTargets>>
+>;
+
+export type DetachChannelTargetsMutationError = ConsoleAPIError;
+export type DetachChannelTargetsMutationVariables = { channelId: string };
+
+export const useDetachChannelTargets = <TError = ConsoleAPIError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof detachChannelTargets>>,
+      TError,
+      DetachChannelTargetsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof request>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof detachChannelTargets>>,
+  TError,
+  DetachChannelTargetsMutationVariables,
+  TContext
+> => {
+  return useMutation(getDetachChannelTargetsMutationOptions(options), queryClient);
+};

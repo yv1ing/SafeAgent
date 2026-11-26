@@ -11,6 +11,8 @@ export interface ConsoleMonitorRecentView {
   call_id: string;
   created_at: string;
   model: string;
+  /** Trajectory call node of this finding */
+  node_id: string;
   project_id: string;
   severity: string;
   state: string;

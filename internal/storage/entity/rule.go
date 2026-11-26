@@ -28,5 +28,7 @@ type RedactionSnapshot struct {
 	ID            string          `bun:",pk" json:"id" required:"true"`
 	CallID        string          `json:"call_id"`
 	Rules         json.RawMessage `bun:"type:jsonb" json:"rules,omitempty"`
+	RulesVersion  int64           `json:"rules_version"`
+	RulesHash     string          `json:"rules_hash"`
 	CreatedAt     time.Time       `json:"created_at"`
 }

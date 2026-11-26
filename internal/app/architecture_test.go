@@ -19,6 +19,10 @@ const gin = "github.com/gin-gonic/gin"
 type boundary struct {
 	packagePath string
 	forbidden   []string
+	// shallow keeps the scan to the package's own files. A recursive scan is right for an
+	// umbrella such as service or transport; it is wrong for a leaf package with an intentional
+	// subpackage, such as observation and its adapter.
+	shallow bool
 }
 
 func joined(paths ...string) []string {
@@ -35,23 +39,34 @@ func joined(paths ...string) []string {
 func boundaries() []boundary {
 	above := joined("storage/entity", "storage/repository", "storage/auditevent", "service", "pipeline", "transport", "app", "testkit")
 	llmPackages := joined("llm/model", "llm/codec", "llm/provider", "llm/stream")
-	domains := append(append([]string{}, llmPackages...), joined("observation", "observe", "analysis", "redact")...)
-	platform := joined("platform/config", "platform/limit", "platform/routing", "platform/secure")
+	domains := append(append([]string{}, llmPackages...), joined("observation", "observation/adapter", "analysis", "redact")...)
+	platform := joined("platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure")
+	// Analysis inspects operator-supplied URLs before they reach a dialer, so it needs the same
+	// address policy the gateway applies. Every other platform package stays off limits.
+	analysisPlatform := []string{}
+	for _, path := range platform {
+		if path != module+"platform/netguard" {
+			analysisPlatform = append(analysisPlatform, path)
+		}
+	}
 	return []boundary{
 		{packagePath: "transport", forbidden: append(joined("storage/repository", "app"), bun)},
 		{packagePath: "pipeline", forbidden: append(joined("transport", "app"), gin, bun)},
 		{packagePath: "service", forbidden: append(joined("transport", "app"), gin, bun)},
-		{packagePath: "service/console", forbidden: joined("transport", "app")},
-		{packagePath: "storage/repository", forbidden: append(joined("service", "pipeline", "transport", "app", "redact", "routing", "llm", "analysis", "observation", "observe", "testkit"), gin)},
-		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "llm", "redact", "analysis", "observation", "observe", "platform/routing", "testkit"), gin)},
-		{packagePath: "storage/auditevent", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "analysis", "observation", "observe", "testkit"), gin)},
+		{packagePath: "service/access", forbidden: append(joined("service/console", "service/control", "service/diagnosis", "pipeline", "transport", "app", "testkit"), gin)},
+		{packagePath: "service/console", forbidden: append(joined("service/control", "transport", "app"), gin)},
+		{packagePath: "service/control", forbidden: append(joined("service/console", "transport", "app"), gin, bun)},
+		{packagePath: "service/diagnosis", forbidden: append(joined("service/console", "service/control", "transport", "app"), gin, bun)},
+		{packagePath: "storage/repository", forbidden: append(joined("service", "pipeline", "transport", "app", "redact", "routing", "llm", "analysis", "observation", "observation/adapter", "testkit"), gin)},
+		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "llm", "redact", "analysis", "observation", "observation/adapter", "platform/routing", "testkit"), gin)},
+		{packagePath: "storage/auditevent", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "analysis", "observation", "observation/adapter", "testkit"), gin)},
 		{packagePath: "llm/model", forbidden: append(append([]string{}, above...), platform...)},
 		{packagePath: "llm/codec", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider", "llm/stream")...)},
 		{packagePath: "llm/provider", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/codec", "llm/stream")...)},
 		{packagePath: "llm/stream", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider")...)},
-		{packagePath: "observation", forbidden: append(append([]string{}, above...), platform...)},
-		{packagePath: "observe", forbidden: joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "analysis", "llm/codec", "llm/provider", "llm/stream", "testkit")},
-		{packagePath: "analysis", forbidden: append(append([]string{}, above...), append(append([]string{}, platform...), llmPackages...)...)},
+		{packagePath: "observation", forbidden: append(append([]string{}, above...), platform...), shallow: true},
+		{packagePath: "observation/adapter", forbidden: joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "analysis", "llm/codec", "llm/provider", "llm/stream", "testkit")},
+		{packagePath: "analysis", forbidden: append(append([]string{}, above...), append(analysisPlatform, llmPackages...)...)},
 		{packagePath: "redact", forbidden: append(append([]string{}, above...), platform...)},
 		{packagePath: "platform/config", forbidden: append(append([]string{}, above...), domains...)},
 		{packagePath: "platform/secure", forbidden: append(append([]string{}, above...), domains...)},
@@ -64,7 +79,7 @@ func boundaries() []boundary {
 
 func TestDependencyBoundaries(t *testing.T) {
 	for _, entry := range boundaries() {
-		imports := packageImports(t, filepath.Join("..", entry.packagePath))
+		imports := packageImports(t, filepath.Join("..", entry.packagePath), entry.shallow)
 		for _, forbidden := range entry.forbidden {
 			for _, imported := range imports {
 				if imported == forbidden || strings.HasPrefix(imported, forbidden+"/") {
@@ -90,7 +105,7 @@ func TestAnalysisHasNoTransitiveLLMDependency(t *testing.T) {
 // observation adapter is the only package allowed to bridge the two sides.
 func TestConsoleDoesNotImportTheWireModel(t *testing.T) {
 	for _, directory := range []string{"service/console", "transport/console"} {
-		for _, imported := range packageImports(t, filepath.Join("..", directory)) {
+		for _, imported := range packageImports(t, filepath.Join("..", directory), false) {
 			for _, forbidden := range joined("llm/model", "llm/codec", "llm/stream") {
 				if imported == forbidden || strings.HasPrefix(imported, forbidden+"/") {
 					t.Fatalf("internal/%s must not import %s", directory, imported)
@@ -101,10 +116,10 @@ func TestConsoleDoesNotImportTheWireModel(t *testing.T) {
 }
 
 func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
-	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/provider/builtin", "llm/stream", "observation", "observe", "analysis", "analysis/builtin", "analysis/decision", "redact", "platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure"} {
-		imports := packageImports(t, filepath.Join("..", library))
+	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/provider/builtin", "llm/stream", "observation", "observation/adapter", "analysis", "analysis/builtin", "analysis/decision", "redact", "platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure"} {
+		imports := packageImports(t, filepath.Join("..", library), false)
 		if library == "analysis" {
-			imports = append(imports, packageImports(t, filepath.Join("..", "analysis", "policy"))...)
+			imports = append(imports, packageImports(t, filepath.Join("..", "analysis", "policy"), false)...)
 		}
 		for _, imported := range imports {
 			for _, layer := range []string{module + "storage/entity", module + "storage/repository", module + "service", module + "transport"} {
@@ -117,11 +132,48 @@ func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
 }
 
 func TestWireModelDependsOnlyOnTheStandardLibrary(t *testing.T) {
-	for _, imported := range packageImports(t, filepath.Join("..", "llm", "model")) {
+	for _, imported := range packageImports(t, filepath.Join("..", "llm", "model"), false) {
 		if strings.Contains(imported, ".") && !strings.HasPrefix(imported, module+"llm/model") {
 			t.Fatalf("internal/llm/model must depend only on the standard library, found %s", imported)
 		}
 	}
+}
+
+// TestTestkitStaysOutOfProduction imports the in-memory fixtures only from tests. A production
+// package that imports testkit would drag the repository, the four codecs and the fake upstream
+// into the server binary.
+func TestTestkitStaysOutOfProduction(t *testing.T) {
+	root := filepath.Join("..")
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		for _, imported := range importsOf(t, path) {
+			if imported == module+"testkit" {
+				t.Errorf("%s imports internal/testkit; test fixtures belong in _test.go files", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan internal: %v", err)
+	}
+}
+
+func importsOf(t *testing.T, path string) []string {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	imports := make([]string, 0, len(parsed.Imports))
+	for _, spec := range parsed.Imports {
+		imports = append(imports, strings.Trim(spec.Path.Value, `"`))
+	}
+	return imports
 }
 
 func goListDependencies(t *testing.T, path string) []string {
@@ -135,7 +187,7 @@ func goListDependencies(t *testing.T, path string) []string {
 	return strings.Fields(string(output))
 }
 
-func packageImports(t *testing.T, directory string) []string {
+func packageImports(t *testing.T, directory string, shallow bool) []string {
 	t.Helper()
 	files := token.NewFileSet()
 	var imports []string
@@ -145,7 +197,13 @@ func packageImports(t *testing.T, directory string) []string {
 		}
 		// Production imports define the boundaries. Tests may compose layers deliberately, for
 		// example a repository integration test that drives the console services.
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if entry.IsDir() {
+			if shallow && path != directory {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		parsed, err := parser.ParseFile(files, path, nil, parser.ImportsOnly)

@@ -48,13 +48,21 @@ func (store *Store) ClaimJobs(ctx context.Context, worker string, limit int, lea
 	return jobs, err
 }
 
-// Heartbeat extends a lease while a long replay is still making progress.
+// Heartbeat extends a lease while a long replay is still making progress. A worker whose lease was
+// recovered and handed to another worker must stop, so a lost lease is reported instead of ignored.
 func (store *Store) HeartbeatJob(ctx context.Context, id, worker string, lease time.Duration) error {
-	_, err := store.DB.NewUpdate().Model((*entity.AnalysisJob)(nil)).
-		Set("lease_expires_at = ?", time.Now().UTC().Add(lease)).
-		Set("updated_at = ?", time.Now().UTC()).
+	now := time.Now().UTC()
+	result, err := store.DB.NewUpdate().Model((*entity.AnalysisJob)(nil)).
+		Set("lease_expires_at = ?", now.Add(lease)).
+		Set("updated_at = ?", now).
 		Where("id = ? AND locked_by = ? AND state = 'running'", id, worker).Exec(ctx)
-	return err
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
 func (store *Store) CompleteJob(ctx context.Context, id, worker string) error {
@@ -129,7 +137,7 @@ func (store *Store) RepairAnalysisJobs(ctx context.Context) (int, error) {
 			jsonb_build_object('kind', 'call', 'project_id', c.project_id, 'call_id', c.id),
 			'pending', 0, 5, 10, now(), '', '', 'call:' || c.id || ':async', now(), now()
 		FROM calls c
-		WHERE c.analysis_state = 'pending' AND c.state <> 'running'
+		WHERE c.analysis_state = 'pending' AND c.state <> 'running' AND c.lane = 'main'
 			AND NOT EXISTS (SELECT 1 FROM analyses a WHERE a.call_id = c.id)
 			AND NOT EXISTS (SELECT 1 FROM analysis_jobs j
 				WHERE j.kind = 'analyze_call' AND j.scope->>'call_id' = c.id

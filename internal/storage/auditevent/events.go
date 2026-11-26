@@ -9,10 +9,11 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/redact"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 8
 
 const (
 	KindRequest       = "request"
+	KindRouting       = "routing"
 	KindAttempt       = "attempt"
 	KindAttemptFailed = "attempt_failed"
 	KindFirstToken    = "attempt_first_token"
@@ -34,6 +35,25 @@ type Principal struct {
 	TrustLevel int    `json:"trust_level"`
 }
 
+// Hit is one masked value at one position of one item. ValueID is the deterministic placeholder
+// digest, so a session-level index deduplicates repeated occurrences without reading the rules
+// again. The ranges are relative to the item text at Path: Start/End index the raw text and
+// ShownStart/ShownEnd index the shown text.
+type Hit struct {
+	Label      string        `json:"label"`
+	Action     redact.Action `json:"action"`
+	ValueID    string        `json:"value_id"`
+	CallID     string        `json:"call_id"`
+	Section    string        `json:"section"`
+	Ordinal    int           `json:"ordinal"`
+	Path       string        `json:"path"`
+	Start      int           `json:"start"`
+	End        int           `json:"end"`
+	ShownStart int           `json:"shown_start"`
+	ShownEnd   int           `json:"shown_end"`
+	Secret     bool          `json:"secret,omitempty"`
+}
+
 // Request carries the items this call added (not the whole expanded history), the request
 // parameters, and the tools when they differ from the parent. Raw text is stored once; the redacted
 // view is derived on read from the call's immutable redaction snapshot.
@@ -41,13 +61,22 @@ type Request struct {
 	Items         []model.Item  `json:"items"`
 	Params        model.Request `json:"params"`
 	Tools         []model.Tool  `json:"tools,omitempty"`
-	Hits          []redact.Hit  `json:"hits,omitempty"`
+	Hits          []Hit         `json:"hits,omitempty"`
 	Ledger        model.Ledger  `json:"ledger,omitempty"`
 	Principal     *Principal    `json:"principal,omitempty"`
 	SessionSource string        `json:"session_source,omitempty"`
 	// Body is the redacted request of an auxiliary endpoint (embeddings, moderations) that has no
 	// canonical items.
 	Body json.RawMessage `json:"body,omitempty"`
+}
+
+// Routing records which route and target resolution served the call. It is the step a replay needs
+// to explain a fallback that the call row only summarizes.
+type Routing struct {
+	RouteID     string `json:"route_id,omitempty"`
+	RouteName   string `json:"route_name,omitempty"`
+	Resolution  string `json:"resolution,omitempty"`
+	PublicModel string `json:"public_model,omitempty"`
 }
 
 type Attempt struct {

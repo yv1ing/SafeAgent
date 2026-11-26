@@ -7,7 +7,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { Pager } from '../../components/data/Pager';
 import { Page } from '../../components/layout/Page';
 import { QueryState } from '../../components/feedback/QueryState';
-import { SeverityBadge } from '../../components/feedback/StatusBadge';
+import { SeverityBadge } from '../../components/feedback/Badges';
 import { Card } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
 import { useLocale } from '../../i18n';

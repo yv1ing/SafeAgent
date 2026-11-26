@@ -25,7 +25,7 @@ export function KpiTiles({
     <Card className="p-0">
       <div className="grid grid-cols-2 gap-px bg-line md:grid-cols-3 xl:grid-cols-6">
         <StatTile
-          label={t.overview.requests}
+          label={t.overview.mainLaneRequests}
           value={formatNumber(totals.calls)}
           detail={interpolate(t.overview.failures, { count: formatNumber(totals.failures) })}
           trend={trend((bucket) => bucket.requests)}
@@ -60,8 +60,10 @@ export function KpiTiles({
           label={t.overview.highRisk}
           value={formatNumber(totals.high_severity)}
           detail={interpolate(
-            totals.redaction_hits === 1 ? t.overview.redactionsOne : t.overview.redactions,
-            { count: formatNumber(totals.redaction_hits) },
+            totals.redaction_values === 1
+              ? t.overview.redactionValuesOne
+              : t.overview.redactionValues,
+            { count: formatNumber(totals.redaction_values) },
           )}
           trend={trend((bucket) => bucket.findings_high)}
           alert={totals.high_severity > 0}
@@ -79,6 +81,7 @@ export function KpiTiles({
             .join(' · ')}
         />
       </div>
+      <p className="border-t px-4 py-2 text-[11px] text-faint">{t.overview.mainLaneNote}</p>
     </Card>
   );
 }

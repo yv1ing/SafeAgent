@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -89,7 +90,10 @@ func (service *Service) runJob(parent context.Context, worker string, job *entit
 	ctx, cancel := context.WithTimeout(parent, analysisTimeout)
 	defer cancel()
 	stop := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	lostLease := make(chan error, 1)
 	go func() {
+		defer close(heartbeatDone)
 		heartbeat := time.NewTicker(workerHeartbeat)
 		defer heartbeat.Stop()
 		for {
@@ -97,12 +101,29 @@ func (service *Service) runJob(parent context.Context, worker string, job *entit
 			case <-stop:
 				return
 			case <-heartbeat.C:
-				_ = service.store.HeartbeatJob(context.WithoutCancel(ctx), job.ID, worker, workerLease)
+				err := service.store.HeartbeatJob(context.WithoutCancel(ctx), job.ID, worker, workerLease)
+				if err == nil {
+					continue
+				}
+				if !errors.Is(err, repository.ErrLeaseLost) {
+					service.logger.Error("analysis job heartbeat failed", "job", job.ID, "error", err)
+					continue
+				}
+				lostLease <- err
+				cancel()
+				return
 			}
 		}
 	}()
 	err := service.handle(ctx, job)
 	close(stop)
+	<-heartbeatDone
+	select {
+	case leaseErr := <-lostLease:
+		service.logger.Error("analysis job stopped after losing its lease", "job", job.ID, "error", leaseErr)
+		return
+	default:
+	}
 	if err != nil {
 		service.logger.Error("analysis job failed", "job", job.ID, "kind", job.Kind, "error", err)
 		if markErr := service.store.FailJob(context.WithoutCancel(ctx), job.ID, worker, err.Error()); markErr != nil {
@@ -143,7 +164,7 @@ func (service *Service) handle(ctx context.Context, job *entity.AnalysisJob) err
 		if err := json.Unmarshal(job.Scope, &scope); err != nil || scope.CallID == "" {
 			return errors.New("analysis job has no call id")
 		}
-		if _, err := service.AnalyzeCall(ctx, job.ProjectID, scope.CallID, scope.BatchID); err != nil {
+		if _, err := service.analyzeCall(ctx, job.ProjectID, scope.CallID, scope.BatchID); err != nil {
 			return err
 		}
 		if scope.BatchID != "" {
@@ -168,7 +189,10 @@ type ReplayScope struct {
 
 // Replay creates a batch over a bounded set of calls and queues one analysis job per call. A batch
 // only groups work and reports progress; the analysis itself is per call.
-func (service *Service) Replay(ctx context.Context, projectID string, scope ReplayScope) (*entity.AnalysisBatch, error) {
+func (service *Service) Replay(ctx context.Context, actor access.Actor, projectID string, scope ReplayScope) (*entity.AnalysisBatch, error) {
+	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
+		return nil, err
+	}
 	if scope.Kind == "" {
 		scope.Kind = "call"
 	}

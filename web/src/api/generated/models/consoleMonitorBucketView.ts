@@ -8,7 +8,7 @@
 
 export interface ConsoleMonitorBucketView {
   blocked: number;
-  duration_p95: number;
+  duration_p95_max: number;
   errors: number;
   input_tokens: number;
   output_tokens: number;

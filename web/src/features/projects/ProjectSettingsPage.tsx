@@ -11,6 +11,7 @@ import {
   useGetDecisionModel,
   useUpdateDecisionModel,
 } from '../../api/generated/decision-model/decision-model';
+import { useListRoutes } from '../../api/generated/routes/routes';
 import { useCurrentUser, useProject, useProjectId } from '../../app/context';
 import { Callout } from '../../components/feedback/Callout';
 import { ConfirmDialog } from '../../components/form/ConfirmDialog';
@@ -37,6 +38,8 @@ function draftOf(project: ConsoleProjectView): ProjectDraft {
     default_max_output_tokens: project.default_max_output_tokens ?? 0,
     stream_review_bytes: project.stream_review_bytes,
     stream_review_timeout_ms: project.stream_review_timeout_ms,
+    auxiliary_retention_days: project.auxiliary_retention_days,
+    default_route_id: project.default_route_id ?? '',
   };
 }
 
@@ -44,6 +47,7 @@ function ProjectSettingsForm({ project }: { project: ConsoleProjectView }) {
   const { t } = useLocale();
   const user = useCurrentUser();
   const update = useUpdateProject(project.id);
+  const routes = useListRoutes(project.id);
   const [draft, setDraft] = useState(() => draftOf(project));
   const original = draftOf(project);
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
@@ -55,7 +59,12 @@ function ProjectSettingsForm({ project }: { project: ConsoleProjectView }) {
       <Card>
         <CardHeader title={t.projects.general} description={t.projects.generalHint} />
         <div className="p-4">
-          <ProjectFields draft={draft} onChange={setDraft} limitsReadOnly={limitsReadOnly} />
+          <ProjectFields
+            draft={draft}
+            onChange={setDraft}
+            limitsReadOnly={limitsReadOnly}
+            routes={routes.data ?? []}
+          />
         </div>
         <div className="flex items-center justify-end gap-2 border-t bg-sunken/40 px-4 py-3">
           <Button disabled={!dirty || update.isPending} onClick={() => setDraft(original)}>
@@ -65,7 +74,13 @@ function ProjectSettingsForm({ project }: { project: ConsoleProjectView }) {
             variant="primary"
             loading={update.isPending}
             disabled={!dirty}
-            onClick={() => update.mutate({ ...draft, version: project.version })}
+            onClick={() =>
+              update.mutate({
+                ...draft,
+                default_route_id: draft.default_route_id || undefined,
+                version: project.version,
+              })
+            }
           >
             {t.common.save}
           </Button>

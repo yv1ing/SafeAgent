@@ -1,4 +1,4 @@
-import type { ConsoleSeriesView } from '../../../api/generated/models';
+import type { ConsoleHealthViewState, ConsoleSeriesView } from '../../../api/generated/models';
 import { HealthList } from '../../../components/data/HealthList';
 import { Card, CardHeader } from '../../../components/ui/card';
 import { interpolate, useLocale } from '../../../i18n';
@@ -25,7 +25,13 @@ export function ChannelTraffic({ series }: { series: ConsoleSeriesView }) {
           ))}
         </ul>
       )}
-      <HealthList health={series.health} empty={t.overview.noHealth} />
+      <HealthList
+        health={series.health.map((entry) => ({
+          ...entry,
+          state: entry.state as ConsoleHealthViewState,
+        }))}
+        empty={t.overview.noHealth}
+      />
     </Card>
   );
 }

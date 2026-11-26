@@ -98,7 +98,7 @@ func evaluateContent(ctx context.Context, trace *observation.Trace) []analysis.F
 			continue
 		}
 		ref := observation.ItemRef{Turn: -1, Position: index}
-		description := observation.NewValue(tool.Description, tool.DescriptionShown, tool.DescriptionRedactions)
+		description := observation.NewValue(tool.Description, tool.DescriptionShown, tool.DescriptionRedactions, nil)
 		item := observation.Item{Kind: observation.ItemText, Origin: observation.OriginToolDescription, Trust: observation.Untrusted, Text: description}
 		findings = append(findings, inspectText(ref, item, description)...)
 	}

@@ -23,10 +23,10 @@ func DecodeGeminiMedia(entry map[string]any) (*model.Media, error) {
 		return nil, nil
 	}
 	media.Kind = mediaKind(media.MIMEType)
-	return media, ValidateMedia(media)
+	return media, validateMedia(media)
 }
 
-func DecodeMedia(entry map[string]any) (*model.Media, error) {
+func decodeMedia(entry map[string]any) (*model.Media, error) {
 	media := &model.Media{}
 	switch blockType := model.String(entry["type"]); blockType {
 	case "image_url":
@@ -64,10 +64,10 @@ func DecodeMedia(entry map[string]any) (*model.Media, error) {
 	default:
 		return nil, nil
 	}
-	return media, ValidateMedia(media)
+	return media, validateMedia(media)
 }
 
-func ValidateMedia(media *model.Media) error {
+func validateMedia(media *model.Media) error {
 	if strings.HasPrefix(media.URL, "data:") {
 		media.Data, media.URL = media.URL, ""
 	}

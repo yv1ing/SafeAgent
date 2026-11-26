@@ -10,7 +10,7 @@ import type {
   ConsoleFindingView,
 } from '../../../api/generated/models';
 import { JsonView } from '../../../components/feedback/JsonView';
-import { SeverityBadge } from '../../../components/feedback/StatusBadge';
+import { SeverityBadge } from '../../../components/feedback/Badges';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { errorMessage, findingLabel, interpolate, useLocale } from '../../../i18n';
@@ -339,17 +339,6 @@ export function DecisionsSection({ detail }: { detail: ConsoleCallDetailView }) 
             </li>
           ))}
         </ul>
-      )}
-      {detail.hits.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-xs text-muted">{t.call.redactions}</span>
-          {detail.hits.map((hit, index) => (
-            <Badge key={index} tone="warning" title={hit.path}>
-              <span className="font-mono">{hit.label}</span> ·{' '}
-              {t.call.hitActions[hit.action as keyof typeof t.call.hitActions] ?? hit.action}
-            </Badge>
-          ))}
-        </div>
       )}
     </Section>
   );

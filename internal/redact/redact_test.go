@@ -170,7 +170,7 @@ func TestBlockAndAlertActions(t *testing.T) {
 
 	alert := engine(t, regex(`\d{4}`, "CODE", redact.ActionAlert)).NewScope()
 	text, result = alert.Replace("code 1234", "text")
-	if result.Blocked || text != "code 1234" || len(result.Hits) != 1 || result.Hits[0].Action != redact.ActionAlert || result.Values() != 0 {
+	if result.Blocked || text != "code 1234" || len(result.Hits) != 1 || result.Hits[0].Action != redact.ActionAlert || result.Values() != 0 || result.Hits[0].ValueID == "" {
 		t.Fatalf("alert rule must only record: %q %+v", text, result)
 	}
 }
@@ -181,7 +181,7 @@ func TestHitJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if string(encoded) != `{"label":"EMAIL","action":"replace","path":"messages[0]","start":0,"end":13}` {
+	if string(encoded) != `{"label":"EMAIL","action":"replace","path":"messages[0]","start":0,"end":13,"value_id":"`+result.Hits[0].ValueID+`"}` {
 		t.Fatalf("hit shape changed: %s", encoded)
 	}
 }
@@ -396,7 +396,7 @@ func TestApplyRequestCoversEveryTextPosition(t *testing.T) {
 	if strings.Contains(string(encoded), address) {
 		t.Fatalf("a position was not redacted: %s", encoded)
 	}
-	if result.Blocked || len(result.Hits) != 23 || result.Values() != 23 {
+	if result.Blocked || len(result.Hits) != 23 || result.Values() != 3 {
 		t.Fatalf("unexpected result: blocked=%v hits=%d values=%d", result.Blocked, len(result.Hits), result.Values())
 	}
 	if len(request.Metadata) != 2 || request.Metadata["plain"] != "p" {

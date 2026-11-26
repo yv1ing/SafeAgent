@@ -27,9 +27,12 @@ func analysisRow(value *analysis.Analysis) *entity.Analysis {
 	}
 }
 
-func findingRows(value *analysis.Analysis) []entity.AnalysisFinding {
+// findingRows maps the anchored findings of one analysis onto the row shape. The item identity is
+// written both inside the evidence/attribution payloads and in the flow columns the console queries.
+func findingRows(value *analysis.Analysis, trace *observation.Trace) []entity.AnalysisFinding {
 	rows := make([]entity.AnalysisFinding, 0, len(value.Findings))
-	for _, finding := range value.Findings {
+	for index := range value.Findings {
+		finding := value.Findings[index]
 		evidence, _ := json.Marshal(finding.Evidence)
 		attribution, _ := json.Marshal(finding.Attribution)
 		row := entity.AnalysisFinding{
@@ -42,8 +45,14 @@ func findingRows(value *analysis.Analysis) []entity.AnalysisFinding {
 			Evidence: evidence, Attribution: attribution, CreatedAt: value.StartedAt,
 		}
 		if finding.Flow != nil {
-			row.FlowSourceTurn = finding.Flow.SourceTurn
-			row.FlowSourceItem = finding.Flow.SourceItem
+			locator := finding.Flow.SourceLocator
+			if locator.CallID == "" {
+				locator = anchorLocator(trace, finding.Flow.SourceTurn, finding.Flow.SourceItem, finding.Flow.SourcePath, locator)
+			}
+			row.FlowSourceCallID = locator.CallID
+			row.FlowSourceSection = string(locator.Section)
+			row.FlowSourceOrdinal = locator.Ordinal
+			row.FlowSourcePath = firstPath(locator.Path, finding.Flow.SourcePath)
 			row.FlowSourceOrigin = string(finding.Flow.SourceOrigin)
 			row.FlowRelation = finding.Flow.Relation
 			row.FlowSinkToolCallID = finding.Flow.SinkToolCallID
@@ -53,20 +62,33 @@ func findingRows(value *analysis.Analysis) []entity.AnalysisFinding {
 	return rows
 }
 
-func flowRows(value *analysis.Analysis) []entity.AnalysisFlow {
+func flowRows(value *analysis.Analysis, trace *observation.Trace) []entity.AnalysisFlow {
 	flows := flowsOf(value.Findings)
 	rows := make([]entity.AnalysisFlow, 0, len(flows))
 	for _, flow := range flows {
+		locator := flow.SourceLocator
+		if locator.CallID == "" {
+			locator = anchorLocator(trace, flow.SourceTurn, flow.SourceItem, flow.SourcePath, locator)
+		}
 		rows = append(rows, entity.AnalysisFlow{
 			ID:         "afl_" + secure.Digest(value.ID + "\x00" + flowLocationKey(flow))[:24],
 			AnalysisID: value.ID, ProjectID: value.ProjectID, CallID: value.CallID, AgentKeyID: value.AgentKeyID,
-			SourceTurn: flow.SourceTurn, SourceItem: flow.SourceItem, SourceOrigin: string(flow.SourceOrigin),
-			SourcePath: flow.SourcePath, SinkToolCallID: flow.SinkToolCallID, Sink: string(flow.Sink),
+			SourceCallID: locator.CallID, SourceSection: string(locator.Section), SourceOrdinal: locator.Ordinal,
+			SourceOrigin: string(flow.SourceOrigin), SourcePath: firstPath(locator.Path, flow.SourcePath),
+			SinkToolCallID: flow.SinkToolCallID, Sink: string(flow.Sink),
 			Relation: flow.Relation, ContentHash: flow.ContentHash, Confidence: flow.Confidence,
 			CreatedAt: value.StartedAt,
 		})
 	}
 	return rows
+}
+
+// firstPath prefers the stored item path over the detector's leaf path.
+func firstPath(locatorPath, detectorPath string) string {
+	if locatorPath != "" {
+		return locatorPath
+	}
+	return detectorPath
 }
 
 func analysisFindingID(analysisID, fingerprint string) string {
@@ -112,9 +134,12 @@ func analysisOfFindings(rows []entity.AnalysisFinding) []analysis.Finding {
 		_ = decode(row.Attribution, &finding.Attribution)
 		if row.FlowRelation != "" {
 			finding.Flow = &analysis.Flow{
-				SourceTurn: row.FlowSourceTurn, SourceItem: row.FlowSourceItem,
-				SourceOrigin: observation.Origin(row.FlowSourceOrigin), SinkToolCallID: row.FlowSinkToolCallID,
-				Sink: finding.Sink, Relation: row.FlowRelation,
+				SourceLocator: observation.Locator{
+					CallID: row.FlowSourceCallID, Section: observation.Section(row.FlowSourceSection),
+					Ordinal: row.FlowSourceOrdinal, Path: row.FlowSourcePath,
+				},
+				SourceOrigin: observation.Origin(row.FlowSourceOrigin), SourcePath: row.FlowSourcePath,
+				SinkToolCallID: row.FlowSinkToolCallID, Sink: finding.Sink, Relation: row.FlowRelation,
 			}
 		}
 		findings = append(findings, finding)
@@ -131,22 +156,33 @@ func hydrateFindingFlows(findings []analysis.Finding, flows []analysis.Flow) {
 			continue
 		}
 		for _, flow := range flows {
-			if flow.SourceTurn == embedded.SourceTurn && flow.SourceItem == embedded.SourceItem &&
-				flow.SinkToolCallID == embedded.SinkToolCallID && flow.Relation == embedded.Relation {
-				copied := flow
-				findings[index].Flow = &copied
-				break
+			if !sameFlowSource(flow, *embedded) || flow.SinkToolCallID != embedded.SinkToolCallID || flow.Relation != embedded.Relation {
+				continue
 			}
+			copied := flow
+			findings[index].Flow = &copied
+			break
 		}
 	}
+}
+
+func sameFlowSource(left, right analysis.Flow) bool {
+	if left.SourceLocator.CallID != "" || right.SourceLocator.CallID != "" {
+		return left.SourceLocator == right.SourceLocator
+	}
+	return left.SourceTurn == right.SourceTurn && left.SourceItem == right.SourceItem
 }
 
 func analysisOfFlows(rows []entity.AnalysisFlow) []analysis.Flow {
 	flows := make([]analysis.Flow, 0, len(rows))
 	for _, row := range rows {
+		locator := observation.Locator{
+			CallID: row.SourceCallID, Section: observation.Section(row.SourceSection),
+			Ordinal: row.SourceOrdinal, Path: row.SourcePath,
+		}
 		flows = append(flows, analysis.Flow{
-			SourceTurn: row.SourceTurn, SourceItem: row.SourceItem, SourceOrigin: observation.Origin(row.SourceOrigin),
-			SourcePath: row.SourcePath, SinkToolCallID: row.SinkToolCallID, Sink: observation.Sink(row.Sink),
+			SourceLocator: locator, SourcePath: row.SourcePath, SourceOrigin: observation.Origin(row.SourceOrigin),
+			SinkToolCallID: row.SinkToolCallID, Sink: observation.Sink(row.Sink),
 			Relation: row.Relation, ContentHash: row.ContentHash, Confidence: row.Confidence,
 		})
 	}

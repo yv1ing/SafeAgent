@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	DefaultDetectorTimeout = 5 * time.Second
-	DefaultMaxFindings     = 500
-	DefaultMaxItems        = 20_000
+	defaultMaxFindings = 500
+	defaultMaxItems    = 20_000
 )
+
+// detectorTimeout bounds one detector. Tests shorten it to exercise abandonment.
+var detectorTimeout = 5 * time.Second
 
 // Options selects the detectors of one pass. Online passes name the detectors they need; an empty
 // list runs the whole set.
@@ -26,10 +28,10 @@ type Options struct {
 
 func (options Options) normalized() Options {
 	if options.MaxFindings <= 0 {
-		options.MaxFindings = DefaultMaxFindings
+		options.MaxFindings = defaultMaxFindings
 	}
 	if options.MaxItems <= 0 {
-		options.MaxItems = DefaultMaxItems
+		options.MaxItems = defaultMaxItems
 	}
 	return options
 }
@@ -140,31 +142,59 @@ func incompleteFinding(version, detail string) Finding {
 
 var errDetectorTimeout = errors.New("detector timed out")
 
+// detectorHandoff is how long a caller cancellation waits for a detector that is already returning,
+// so a result that completed at the same moment is not reported as a failure.
+const detectorHandoff = 50 * time.Millisecond
+
+type detectorOutcome struct {
+	findings []Finding
+	failure  error
+}
+
+func (outcome detectorOutcome) result() ([]Finding, error) {
+	return outcome.findings, outcome.failure
+}
+
+// evaluateOne runs one detector under its own deadline. A detector that outlives the deadline is
+// abandoned: it delivers through a buffered channel with a non-blocking send, so it can finish
+// without a reader. The caller's cancellation is reported as the caller's error; only the engine's
+// own deadline becomes a detector timeout.
 func evaluateOne(parent context.Context, detector Detector, trace *observation.Trace) ([]Finding, error) {
-	ctx, cancel := context.WithTimeout(parent, DefaultDetectorTimeout)
+	ctx, cancel := context.WithTimeout(parent, detectorTimeout)
 	defer cancel()
-	type outcome struct {
-		findings []Finding
-		err      error
-	}
-	done := make(chan outcome, 1)
+	done := make(chan detectorOutcome, 1)
 	go func() {
+		outcome := detectorOutcome{}
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				done <- outcome{err: fmt.Errorf("panic: %v", recovered)}
+				outcome = detectorOutcome{failure: fmt.Errorf("panic: %v", recovered)}
+			}
+			select {
+			case done <- outcome:
+			default:
 			}
 		}()
-		done <- outcome{findings: detector.Evaluate(ctx, trace), err: ctx.Err()}
+		outcome.findings = detector.Evaluate(ctx, trace)
 	}()
 	select {
-	case result := <-done:
-		if result.err != nil {
-			return nil, result.err
-		}
-		return result.findings, nil
+	case outcome := <-done:
+		return outcome.result()
 	case <-ctx.Done():
-		return nil, errDetectorTimeout
 	}
+	if failure := parent.Err(); failure != nil {
+		select {
+		case outcome := <-done:
+			return outcome.result()
+		case <-time.After(detectorHandoff):
+		}
+		return nil, failure
+	}
+	select {
+	case outcome := <-done:
+		return outcome.result()
+	default:
+	}
+	return nil, errDetectorTimeout
 }
 
 // Coverage records what actually ran. A safe verdict is only possible when every requested

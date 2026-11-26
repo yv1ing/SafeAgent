@@ -44,6 +44,7 @@ func (store *Store) SaveAnalysis(ctx context.Context, analysis *entity.Analysis,
 			Set("analysis_state = ?", analysis.State).
 			Set("finding_count = ?", len(findings)).
 			Set("max_severity = ?", maxSeverity).
+			Set("updated_at = ?", time.Now().UTC()).
 			Where(`id = ? AND (latest_analysis_id = '' OR NOT EXISTS (
 				SELECT 1 FROM analyses current WHERE current.id = latest_analysis_id AND current.started_at > ?))`,
 				analysis.CallID, analysis.StartedAt).
@@ -97,6 +98,18 @@ func (store *Store) AnalysesOfCall(ctx context.Context, projectID, callID string
 	return analyses, err
 }
 
+// FindingsOfCalls returns the findings of many calls in one query for the conversation view.
+func (store *Store) FindingsOfCalls(ctx context.Context, projectID string, callIDs []string) ([]entity.AnalysisFinding, error) {
+	findings := []entity.AnalysisFinding{}
+	if len(callIDs) == 0 {
+		return findings, nil
+	}
+	err := store.DB.NewSelect().Model(&findings).
+		Where("project_id = ? AND call_id IN (?)", projectID, bun.In(callIDs)).
+		Order("call_id", "created_at", "code").Scan(ctx)
+	return findings, err
+}
+
 func (store *Store) FindingsOfAnalysis(ctx context.Context, analysisID string) ([]entity.AnalysisFinding, error) {
 	findings := []entity.AnalysisFinding{}
 	err := store.DB.NewSelect().Model(&findings).Where("analysis_id = ?", analysisID).
@@ -115,6 +128,18 @@ func (store *Store) FlowsOfAnalysis(ctx context.Context, analysisID string) ([]e
 func (store *Store) DecisionsOfCall(ctx context.Context, callID string) ([]entity.Decision, error) {
 	decisions := []entity.Decision{}
 	err := store.DB.NewSelect().Model(&decisions).Where("call_id = ?", callID).Order("created_at").Scan(ctx)
+	return decisions, err
+}
+
+// DecisionsOfCalls returns the online decisions of many calls in one query.
+func (store *Store) DecisionsOfCalls(ctx context.Context, callIDs []string) ([]entity.Decision, error) {
+	decisions := []entity.Decision{}
+	if len(callIDs) == 0 {
+		return decisions, nil
+	}
+	err := store.DB.NewSelect().Model(&decisions).
+		Where("call_id IN (?)", bun.In(callIDs)).
+		Order("call_id", "created_at").Scan(ctx)
 	return decisions, err
 }
 
@@ -180,7 +205,6 @@ func (store *Store) ActivePolicies(ctx context.Context) ([]entity.PolicyVersion,
 	return policies, err
 }
 
-// ProjectAnalysisStats aggregates counts for the monitor page.
 // TopAgent is one row of the monitor's agent leaderboard.
 type TopAgent struct {
 	ProjectID    string    `bun:"project_id"`
@@ -201,10 +225,10 @@ func (store *Store) TopAgents(ctx context.Context, projectIDs []string, since ti
 		limit = 10
 	}
 	err := store.DB.NewRaw(`SELECT c.project_id, c.agent_key_id, COALESCE(k.label, c.agent_key_id) AS label,
-			count(*) AS calls, count(*) FILTER (WHERE c.state = 'blocked') AS blocked,
+			count(*) AS calls, count(*) FILTER (WHERE c.outcome = 'blocked') AS blocked,
 			count(*) FILTER (WHERE c.max_severity = 'high') AS high_findings, max(c.created_at) AS last_at
 		FROM calls c LEFT JOIN agent_keys k ON k.id = c.agent_key_id
-		WHERE c.project_id IN (?) AND c.created_at >= ?
+		WHERE c.project_id IN (?) AND c.created_at >= ? AND c.lane = 'main'
 		GROUP BY c.project_id, c.agent_key_id, k.label
 		ORDER BY high_findings DESC, calls DESC LIMIT ?`, bun.In(projectIDs), since, limit).Scan(ctx, &rows)
 	return rows, err
@@ -231,7 +255,7 @@ func (store *Store) HighRiskCalls(ctx context.Context, projectIDs []string, sinc
 	}
 	err := store.DB.NewRaw(`SELECT id AS call_id, project_id, agent_key_id, public_model AS model,
 			max_severity AS severity, state, created_at
-		FROM calls WHERE project_id IN (?) AND created_at >= ? AND max_severity = 'high'
+		FROM calls WHERE project_id IN (?) AND created_at >= ? AND max_severity = 'high' AND lane = 'main'
 		ORDER BY created_at DESC LIMIT ?`, bun.In(projectIDs), since, limit).Scan(ctx, &rows)
 	return rows, err
 }
@@ -254,11 +278,11 @@ func (store *Store) CallStats(ctx context.Context, projectIDs []string, since ti
 	}
 	err := store.DB.NewRaw(`SELECT project_id, count(*) AS calls,
 			count(*) FILTER (WHERE state = 'failed') AS failures,
-			count(*) FILTER (WHERE state = 'blocked') AS blocked,
+			count(*) FILTER (WHERE outcome = 'blocked') AS blocked,
 			COALESCE(sum(finding_count), 0)::bigint AS findings,
 			count(*) FILTER (WHERE max_severity = 'high') AS high_findings,
 			max(created_at) AS last_at
-		FROM calls WHERE project_id IN (?) AND created_at >= ?
+		FROM calls WHERE project_id IN (?) AND created_at >= ? AND lane = 'main'
 		GROUP BY project_id`, bun.In(projectIDs), since).Scan(ctx, &rows)
 	return rows, err
 }
@@ -290,13 +314,15 @@ func (store *Store) AgentRisk(ctx context.Context, projectID string, since time.
 	err := store.DB.NewRaw(`SELECT c.agent_key_id, COALESCE(k.label, c.agent_key_id) AS label,
 			count(*) AS findings,
 			count(*) FILTER (WHERE f.severity = 'high') AS high,
-			(SELECT count(*) FROM analysis_flows fl WHERE fl.project_id = f.project_id
-				AND fl.agent_key_id = c.agent_key_id AND fl.created_at >= ?) AS flows,
+			(SELECT count(*) FROM analysis_flows fl
+				JOIN calls fc ON fc.id = fl.call_id AND fl.analysis_id = fc.latest_analysis_id
+				WHERE fl.project_id = f.project_id
+					AND fl.agent_key_id = c.agent_key_id AND fl.created_at >= ?) AS flows,
 			max(f.created_at) AS last_at
 		FROM analysis_findings f
-		JOIN calls c ON c.id = f.call_id
+		JOIN calls c ON c.id = f.call_id AND f.analysis_id = c.latest_analysis_id
 		LEFT JOIN agent_keys k ON k.id = c.agent_key_id
-		WHERE f.project_id = ? AND f.created_at >= ?
+		WHERE f.project_id = ? AND f.created_at >= ? AND c.lane = 'main'
 		GROUP BY c.agent_key_id, k.label, f.project_id
 		ORDER BY high DESC, findings DESC LIMIT 50`, since, projectID, since).Scan(ctx, &rows)
 	return rows, err
@@ -325,8 +351,9 @@ func (store *Store) FindingDistribution(ctx context.Context, projectID string, s
 	if column != "code" && column != "source" && column != "mode" && column != "harm" && column != "severity" {
 		column = "code"
 	}
-	err := store.DB.NewRaw(`SELECT `+column+` AS name, count(*) AS count FROM analysis_findings
-		WHERE project_id = ? AND created_at >= ? AND `+column+` <> '' GROUP BY 1 ORDER BY count DESC, name LIMIT 50`,
+	err := store.DB.NewRaw(`SELECT f.`+column+` AS name, count(*) AS count FROM analysis_findings f
+		JOIN calls c ON c.id = f.call_id AND f.analysis_id = c.latest_analysis_id
+		WHERE f.project_id = ? AND f.created_at >= ? AND f.`+column+` <> '' GROUP BY 1 ORDER BY count DESC, name LIMIT 50`,
 		projectID, since).Scan(ctx, &rows)
 	return rows, err
 }
@@ -343,8 +370,9 @@ type FindingCode struct {
 
 func (store *Store) FindingCodes(ctx context.Context, projectID string, since time.Time) ([]FindingCode, error) {
 	rows := []FindingCode{}
-	err := store.DB.NewRaw(`SELECT code, source, mode, harm, severity, count(*) AS count FROM analysis_findings
-		WHERE project_id = ? AND created_at >= ? GROUP BY 1,2,3,4,5 ORDER BY count DESC, code LIMIT 50`,
+	err := store.DB.NewRaw(`SELECT f.code, f.source, f.mode, f.harm, f.severity, count(*) AS count FROM analysis_findings f
+		JOIN calls c ON c.id = f.call_id AND f.analysis_id = c.latest_analysis_id
+		WHERE f.project_id = ? AND f.created_at >= ? GROUP BY 1,2,3,4,5 ORDER BY count DESC, f.code LIMIT 50`,
 		projectID, since).Scan(ctx, &rows)
 	return rows, err
 }

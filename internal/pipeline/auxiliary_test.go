@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/pipeline"
@@ -29,7 +30,7 @@ func TestCountTokensForwardsToTheUpstream(t *testing.T) {
 		t.Fatalf("the native counting endpoint must be used: %s", path)
 	}
 	call := rig.store.Calls[0]
-	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.EndpointFormat != "anthropic_messages" {
+	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.UpstreamFormat != "anthropic_messages" {
 		t.Fatalf("the counting call must name its channel model: %+v", call)
 	}
 }
@@ -70,18 +71,18 @@ func TestEmbeddingsPassThroughAndAreAudited(t *testing.T) {
 	if !strings.Contains(sent.Body, `"model":"gpt-5-upstream"`) {
 		t.Fatalf("the route must name the upstream model: %s", sent.Body)
 	}
-	if call := rig.store.Calls[0]; call.Kind != "embeddings" || call.State != "completed" {
+	if call := rig.store.Calls[0]; call.Operation != classify.Embeddings || call.State != "completed" || call.Outcome != classify.OutcomeOK {
 		t.Fatalf("the auxiliary call must be audited: %+v", call)
 	}
 	call := rig.store.Calls[0]
-	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.EndpointFormat != "openai_chat" {
+	if call.ChannelID != "channel_1" || call.ModelID != "model_1" || call.UpstreamModel != "gpt-5-upstream" || call.UpstreamFormat != "openai_chat" {
 		t.Fatalf("the auxiliary call must name its channel model: %+v", call)
 	}
 }
 
 func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
 	rig := newRig(t, func(testkit.Received) testkit.Reply { return testkit.Reply{Body: `{"data":[]}`} })
-	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+	rig.store.SetProvider(provider.ProviderSpec{
 		ID: "test", Label: "Test",
 		Endpoints: map[model.Format]provider.EndpointSpec{
 			model.Chat: {
@@ -94,9 +95,8 @@ func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
 			},
 		},
 	})
-	rig.store.Channel[0].Endpoints = []entity.ChannelEndpoint{{Format: string(model.Chat)}, {Format: string(model.Messages)}}
 	rig.store.Models[0].Kind = entity.ModelEmbedding
-	rig.store.Models[0].Formats = []string{string(model.Messages)}
+	rig.store.Targets[0].Format = string(model.Messages)
 	rig.pipeline = pipeline.New(rig.store, []byte(testkit.InstanceSecret), pipeline.Options{
 		Providers: rig.store.Registry, Selector: rig.selector, Limiter: rig.limiter,
 	})
@@ -119,7 +119,7 @@ func TestAuxiliaryUsesOnlyTheRoutedFormat(t *testing.T) {
 func TestEmbeddingModelRequiresAnAuxiliaryFormat(t *testing.T) {
 	rig := newRig(t, nil)
 	rig.store.Models[0].Kind = entity.ModelEmbedding
-	rig.store.Registry = provider.NewRegistry(provider.ProviderSpec{
+	rig.store.SetProvider(provider.ProviderSpec{
 		ID: "test", Label: "Test",
 		Endpoints: map[model.Format]provider.EndpointSpec{
 			model.Chat: {Format: model.Chat, BaseURL: rig.upstream.URL, Path: "/chat/completions", Auth: provider.AuthBearer},
@@ -178,7 +178,7 @@ func TestAuxiliaryRedactionBlockIsAudited(t *testing.T) {
 	if failure == nil || failure.Code != "sensitive_content_blocked" {
 		t.Fatalf("failure=%+v", failure)
 	}
-	if len(rig.store.Calls) != 1 || rig.store.Calls[0].Kind != "embeddings" || rig.store.Calls[0].State != "blocked" {
+	if len(rig.store.Calls) != 1 || rig.store.Calls[0].Operation != classify.Embeddings || rig.store.Calls[0].State != "completed" || rig.store.Calls[0].Outcome != classify.OutcomeBlocked {
 		t.Fatalf("a blocked auxiliary call must be recorded: %+v", rig.store.Calls)
 	}
 	if len(rig.upstream.Requests()) != 0 {

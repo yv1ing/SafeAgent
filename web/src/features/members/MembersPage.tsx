@@ -9,6 +9,7 @@ import { Page } from '../../components/layout/Page';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { QueryState } from '../../components/feedback/QueryState';
 import { Badge } from '../../components/ui/badge';
+import { EnabledBadge } from '../../components/feedback/Badges';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Empty } from '../../components/ui/empty';
@@ -75,7 +76,7 @@ export function MembersPage() {
                     row.disabled ? (
                       <Badge>{t.common.disabled}</Badge>
                     ) : (
-                      <Badge tone="success">{t.users.active}</Badge>
+                      <EnabledBadge enabled label={t.users.active} />
                     ),
                 },
                 ...(manager

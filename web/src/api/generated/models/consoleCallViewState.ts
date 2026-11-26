@@ -12,8 +12,6 @@ export const ConsoleCallViewState = {
   running: 'running',
   completed: 'completed',
   failed: 'failed',
-  blocked: 'blocked',
   cancelled: 'cancelled',
   interrupted: 'interrupted',
-  rejected: 'rejected',
 } as const;

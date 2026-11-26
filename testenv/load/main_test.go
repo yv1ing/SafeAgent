@@ -39,9 +39,16 @@ func TestValidateStreamRejectsMalformedFrame(t *testing.T) {
 	}
 }
 
-func TestValidateJSONRequiresText(t *testing.T) {
-	body := `{"choices":[{"message":{"content":""}}]}`
+func TestValidateJSONTreatsAnEmptyCompletionAsASuccessfulEmptySample(t *testing.T) {
+	body := `{"choices":[{"message":{"content":""}}],"usage":{"prompt_tokens":8,"completion_tokens":0}}`
 	got := validateJSON("chat", strings.NewReader(body))
+	if !got.ok || !got.empty || got.promptTokens != 8 {
+		t.Fatalf("expected an empty success, got %+v", got)
+	}
+}
+
+func TestValidateJSONRejectsAMalformedCompletion(t *testing.T) {
+	got := validateJSON("chat", strings.NewReader(`{"choices":[]}`))
 	if got.ok || got.kind != "protocol" {
 		t.Fatalf("expected a protocol failure, got %+v", got)
 	}

@@ -16,11 +16,18 @@ type CallView struct {
 	ID                     string     `json:"id" required:"true"`
 	AgentKeyID             string     `json:"agent_key_id" required:"true"`
 	ClientFormat           string     `json:"client_format" required:"true"`
+	Operation              string     `json:"operation" required:"true" enum:"generation,count_tokens,models,model,responses_retrieve,responses_input_items,responses_cancel,responses_delete,embeddings,moderations" description:"Endpoint family of the request"`
+	Purpose                string     `json:"purpose" required:"true" enum:"chat,subagent,compaction,title,description,review,memory,suggestion,probe,count_tokens,model_list,embedding,moderation,unknown" description:"Why the client issued the request"`
+	PurposeSource          string     `json:"purpose_source" required:"true" enum:"declared,heuristic,default" description:"How the purpose was established"`
+	Lane                   string     `json:"lane" required:"true" enum:"main,side,auxiliary" description:"Role of the call in the conversation"`
 	PublicModel            string     `json:"public_model" required:"true"`
 	ModelID                string     `json:"model_id" required:"true"`
 	UpstreamModel          string     `json:"upstream_model" required:"true"`
 	ChannelID              string     `json:"channel_id" required:"true"`
-	State                  string     `json:"state" required:"true" enum:"running,completed,failed,blocked,cancelled,interrupted,rejected"`
+	RouteID                string     `json:"route_id" required:"true"`
+	Resolution             string     `json:"resolution" required:"true" enum:"exact,alias,explicit,fallback" description:"How the route was matched; fallback marks the project default route"`
+	State                  string     `json:"state" required:"true" enum:"running,completed,failed,cancelled,interrupted"`
+	Outcome                string     `json:"outcome" required:"true" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled" description:"Terminal reason independent of the HTTP lifecycle"`
 	ErrorCode              string     `json:"error_code" required:"true"`
 	Stream                 bool       `json:"stream" required:"true"`
 	FirstTokenMilliseconds int        `json:"first_token_ms" required:"true"`
@@ -33,7 +40,8 @@ type CallView struct {
 	UsageKnown             bool       `json:"usage_known" required:"true"`
 	CostMicros             *int64     `json:"cost_micros" required:"true"`
 	Currency               string     `json:"currency" required:"true"`
-	RedactionHits          int        `json:"redaction_hits" required:"true"`
+	RedactionValues        int        `json:"redaction_values" required:"true" description:"Distinct redacted values this call introduced"`
+	RedactionLabels        []string   `json:"redaction_labels" required:"true" description:"Distinct redaction labels of this call"`
 	AnalysisState          string     `json:"analysis_state" required:"true"`
 	LatestAnalysisID       string     `json:"latest_analysis_id" required:"true"`
 	FindingCount           int        `json:"finding_count" required:"true"`
@@ -74,25 +82,39 @@ type TurnView struct {
 }
 
 type ItemView struct {
-	Kind       string          `json:"kind" required:"true"`
-	Origin     string          `json:"origin" required:"true"`
-	Trust      string          `json:"trust" required:"true"`
-	Text       string          `json:"text" required:"true"`
-	ToolCall   *ToolCallView   `json:"tool_call,omitempty"`
-	ToolResult *ToolResultView `json:"tool_result,omitempty"`
-	Media      *MediaView      `json:"media,omitempty"`
-	CallID     string          `json:"call_id" required:"true"`
-	Path       string          `json:"path,omitempty"`
+	Kind            string               `json:"kind" required:"true"`
+	Origin          string               `json:"origin" required:"true"`
+	Trust           string               `json:"trust" required:"true"`
+	Text            string               `json:"text" required:"true" description:"Raw text for administrators, shown text otherwise"`
+	ShownText       string               `json:"shown_text,omitempty" description:"Shown text, always present when the item has redactions"`
+	ToolCall        *ToolCallView        `json:"tool_call,omitempty"`
+	ToolResult      *ToolResultView      `json:"tool_result,omitempty"`
+	Media           *MediaView           `json:"media,omitempty"`
+	CallID          string               `json:"call_id" required:"true"`
+	Section         string               `json:"section" required:"true" enum:"request,response,instructions,params,tools"`
+	Ordinal         int                  `json:"ordinal" required:"true"`
+	Path            string               `json:"path,omitempty"`
+	ShownRedactions []ShownRedactionView `json:"shown_redactions" required:"true" description:"Ranges of the shown text the UI highlights"`
+	RedactionLabels []string             `json:"redaction_labels" required:"true"`
+}
+
+type ShownRedactionView struct {
+	Start   int    `json:"start" required:"true"`
+	End     int    `json:"end" required:"true"`
+	Label   string `json:"label" required:"true"`
+	Action  string `json:"action" required:"true"`
+	ValueID string `json:"value_id" required:"true"`
 }
 
 type ToolCallView struct {
-	ID           string     `json:"id" required:"true"`
-	Name         string     `json:"name" required:"true"`
-	Kind         string     `json:"kind" required:"true"`
-	Arguments    string     `json:"arguments" required:"true"`
-	Target       TargetView `json:"target" required:"true"`
-	Capabilities []string   `json:"capabilities" required:"true"`
-	Sink         string     `json:"sink" required:"true"`
+	ID             string     `json:"id" required:"true"`
+	Name           string     `json:"name" required:"true"`
+	Kind           string     `json:"kind" required:"true"`
+	Arguments      string     `json:"arguments" required:"true"`
+	ShownArguments string     `json:"shown_arguments,omitempty" description:"Shown arguments, present when they differ from the raw arguments"`
+	Target         TargetView `json:"target" required:"true"`
+	Capabilities   []string   `json:"capabilities" required:"true"`
+	Sink           string     `json:"sink" required:"true"`
 }
 
 type TargetView struct {
@@ -151,8 +173,11 @@ type AxesView struct {
 }
 
 type FlowView struct {
-	SourceTurn     int     `json:"source_turn" required:"true"`
-	SourceItem     int     `json:"source_item" required:"true"`
+	SourceTurn     int     `json:"source_turn" required:"true" description:"Detector-time turn index; kept for detector parity"`
+	SourceItem     int     `json:"source_item" required:"true" description:"Detector-time item index; kept for detector parity"`
+	SourceCallID   string  `json:"source_call_id" required:"true"`
+	SourceSection  string  `json:"source_section" required:"true" enum:"request,response,instructions,params,tools"`
+	SourceOrdinal  int     `json:"source_ordinal" required:"true"`
 	SourceOrigin   string  `json:"source_origin" required:"true"`
 	SourcePath     string  `json:"source_path" required:"true"`
 	SinkToolCallID string  `json:"sink_tool_call_id" required:"true"`
@@ -250,7 +275,26 @@ type CallDetailView struct {
 	Timeline   []TimelineEntryView `json:"timeline" required:"true"`
 	Integrity  AuditIntegrityView  `json:"integrity" required:"true"`
 	Events     []EventView         `json:"events" required:"true" description:"Only returned to administrators"`
-	Hits       []HitView           `json:"hits" required:"true"`
+	Hits       []CallHitView       `json:"hits" required:"true" description:"Distinct redacted values introduced by this call"`
+}
+
+type CallHitView struct {
+	ValueID     string            `json:"value_id" required:"true"`
+	Label       string            `json:"label" required:"true"`
+	Action      string            `json:"action" required:"true" enum:"replace,block,alert"`
+	Detector    string            `json:"detector" required:"true" description:"Derived hint; empty when the label is not a built-in detector"`
+	Secret      bool              `json:"secret" required:"true"`
+	Occurrences []HitLocationView `json:"occurrences" required:"true"`
+}
+
+type HitLocationView struct {
+	Section    string `json:"section" required:"true"`
+	Ordinal    int    `json:"ordinal" required:"true"`
+	Path       string `json:"path" required:"true"`
+	Start      int    `json:"start" required:"true"`
+	End        int    `json:"end" required:"true"`
+	ShownStart int    `json:"shown_start" required:"true"`
+	ShownEnd   int    `json:"shown_end" required:"true"`
 }
 
 type TimelineEntryView struct {
@@ -269,6 +313,9 @@ type TimelineEntryView struct {
 	ModelID       string            `json:"model_id" required:"true"`
 	UpstreamModel string            `json:"upstream_model" required:"true"`
 	KeyID         string            `json:"key_id" required:"true"`
+	RouteID       string            `json:"route_id" required:"true"`
+	RouteName     string            `json:"route_name" required:"true"`
+	Resolution    string            `json:"resolution" required:"true"`
 	Response      *TimelineResponse `json:"response,omitempty"`
 }
 
@@ -292,17 +339,21 @@ type AuditIntegrityView struct {
 }
 
 type AttemptView struct {
-	ChannelID        string `json:"channel_id" required:"true"`
-	ChannelName      string `json:"channel_name" required:"true"`
-	ModelID          string `json:"model_id" required:"true"`
-	UpstreamModel    string `json:"upstream_model" required:"true"`
-	KeyID            string `json:"key_id" required:"true"`
-	StartOffset      int64  `json:"start_ms" required:"true"`
-	EndOffset        int64  `json:"end_ms" required:"true"`
-	FirstTokenOffset int64  `json:"first_token_ms" required:"true"`
-	Result           string `json:"result" required:"true"`
-	Code             string `json:"code" required:"true"`
-	Class            string `json:"class" required:"true"`
+	Index                int    `json:"index" required:"true"`
+	ChannelID            string `json:"channel_id" required:"true"`
+	ChannelName          string `json:"channel_name" required:"true"`
+	ModelID              string `json:"model_id" required:"true"`
+	UpstreamModel        string `json:"upstream_model" required:"true"`
+	Format               string `json:"format" required:"true"`
+	KeyID                string `json:"key_id" required:"true"`
+	StartOffset          int64  `json:"start_ms" required:"true"`
+	EndOffset            int64  `json:"end_ms" required:"true"`
+	FirstTokenOffset     int64  `json:"first_token_ms" required:"true"`
+	DurationMilliseconds int64  `json:"duration_ms" required:"true"`
+	Result               string `json:"result" required:"true" enum:"running,succeeded,failed,cancelled"`
+	Code                 string `json:"code" required:"true"`
+	Class                string `json:"class" required:"true"`
+	Recovered            bool   `json:"recovered" required:"true" description:"A later attempt of the same call succeeded"`
 }
 
 type EventView struct {
@@ -316,11 +367,16 @@ type EventView struct {
 type listCallsInput struct {
 	projectPath
 	pageQuery
-	State       string `query:"state" json:"-" enum:"running,completed,failed,blocked,cancelled,interrupted,rejected"`
-	MinSeverity string `query:"min_severity" json:"-" enum:"info,medium,high"`
-	Model       string `query:"model" json:"-"`
-	AgentKeyID  string `query:"agent_key_id" json:"-"`
-	SessionID   string `query:"session_id" json:"-"`
+	State            string `query:"state" json:"-" enum:"running,completed,failed,cancelled,interrupted"`
+	MinSeverity      string `query:"min_severity" json:"-" enum:"info,medium,high"`
+	Model            string `query:"model" json:"-"`
+	AgentKeyID       string `query:"agent_key_id" json:"-"`
+	SessionID        string `query:"session_id" json:"-"`
+	Lane             string `query:"lane" json:"-" enum:"main,side,auxiliary"`
+	Operation        string `query:"operation" json:"-" enum:"generation,count_tokens,models,model,responses_retrieve,responses_input_items,responses_cancel,responses_delete,embeddings,moderations"`
+	Purpose          string `query:"purpose" json:"-" enum:"chat,subagent,compaction,title,description,review,memory,suggestion,probe,count_tokens,model_list,embedding,moderation,unknown"`
+	Outcome          string `query:"outcome" json:"-" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled"`
+	IncludeAuxiliary bool   `query:"include_auxiliary" json:"-" description:"Include auxiliary protocol calls; ignored when lane is set"`
 }
 
 type callPath struct {
@@ -367,13 +423,17 @@ func callView(value *entity.Call) CallView {
 		losses = append(losses, LossView{Path: loss.Path, Code: loss.Code, Class: loss.Class, Detail: loss.Detail, From: loss.From, To: loss.To, ItemKey: loss.ItemKey})
 	}
 	return CallView{
-		ID: value.ID, AgentKeyID: value.AgentKeyID, ClientFormat: value.ClientFormat, PublicModel: value.PublicModel,
-		ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, ChannelID: value.ChannelID, State: value.State, ErrorCode: value.ErrorCode,
+		ID: value.ID, AgentKeyID: value.AgentKeyID, ClientFormat: value.ClientFormat,
+		Operation: string(value.Operation), Purpose: string(value.Purpose), PurposeSource: string(value.PurposeSource),
+		Lane: string(value.Lane), PublicModel: value.PublicModel,
+		ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, ChannelID: value.ChannelID,
+		RouteID: value.RouteID, Resolution: value.Resolution, State: value.State, Outcome: string(value.Outcome), ErrorCode: value.ErrorCode,
 		Stream: value.Stream, FirstTokenMilliseconds: value.FirstTokenMilliseconds, DurationMilliseconds: value.DurationMilliseconds,
 		InputTokens: value.InputTokens, OutputTokens: value.OutputTokens, CacheReadTokens: value.CacheReadTokens,
 		CacheWriteTokens: value.CacheWriteTokens, ReasoningTokens: value.ReasoningTokens, UsageKnown: value.UsageKnown,
-		CostMicros: value.CostMicros, Currency: value.Currency, RedactionHits: value.RedactionHits,
-		AnalysisState: value.AnalysisState, LatestAnalysisID: value.LatestAnalysisID, FindingCount: value.FindingCount,
+		CostMicros: value.CostMicros, Currency: value.Currency, RedactionValues: value.RedactionValues,
+		RedactionLabels: nonNil(value.RedactionLabels),
+		AnalysisState:   value.AnalysisState, LatestAnalysisID: value.LatestAnalysisID, FindingCount: value.FindingCount,
 		MaxSeverity: value.MaxSeverity, Losses: losses, Attempts: value.Attempts, SessionID: value.SessionID,
 		ParentCallID: value.ParentCallID, CreatedAt: stamp(value.CreatedAt), TerminatedAt: stampOptional(value.TerminatedAt),
 	}
@@ -384,12 +444,46 @@ func eventView(value *entity.Event) EventView {
 }
 
 func attemptView(value *service.CallAttempt) AttemptView {
-	return AttemptView{ChannelID: value.ChannelID, ChannelName: value.ChannelName, ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, KeyID: value.KeyID, StartOffset: value.StartOffset, EndOffset: value.EndOffset, FirstTokenOffset: value.FirstTokenOffset, Result: value.Result, Code: value.Code, Class: value.Class}
+	return AttemptView{
+		Index: value.Index, ChannelID: value.ChannelID, ChannelName: value.ChannelName,
+		ModelID: value.ModelID, UpstreamModel: value.UpstreamModel, Format: value.Format, KeyID: value.KeyID,
+		StartOffset: value.StartOffset, EndOffset: value.EndOffset, FirstTokenOffset: value.FirstTokenOffset,
+		DurationMilliseconds: value.DurationMilliseconds, Result: value.Result, Code: value.Code,
+		Class: value.Class, Recovered: value.Recovered,
+	}
 }
 
 func itemView(value observation.Item, administrator bool) ItemView {
-	view := ItemView{Kind: string(value.Kind), Origin: string(value.Origin), Trust: string(value.Trust), CallID: value.Locator.CallID, Path: value.Locator.Path}
+	locator := value.Locator
+	if locator.Section == "" {
+		locator.Section = observation.SectionRequest
+	}
+	view := ItemView{
+		Kind: string(value.Kind), Origin: string(value.Origin), Trust: string(value.Trust),
+		CallID: value.Locator.CallID, Section: string(locator.Section), Ordinal: locator.Ordinal, Path: value.Locator.Path,
+		ShownRedactions: []ShownRedactionView{}, RedactionLabels: []string{},
+	}
 	view.Text = textOf(value.Text, administrator)
+	spans := value.Text.ShownRedactions
+	if len(spans) == 0 && value.ToolCall != nil {
+		spans = value.ToolCall.Arguments.ShownRedactions
+	}
+	view.ShownRedactions = viewAll(spans, func(span *observation.ShownSpan) ShownRedactionView {
+		return ShownRedactionView{Start: span.Start, End: span.End, Label: span.Label, Action: span.Action, ValueID: span.ValueID}
+	})
+	if len(spans) > 0 {
+		view.ShownText = value.Text.Shown
+	}
+	labels := []string{}
+	seen := map[string]bool{}
+	for _, span := range spans {
+		if span.Label == "" || seen[span.Label] {
+			continue
+		}
+		seen[span.Label] = true
+		labels = append(labels, span.Label)
+	}
+	view.RedactionLabels = labels
 	if value.ToolCall != nil {
 		target := value.ToolCall.Target
 		if !administrator && value.ToolCall.TargetShown.Kind != "" {
@@ -397,9 +491,10 @@ func itemView(value observation.Item, administrator bool) ItemView {
 		}
 		view.ToolCall = &ToolCallView{
 			ID: value.ToolCall.ID, Name: value.ToolCall.Name, Kind: value.ToolCall.Kind,
-			Arguments:    textOf(value.ToolCall.Arguments, administrator),
-			Target:       TargetView{Kind: target.Kind, Value: target.Value, Host: target.Host, Path: target.Path, Command: target.Command},
-			Capabilities: nonNil(value.ToolCall.Capabilities), Sink: string(value.ToolCall.Sink),
+			Arguments:      textOf(value.ToolCall.Arguments, administrator),
+			ShownArguments: shownArguments(value.ToolCall.Arguments, administrator),
+			Target:         TargetView{Kind: target.Kind, Value: target.Value, Host: target.Host, Path: target.Path, Command: target.Command},
+			Capabilities:   nonNil(value.ToolCall.Capabilities), Sink: string(value.ToolCall.Sink),
 		}
 	}
 	if value.ToolResult != nil {
@@ -413,6 +508,15 @@ func itemView(value observation.Item, administrator bool) ItemView {
 		view.Media = &MediaView{Kind: value.Media.Kind, MIMEType: value.Media.MIMEType, Filename: value.Media.Filename}
 	}
 	return view
+}
+
+// shownArguments carries the shown form whenever the raw form is what the reader sees, so the UI
+// can highlight placeholders without a second request.
+func shownArguments(value observation.Value, administrator bool) string {
+	if !administrator || value.Shown == value.Raw {
+		return ""
+	}
+	return value.Shown
 }
 
 func textOf(value observation.Value, administrator bool) string {
@@ -444,8 +548,11 @@ func transcriptView(value *service.Transcript, administrator bool) TranscriptVie
 
 func flowView(value *analysis.Flow) FlowView {
 	return FlowView{
-		SourceTurn: value.SourceTurn, SourceItem: value.SourceItem, SourceOrigin: string(value.SourceOrigin),
-		SourcePath: value.SourcePath, SinkToolCallID: value.SinkToolCallID, Sink: string(value.Sink),
+		SourceTurn: value.SourceTurn, SourceItem: value.SourceItem,
+		SourceCallID: value.SourceLocator.CallID, SourceSection: string(value.SourceLocator.Section),
+		SourceOrdinal: value.SourceLocator.Ordinal,
+		SourceOrigin:  string(value.SourceOrigin),
+		SourcePath:    value.SourcePath, SinkToolCallID: value.SinkToolCallID, Sink: string(value.Sink),
 		Relation: value.Relation, ContentHash: value.ContentHash, Confidence: value.Confidence,
 	}
 }
@@ -532,6 +639,11 @@ func timelineView(entry auditevent.Entry) TimelineEntryView {
 		view.ChannelID = entry.Decoded.AttemptFailure.ChannelID
 		view.KeyID = entry.Decoded.AttemptFailure.KeyID
 	}
+	if entry.Decoded.Routing != nil {
+		view.RouteID = entry.Decoded.Routing.RouteID
+		view.RouteName = entry.Decoded.Routing.RouteName
+		view.Resolution = entry.Decoded.Routing.Resolution
+	}
 	if entry.Decoded.ToolCall != nil {
 		view.ToolCallID = entry.Decoded.ToolCall.ID
 		view.ToolName = entry.Decoded.ToolCall.Name
@@ -570,10 +682,7 @@ func callDetailView(detail *service.CallDetail, administrator bool) CallDetailVi
 	if administrator {
 		events = viewAll(detail.Events, eventView)
 	}
-	hits := make([]HitView, 0, len(detail.Transcript.Hits))
-	for index := range detail.Transcript.Hits {
-		hits = append(hits, hitView(&detail.Transcript.Hits[index]))
-	}
+	hits := viewAll(detail.Hits, callHitView)
 	analyses := make([]AnalysisView, 0, len(detail.Analyses))
 	for _, analysis := range detail.Analyses {
 		analyses = append(analyses, analysisView(analysis))
@@ -596,7 +705,12 @@ func (console *Console) registerCalls() {
 		if err != nil {
 			return nil, err
 		}
-		filter := service.CallFilter{State: ctx.Query("state"), MinSeverity: ctx.Query("min_severity"), Model: ctx.Query("model"), AgentKeyID: ctx.Query("agent_key_id"), SessionID: ctx.Query("session_id")}
+		filter := service.CallFilter{
+			State: ctx.Query("state"), MinSeverity: ctx.Query("min_severity"), Model: ctx.Query("model"),
+			AgentKeyID: ctx.Query("agent_key_id"), SessionID: ctx.Query("session_id"),
+			Lane: ctx.Query("lane"), Operation: ctx.Query("operation"), Purpose: ctx.Query("purpose"),
+			Outcome: ctx.Query("outcome"), IncludeAuxiliary: ctx.Query("include_auxiliary") == "true",
+		}
 		page, err := console.Calls.List(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), filter, position)
 		if err != nil {
 			return nil, err
@@ -614,10 +728,7 @@ func (console *Console) registerCalls() {
 		return callDetailView(detail, identity.User.Administrator), nil
 	})
 	console.add("GET", "/projects/{project_id}/calls/{call_id}/analyses", "listCallAnalyses", analysesOfCallInput{}, AnalysisPage{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
-		views, err := console.Analysis.AnalysesOfCall(ctx.Request.Context(), ctx.Param("project_id"), ctx.Param("call_id"))
+		views, err := console.Analysis.AnalysesOfCall(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), ctx.Param("call_id"))
 		if err != nil {
 			return nil, analysisError(err)
 		}
@@ -628,30 +739,24 @@ func (console *Console) registerCalls() {
 		return AnalysisPage{Items: items}, nil
 	})
 	console.add("POST", "/projects/{project_id}/calls/{call_id}/analyses", "reanalyzeCall", analysesOfCallInput{}, AnalysisView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		if !console.analysisLimit.Allow("analysis:" + identity.User.ID) {
 			return nil, errRateLimited
 		}
-		record, err := console.Analysis.AnalyzeCall(ctx.Request.Context(), ctx.Param("project_id"), ctx.Param("call_id"), "")
+		record, err := console.Analysis.AnalyzeCall(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), ctx.Param("call_id"), "")
 		if err != nil {
 			return nil, analysisError(err)
 		}
-		view, err := console.Analysis.AnalysisView(ctx.Request.Context(), ctx.Param("project_id"), record.ID)
+		view, err := console.Analysis.AnalysisView(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), record.ID)
 		if err != nil {
 			return nil, analysisError(err)
 		}
 		return analysisView(view), nil
 	})
 	console.add("GET", "/projects/{project_id}/analyses/diff", "diffAnalyses", diffInput{}, DiffView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		if err := console.Project.Require(ctx.Request.Context(), identity.actor(), ctx.Param("project_id")); err != nil {
-			return nil, err
-		}
 		if ctx.Query("before") == "" || ctx.Query("after") == "" {
 			return nil, errInvalidRequest
 		}
-		diff, err := console.Analysis.Diff(ctx.Request.Context(), ctx.Param("project_id"), ctx.Query("before"), ctx.Query("after"))
+		diff, err := console.Analysis.Diff(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), ctx.Query("before"), ctx.Query("after"))
 		if err != nil {
 			return nil, analysisError(err)
 		}
@@ -669,4 +774,17 @@ func (console *Console) registerCalls() {
 		}
 		return DiffView{BeforeID: diff.BeforeID, AfterID: diff.AfterID, Comparable: diff.Comparable, Reason: diff.Reason, Added: added, Removed: removed, Changed: changed, BeforeCount: diff.BeforeCount, AfterCount: diff.AfterCount}, nil
 	})
+}
+
+func callHitView(value *service.RedactionValue) CallHitView {
+	return CallHitView{
+		ValueID: value.ValueID, Label: value.Label, Action: string(value.Action),
+		Detector: value.Detector, Secret: value.Secret,
+		Occurrences: viewAll(value.Occurrences, func(occurrence *service.RedactionOccurrence) HitLocationView {
+			return HitLocationView{
+				Section: string(occurrence.Section), Ordinal: occurrence.Ordinal, Path: occurrence.Path,
+				Start: occurrence.Start, End: occurrence.End, ShownStart: occurrence.ShownStart, ShownEnd: occurrence.ShownEnd,
+			}
+		}),
+	}
 }

@@ -5,12 +5,20 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleProviderViewHosts } from './consoleProviderViewHosts.ts';
+import type { ConsoleProviderViewSource } from './consoleProviderViewSource.ts';
 
 export interface ConsoleProviderView {
-  custom?: boolean;
-  formats?: string[];
-  hosts?: ConsoleProviderViewHosts;
+  channel_count: number;
+  created_at: string;
+  deleted_at?: string;
+  enabled: boolean;
+  /** Endpoint catalog keyed by wire format */
+  endpoints: unknown;
+  formats: string[];
   id: string;
   label: string;
+  seed_version: number;
+  source: ConsoleProviderViewSource;
+  updated_at: string;
+  version: number;
 }

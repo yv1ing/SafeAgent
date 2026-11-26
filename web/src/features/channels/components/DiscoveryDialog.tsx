@@ -8,12 +8,10 @@ export function DiscoveryDialog({
   channelId,
   format,
   onClose,
-  onImported,
 }: {
   channelId: string;
   format: string;
   onClose: () => void;
-  onImported: (modelIds: string[]) => void;
 }) {
   const { t } = useLocale();
   const discover = useDiscoverChannelModels(channelId);
@@ -23,7 +21,7 @@ export function DiscoveryDialog({
     discover.mutate(format, {
       onSuccess: (result) => setSelected(result.models ?? []),
     });
-  }, [format]);
+  }, [channelId, format]);
   const names = discover.data?.models ?? [];
   const toggle = (name: string) =>
     setSelected(
@@ -33,7 +31,7 @@ export function DiscoveryDialog({
     <FormDialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title={t.channels.discoverTitle.replace('{format}', format)}
+      title={interpolate(t.channels.discoverTitle, { format })}
       description={t.channels.discoverHint}
       submitLabel={t.channels.importSelected}
       pending={importModels.isPending}
@@ -48,7 +46,10 @@ export function DiscoveryDialog({
                   interpolate(t.channels.skipped, { models: result.skipped.join(', ') }),
                 );
               }
-              onImported(result.added ?? []);
+              if (result.created?.length) {
+                toast.success(interpolate(t.channels.imported, { count: result.created.length }));
+              }
+              onClose();
             },
           },
         )
@@ -58,7 +59,7 @@ export function DiscoveryDialog({
       {!discover.isPending && names.length === 0 && (
         <p className="text-sm text-muted">{t.channels.noDiscovery}</p>
       )}
-      <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+      <ul className="scroll-thin flex max-h-80 flex-col gap-1 overflow-y-auto">
         {names.map((name) => (
           <li key={name}>
             <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sunken">

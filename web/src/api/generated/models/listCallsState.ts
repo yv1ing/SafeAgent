@@ -12,8 +12,6 @@ export const ListCallsState = {
   running: 'running',
   completed: 'completed',
   failed: 'failed',
-  blocked: 'blocked',
   cancelled: 'cancelled',
   interrupted: 'interrupted',
-  rejected: 'rejected',
 } as const;

@@ -13,6 +13,8 @@ export interface ConsoleToolCallView {
   id: string;
   kind: string;
   name: string;
+  /** Shown arguments, present when they differ from the raw arguments */
+  shown_arguments?: string;
   sink: string;
   target: ConsoleTargetView;
 }

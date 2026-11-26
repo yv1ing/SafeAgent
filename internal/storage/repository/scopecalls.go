@@ -9,13 +9,15 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
-// ScopeCalls returns the calls covered by a replay scope, oldest first and hard-capped.
+// ScopeCalls returns the calls covered by a replay scope, oldest first and hard-capped. Auxiliary
+// protocol traffic is never replayed or diagnosed.
 func (store *Store) ScopeCalls(ctx context.Context, projectID string, scopeKind, callID, sessionID, agentKeyID string, from, to time.Time, limit int) ([]entity.Call, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 5000
 	}
 	calls := []entity.Call{}
-	query := store.DB.NewSelect().Model(&calls).Where("project_id = ?", projectID).Where("state <> 'running'")
+	query := store.DB.NewSelect().Model(&calls).Where("project_id = ?", projectID).
+		Where("state <> 'running'").Where("lane <> ?", "auxiliary")
 	switch scopeKind {
 	case "call":
 		query = query.Where("id = ?", callID)

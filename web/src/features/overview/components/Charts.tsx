@@ -1,11 +1,11 @@
 import type { ConsoleSeriesView, ConsoleStatsView } from '../../../api/generated/models';
+import { ChartCard } from '../../../components/charts/ChartCard';
+import { TimeChart } from '../../../components/charts/TimeChart';
+import { Card } from '../../../components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { findingLabel, useLocale } from '../../../i18n';
 import { formatBucket, formatCost, formatNumber, formatTokens } from '../../../lib/format';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
-import { Card } from '../../../components/ui/card';
-import { ChartCard } from './ChartCard';
 import { RankList } from './RankList';
-import { TimeChart } from './TimeChart';
 
 const rankLimit = 6;
 
@@ -27,7 +27,7 @@ export function TrafficCharts({ series }: { series: ConsoleSeriesView }) {
     { key: 'output', label: t.overview.outputTokens, color: 'var(--chart-2)' },
   ];
   const table = (series: typeof requestSeries) => ({
-    columns: [t.overview.time, ...series.map((entry) => entry.label)],
+    columns: [t.table.time, ...series.map((entry) => entry.label)],
     rows: rows.map((row) => [
       row.time,
       ...series.map((entry) => row[entry.key as keyof typeof row]),
@@ -78,7 +78,7 @@ export function Breakdowns({
   const redactions = (series?.redactions ?? []).slice(0, rankLimit).map((entry) => ({
     key: entry.label,
     label: <span className="font-mono">{entry.label}</span>,
-    value: entry.hits,
+    value: entry.values,
   }));
   return (
     <Tabs defaultValue="models">

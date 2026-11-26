@@ -225,3 +225,50 @@ func TestToolResultMediaStaysStructured(t *testing.T) {
 	}
 	testkit.AssertJSON(t, out, "messages.0.content.0.content.1.type", "image")
 }
+
+func signatureEvents(signature *model.Signature) []model.Event {
+	reasoning := &model.Reasoning{Visibility: "full", Signature: signature}
+	return []model.Event{
+		{Kind: model.EventMessageStart, Meta: &model.ResponseMeta{ID: "msg_1", Model: "m"}},
+		{Kind: model.EventItemStart, ItemIndex: 0, Item: &model.Item{Kind: model.ItemReasoning, Role: model.RoleAssistant, Reasoning: reasoning}},
+		{Kind: model.EventPartStart, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText}},
+		{Kind: model.EventPartDelta, ItemIndex: 0, PartIndex: 0, Delta: "kept thought"},
+		{Kind: model.EventPartStop, ItemIndex: 0, PartIndex: 0, Part: &model.Part{Kind: model.PartReasoningText, Text: "kept thought"}},
+		{Kind: model.EventItemStop, ItemIndex: 0, Item: &model.Item{Kind: model.ItemReasoning, Role: model.RoleAssistant, Reasoning: reasoning}},
+		{Kind: model.EventMessageDelta, Finish: &model.Finish{Kind: model.FinishStop}},
+		{Kind: model.EventMessageStop},
+	}
+}
+
+func signatureOf(t *testing.T, events []model.Event) (string, []model.Loss) {
+	t.Helper()
+	output, losses := testkit.EncodeEvents(t, messages.New().NewStreamEncoder(model.ResponseMeta{ID: "msg_1", Model: "m"}, upstream), events)
+	sealed := ""
+	for _, frame := range output {
+		if signature, ok := testkit.JSONValue(t, frame.Data, "delta.signature").(string); ok {
+			sealed = signature
+		}
+	}
+	return sealed, losses
+}
+
+func TestSignatureForDifferentTextIsReportedAsDropped(t *testing.T) {
+	signature := &model.Signature{Vendor: model.VendorAnthropic, Blob: "opaque", TextDigest: model.TextDigest("another thought")}
+	sealed, losses := signatureOf(t, signatureEvents(signature))
+	if sealed != "" {
+		t.Fatalf("a signature that does not cover the part must not be sent: %q", sealed)
+	}
+	found := false
+	for _, loss := range losses {
+		found = found || loss.Code == model.LossSignatureStripped
+	}
+	if !found {
+		t.Fatalf("a dropped reasoning signature must be a visible loss: %+v", losses)
+	}
+
+	signature.TextDigest = model.TextDigest("kept thought")
+	sealed, losses = signatureOf(t, signatureEvents(signature))
+	if sealed != "opaque" {
+		t.Fatalf("a signature covering the part must be sent: %q %+v", sealed, losses)
+	}
+}

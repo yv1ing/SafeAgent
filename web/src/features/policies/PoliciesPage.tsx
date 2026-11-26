@@ -16,6 +16,7 @@ import { Button } from '../../components/ui/button';
 import { Card, CardHeader } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { errorMessage, useLocale } from '../../i18n';
+import { formatDate } from '../../lib/format';
 
 function pretty(document: unknown) {
   return JSON.stringify(document, null, 2);
@@ -150,7 +151,7 @@ export function PoliciesPage() {
                           {current ? t.policies.active : t.policies.historical}
                         </Badge>
                         <span className="ml-auto text-faint">
-                          {new Date(version.created_at).toLocaleString(locale)}
+                          {formatDate(version.created_at, locale)}
                         </span>
                       </div>
                       <span className="truncate font-mono text-faint">{version.hash}</span>
