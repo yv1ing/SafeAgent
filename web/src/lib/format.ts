@@ -81,14 +81,11 @@ export function stateTone(state: string | undefined): Tone {
   switch (state) {
     case 'completed':
       return 'success';
-    case 'blocked':
-      return 'warning';
     case 'running':
       return 'info';
     case 'failed':
     case 'cancelled':
     case 'interrupted':
-    case 'rejected':
       return 'danger';
     default:
       return 'neutral';

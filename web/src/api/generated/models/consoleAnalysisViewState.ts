@@ -10,7 +10,6 @@ export type ConsoleAnalysisViewState =
   (typeof ConsoleAnalysisViewState)[keyof typeof ConsoleAnalysisViewState];
 
 export const ConsoleAnalysisViewState = {
-  running: 'running',
   completed: 'completed',
   failed: 'failed',
 } as const;

@@ -5,6 +5,7 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
+import type { ConsoleCallViewAnalysisState } from './consoleCallViewAnalysisState.ts';
 import type { ConsoleCallViewLane } from './consoleCallViewLane.ts';
 import type { ConsoleCallViewOperation } from './consoleCallViewOperation.ts';
 import type { ConsoleCallViewOutcome } from './consoleCallViewOutcome.ts';
@@ -16,7 +17,8 @@ import type { ConsoleLossView } from './consoleLossView.ts';
 
 export interface ConsoleCallView {
   agent_key_id: string;
-  analysis_state: string;
+  /** Diagnosis projection: a side or auxiliary call is skipped */
+  analysis_state: ConsoleCallViewAnalysisState;
   attempts: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
@@ -40,8 +42,8 @@ export interface ConsoleCallView {
   model_id: string;
   /** Endpoint family of the request */
   operation: ConsoleCallViewOperation;
-  /** Terminal reason independent of the HTTP lifecycle */
-  outcome: ConsoleCallViewOutcome;
+  /** Terminal reason independent of the HTTP lifecycle; absent while the call is running */
+  outcome?: ConsoleCallViewOutcome;
   output_tokens: number;
   parent_call_id: string;
   public_model: string;
@@ -54,8 +56,8 @@ export interface ConsoleCallView {
   redaction_labels: string[];
   /** Distinct redacted values this call introduced */
   redaction_values: number;
-  /** How the route was matched; fallback marks the project default route */
-  resolution: ConsoleCallViewResolution;
+  /** How the route was matched; fallback marks the project default route; absent until the call is routed */
+  resolution?: ConsoleCallViewResolution;
   route_id: string;
   session_id: string;
   state: ConsoleCallViewState;

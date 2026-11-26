@@ -88,7 +88,7 @@ export function CallDetail({
   const detail = useGetCall(projectId, callId, { query: { refetchInterval: interval } });
   useEffect(() => {
     if (detail.data) {
-      setPending(['pending', 'running'].includes(detail.data.call.analysis_state));
+      setPending(detail.data.call.analysis_state === 'pending');
     }
   }, [detail.data]);
   useEffect(() => {

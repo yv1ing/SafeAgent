@@ -96,7 +96,7 @@ Important mappings:
 
 The optional `X-SafeAgent-Session` header groups calls from one agent key. The value is trimmed, limited to 128 bytes and rejected if it contains control characters; the stored id is `sess_` plus a SHA-256 prefix over the agent key and the raw value. It is never an identity and never replaces authentication.
 
-Parent resolution order: `previous_response_id`, then the latest tool result, then the conversation-prefix fingerprint. The explicit header does not discover a parent; it names the session that groups the call. An explicit header that conflicts with a `previous_response_id` parent returns 409 `session_conflict` and the call is recorded as rejected. A heuristic parent in another session is dropped without rejecting the call. `auditevent.Request.SessionSource` records which source was used.
+Parent resolution order: `previous_response_id`, then the latest tool result, then the conversation-prefix fingerprint. The explicit header does not discover a parent; it names the session that groups the call. An explicit header that conflicts with a `previous_response_id` parent returns 409 `session_conflict` and the call fails with a `client_error` outcome. A heuristic parent in another session is dropped without rejecting the call. `auditevent.Request.SessionSource` records which source was used.
 
 ## Endpoint surface
 

@@ -119,7 +119,7 @@ A deterministic finding has these fields:
 | `Attribution` | turn, item, tool call and locator the finding is attributed to |
 | `Flow` | the source-to-sink edge when the finding is backed by one |
 
-The fingerprint does not depend on a byte offset, a timestamp or an analysis id, so re-analysing the same call keeps the same identities and two items with the same code do not collapse into one finding. Evidence and attribution carry the `Locator` of the item they point at; `Turn` and `Item` remain for detector logic and for rows written before identity existed.
+The fingerprint does not depend on a byte offset, a timestamp or an analysis id, so re-analysing the same call keeps the same identities and two items with the same code do not collapse into one finding. Evidence and attribution carry the `Locator` of the item they point at; `Turn` and `Item` remain for detector logic.
 
 An `Evidence` entry records the view it indexes (`raw` or `redacted`), its byte range, and a quote that is always safe to display: a match overlapping a redacted span is stored as `[redacted]`. Nested tool arguments carry their shown text separately, so evidence never quotes a value that the call view hides.
 

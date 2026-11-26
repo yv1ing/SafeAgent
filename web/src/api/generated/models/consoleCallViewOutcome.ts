@@ -7,7 +7,7 @@
  */
 
 /**
- * Terminal reason independent of the HTTP lifecycle
+ * Terminal reason independent of the HTTP lifecycle; absent while the call is running
  */
 export type ConsoleCallViewOutcome =
   (typeof ConsoleCallViewOutcome)[keyof typeof ConsoleCallViewOutcome];

@@ -44,8 +44,8 @@ func TestCallFilterEnumsTrackClassify(t *testing.T) {
 		"responses_input_items", "responses_cancel", "responses_delete", "embeddings", "moderations",
 	}, func(value string) bool { return classify.Operation(value).Valid() })
 	assertEnum(t, "Purpose", []string{
-		"chat", "subagent", "compaction", "title", "description", "review", "memory", "suggestion",
-		"probe", "count_tokens", "model_list", "embedding", "moderation", "unknown",
+		"chat", "subagent", "compaction", "title", "memory", "count_tokens", "model_list",
+		"embedding", "moderation", "unknown",
 	}, func(value string) bool { return classify.Purpose(value).Valid() })
 	assertEnum(t, "Outcome", []string{
 		"ok", "blocked", "rejected", "client_error", "upstream_error", "unsupported", "not_found",

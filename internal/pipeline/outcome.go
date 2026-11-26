@@ -15,8 +15,8 @@ type settlement struct {
 
 // settlementFor maps a failure to the terminal row state and outcome. A policy refusal completed the
 // protocol exchange it was asked to perform, and an auxiliary endpoint that does not serve the
-// request is a normal negative answer: neither is a gateway failure. Upstream and client errors are
-// failures, as is a cancelled call that never completed.
+// request is a normal negative answer: neither is a gateway failure. Upstream errors, client errors
+// and requests the upstream rejected are failures, as is a cancelled call that never completed.
 func settlementFor(failure *model.Error, lane classify.Lane) settlement {
 	if failure == nil {
 		return settlement{state: "completed", outcome: classify.OutcomeOK}
@@ -34,7 +34,7 @@ func settlementFor(failure *model.Error, lane classify.Lane) settlement {
 		}
 		return settlement{state: "failed", outcome: classify.OutcomeClientError}
 	case model.ClassRejected:
-		return settlement{state: "failed", outcome: classify.OutcomeClientError}
+		return settlement{state: "failed", outcome: classify.OutcomeRejected}
 	case model.ClassRateLimit:
 		return settlement{state: "failed", outcome: classify.OutcomeRateLimited}
 	default:

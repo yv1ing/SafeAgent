@@ -33,22 +33,22 @@ flowchart LR
 | Axis | Values | Meaning |
 | --- | --- | --- |
 | operation | `generation`, `count_tokens`, `models`, `model`, `responses_retrieve`, `responses_input_items`, `responses_cancel`, `responses_delete`, `embeddings`, `moderations` | the endpoint family the request addressed |
-| purpose | `chat`, `subagent`, `compaction`, `title`, `description`, `review`, `memory`, `suggestion`, `probe`, `count_tokens`, `model_list`, `embedding`, `moderation`, `unknown` | why a generation request was issued |
+| purpose | `chat`, `subagent`, `compaction`, `title`, `memory`, `count_tokens`, `model_list`, `embedding`, `moderation`, `unknown` | why a generation request was issued |
 | purpose source | `declared`, `heuristic`, `default` | how the purpose was established |
 | lane | `main`, `side`, `auxiliary` | the role of the call in a conversation |
 | outcome | `ok`, `blocked`, `rejected`, `client_error`, `upstream_error`, `unsupported`, `not_found`, `rate_limited`, `cancelled` | the terminal reason |
 
 The classifier reads declared headers first: `X-Openai-Subagent`, `X-Claude-Code-Agent-Id`, `X-Deepseek-Harness-Compact`, `X-Openai-Memgen-Request` and the `thread_source` field of `X-Codex-Turn-Metadata`. The only inferred purpose is `title`, recognized by no tools, an output budget of at most 512 tokens and a title-style instruction in the leading prompt. Anything else is `chat` with source `default`. A misclassification can only move a generation call into a background lane; it cannot move an auxiliary call into the main lane.
 
-An auxiliary operation is always lane `auxiliary`, with a purpose derived from the operation. A generation call is lane `side` for subagent, compaction, title, description, review, memory and suggestion purposes, and lane `main` otherwise.
+An auxiliary operation is always lane `auxiliary`, with a purpose derived from the operation. A generation call is lane `side` for subagent, compaction, title and memory purposes, and lane `main` otherwise.
 
 | Lane | Conversation | Diagnosis | Traffic request/failure counts | Call list |
 | --- | --- | --- | --- | --- |
 | `main` | writes it | written | counted | shown by default |
-| `side` | writes it, inherits the session | not written | not counted; tokens and cost are counted | shown with a lane badge |
+| `side` | writes it, inherits the session | not written | not counted; cost is counted | shown with a lane badge |
 | `auxiliary` | never writes one; `session_id` stays empty | skipped | not counted | hidden unless requested |
 
-Only `client_error` and `upstream_error` are failures. A policy block, a deliberate protocol refusal (`unsupported`, `not_found`) and a cancellation are completed or cancelled calls, not gateway failures. `settlementFor` is the single mapping from a protocol error to a call's terminal state and outcome.
+`client_error`, `upstream_error`, `rate_limited` and `rejected` are failures: the call ended without an answer. `rejected` covers an upstream that refused a request it understood and a response that exceeded a delivery bound. A policy block, a deliberate protocol refusal (`unsupported`, `not_found`) and a cancellation are completed or cancelled calls, not gateway failures. `settlementFor` is the single mapping from a protocol error to a call's terminal state and outcome.
 
 Routing follows the same lane rule: the explicit `X-SafeAgent-Model` header wins, then the exact route name or an alias; only side and auxiliary calls may fall back to the project's `default_route_id`, and a fallback is recorded as `resolution=fallback`. A main call whose model is not configured fails with `model_not_found`. [Providers](providers.md) owns the graph these names resolve against.
 

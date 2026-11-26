@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.2.0
  */
 
+/**
+ * Terminal reason; absent while the call is running
+ */
 export type ConsoleTrajectoryCallViewOutcome =
   (typeof ConsoleTrajectoryCallViewOutcome)[keyof typeof ConsoleTrajectoryCallViewOutcome];
 

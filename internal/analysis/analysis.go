@@ -14,7 +14,6 @@ import (
 )
 
 const (
-	AnalysisRunning   = "running"
 	AnalysisCompleted = "completed"
 	AnalysisFailed    = "failed"
 
@@ -55,8 +54,8 @@ type Verdict struct {
 	Reason     string  `json:"reason,omitempty"`
 }
 
-// Analysis is one diagnosis of one call. State running and failed are stored too: a failure is a
-// visible result, not an absent row.
+// Analysis is one diagnosis of one call. A failed analysis is stored too: a failure is a visible
+// result, not an absent row.
 type Analysis struct {
 	ID         string       `json:"id"`
 	ProjectID  string       `json:"project_id"`
@@ -80,7 +79,7 @@ type Analysis struct {
 func NewAnalysis(id, projectID, callID, agentKeyID, batchID string, versions Versions, inputHash string, startedAt time.Time) *Analysis {
 	return &Analysis{
 		ID: id, ProjectID: projectID, CallID: callID, AgentKeyID: agentKeyID, BatchID: batchID,
-		State: AnalysisRunning, Versions: versions, InputHash: inputHash,
+		Versions: versions, InputHash: inputHash,
 		Findings: []Finding{}, Flows: []Flow{}, StartedAt: startedAt,
 	}
 }

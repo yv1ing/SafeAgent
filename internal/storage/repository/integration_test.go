@@ -488,11 +488,11 @@ func TestStatisticsAndPrune(t *testing.T) {
 	}
 }
 
-func TestAuxiliaryRetentionZeroKeepsAuxiliaryCalls(t *testing.T) {
+func TestAuxiliaryRetentionZeroFollowsProjectRetention(t *testing.T) {
 	database := prepared(t)
 	seeded := seedWithAuxiliary(t, database, 1, 0)
 	ctx := context.Background()
-	auxiliary := seeded.auxiliaryCall("aux_keep", time.Now().UTC())
+	auxiliary := seeded.auxiliaryCall("aux_pruned", time.Now().UTC())
 	if err := database.CreateCall(ctx, auxiliary); err != nil {
 		t.Fatalf("create auxiliary: %v", err)
 	}
@@ -502,8 +502,8 @@ func TestAuxiliaryRetentionZeroKeepsAuxiliaryCalls(t *testing.T) {
 	if err := database.Prune(ctx, 30); err != nil {
 		t.Fatalf("prune: %v", err)
 	}
-	if _, err := database.Call(ctx, seeded.project.ID, auxiliary.ID); err != nil {
-		t.Fatalf("auxiliary retention 0 must keep auxiliary calls: %v", err)
+	if _, err := database.Call(ctx, seeded.project.ID, auxiliary.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("auxiliary retention 0 must follow the project retention: %v", err)
 	}
 }
 

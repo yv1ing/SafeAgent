@@ -4,161 +4,71 @@
 
 <p align="center">English · <a href="README_zh.md">中文</a></p>
 
-SafeAgent is a self-hosted security gateway for agent behavior. It sits between agent clients and model providers, converts the four wire formats agents use, masks sensitive data before it leaves the organization, and turns every call into a signed, replayable record. Operators get one place to watch traffic, investigate what an agent did, and stop a tool action before it reaches a business system.
+SafeAgent is a self-hostable security gateway for governing agent behavior. It sits between agent clients and model providers, accepts the four APIs agents commonly speak, masks sensitive values before they leave the organization, checks each request and tool call against project policy, and records every call in a signed, replayable audit trail. Operators use one console to watch traffic, understand what an agent did, and stop a risky action before it reaches a business system.
 
-## What it solves
+## Three common deployment problems
 
-Agents in production are given accounts, tools and network access. They read documents, send messages, change configuration and call internal services, and the effects of those actions are usually durable before anyone notices them.
+Agent deployments tend to fail in three places.
 
-| Production problem | What goes wrong | What SafeAgent does |
-| --- | --- | --- |
-| Fragmented interfaces | Four model APIs and several agent clients coexist; pairwise adaptation grows with every combination | one canonical model with bidirectional conversion, streaming and loss reporting |
-| Sensitive data egress | Requests leave with full text; redaction is reimplemented per client and inconsistently | reversible masking at the boundary, with policy evaluated on the masked view |
-| Invisible behavior | The initiator, destination and effect of a tool call cannot be linked, and plain logs prove nothing | call classification, protocol-neutral tracing, online checkpoints and a signed audit chain |
+**Fragmented interfaces.** Chat Completions, Responses, Anthropic Messages and Gemini coexist, and every new client or provider adds another pair of adapters to maintain. SafeAgent converts all four through one canonical model, so the integration work does not grow with every combination.
 
-These problems meet on one call path. SafeAgent handles them there, in the gateway, so a policy applies to every client without an SDK and the audit record is produced by the same component that enforced the decision.
+**Sensitive data exposure.** Requests carry customer records, internal identifiers and credentials. Masking implemented separately in each client is inconsistent at best. SafeAgent masks values at the boundary and restores them on the way back; policy and diagnosis work on the masked text.
 
-## Why SafeAgent
-
-Built separately, a protocol gateway sees only the request, an agent guard sees only the tool call, and a log platform cannot prove a record was not altered. SafeAgent runs conversion, the data boundary, the behavior trace and the audit trail on one path with one shared context.
-
-The gateway also separates agent activity from protocol plumbing. Primary calls are diagnosed and counted. Background work an agent performs during a conversation — subagents, compaction, title generation — stays visible but is not treated as primary activity. Auxiliary endpoints such as token counting, model listing or the Responses lifecycle never create conversations and never inflate failure rates.
+**Behavior that cannot be explained later.** A tool call can read a file, send a message or change a system. Ordinary logs cannot show who triggered it, what it touched, or whether the record was altered afterwards. SafeAgent traces content from its origin to the tool that used it, blocks disallowed actions while the call is in flight, and signs every audit event.
 
 ## Core capabilities
 
-### Unified protocol conversion
+### Protocol conversion
 
-Chat Completions, Responses, Anthropic Messages and Gemini convert in both directions through one internal model. A client and an upstream may use different formats, and each side is encoded on its own terms.
-
-- All four interfaces convert in both directions, with the same semantics for streaming and non-streaming traffic.
-- Dropped or rewritten fields are recorded in a per-call loss ledger and reported to the client.
-- Same-format Chat, Messages and Gemini requests that need no rewrite pass through as raw bytes; Responses always takes the canonical path because the gateway owns request state.
-- Provider endpoints, authentication, capability profiles and model discovery are maintained as editable catalog rows.
-- A project may review a bounded leading window of a streaming response before the first byte; the default is direct streaming.
+Chat Completions, Responses, Anthropic Messages and Gemini convert in both directions through one canonical model. The client and the upstream may use different formats, and the gateway encodes each side in its own protocol. Streaming and non-streaming calls share the same semantics. When a target format cannot carry a field, the call records the loss instead of dropping it silently.
 
 ### Sensitive data boundary
 
-Before a request leaves the gateway, detectors replace sensitive values; the model and the upstream only see the masked text. The response restores the original values from the call's mapping, so the client receives the complete result.
+Detectors replace sensitive values before a request leaves the gateway, so the model and the provider only see masked text. The response restores the original values from the call's mapping. A masked value keeps a stable identity across a conversation, which lets the console count and display it once instead of accumulating a copy on every continuation. Each call stores the rule set it ran under; historical calls are shown with those rules.
 
-- Reversible masking spans requests, streaming responses and auxiliary payloads; policy and diagnosis read the masked view.
-- Built-in detectors cover common personal data and credentials; projects add regular expressions and choose replace, block or alert for each rule.
-- A masked value keeps a deterministic identity, so repeated occurrences are counted and displayed once per conversation instead of accumulating on every continuation.
-- Each call stores a snapshot of the rules it ran under, and historical calls are displayed with those rules rather than the current ones.
-- Upstream keys and decision-model credentials are sealed with the instance key supplied at startup.
+### Behavior tracing and online policy
 
-### Behavior tracing and audit
+Every call becomes a protocol-neutral trace: where content came from, whether it is trusted, and what a tool call can do. Project rules run before the upstream call, before a tool call is released, before tool output returns to the model, and before a response is written. A project may also review the leading part of a streaming response before the first byte reaches the client.
 
-Every call is rebuilt as one protocol-neutral trace that records where content came from, whether it is trusted, and what a tool call can do. Policy runs at four checkpoints: request, tool call, tool result and response, with an optional reviewed window for streaming responses.
+### Editable model supply and routing
 
-- Trace: content origin, trust level and tool destination, inferred from names, arguments and normalized targets.
-- Conversations: calls are linked into a session; a conversation is rendered as one projection of calls, turns, items, tools, attempts, decisions, findings and masked values.
-- Audit chain: every audit event is HMAC-chained per call, and a call stores its own chain head and event count. Tampering and deleted tails are detected, and an offline command verifies stored chains without starting the gateway.
-- Diagnosis: a background worker rebuilds the trace from the same events, expands a bounded ancestor conversation, runs deterministic detectors, optionally asks a decision model, and stores findings, flows, coverage and a verdict.
-- Audit events also serve as replay steps: each step names the trajectory nodes it touched, and the projection keeps those steps beside the calls.
+Providers, channels, models, routes and targets are configuration records. Operators connect a provider once, select the models it exposes, and map a public model name to one or more channel-and-model pairs. A channel or model can be removed with an impact preview; routes that depended on it degrade visibly instead of disappearing.
 
-### Editable control plane
+### Operator console
 
-Suppliers and routing policy are separate graphs.
+The console shows traffic and failures, calls and conversations, risk findings and data flows, policy history, redaction rules, model supply and routing, and access control. Raw audit data is visible to administrators only, and operations that change state are recorded.
 
-- Providers describe protocol endpoints, capabilities and discovery. Built-in providers arrive as editable rows, and a custom provider can be added for an OpenAI-compatible or self-hosted endpoint.
-- Channels hold credentials, base URLs, limits and timeouts. Models describe upstream names, kinds and prices. Model formats are derived from the provider endpoints instead of stored separately.
-- A route maps a project-facing model name, plus optional aliases, to ordered targets. Each target names a channel and a model with a priority, a weight and an optional format and output limit.
-- Removing a channel or model is a soft delete with an impact preview; routes that referenced it degrade visibly instead of disappearing. A dangling supply or routing reference is reported as a warning and does not prevent startup.
-- Changes take effect without restarting the process.
+## Call path
 
-### Console and operations
-
-The console gives operators a view of traffic and failures, call and conversation records, risk findings and data flows, policy versions, redaction rules, models, channels, routes and access control. Raw audit payloads are visible to administrators only, and successful state-changing console operations are written to the operation log.
-
-## How it works
-
-```mermaid
-flowchart TB
-    Agent["agent or HTTP client"] --> API["four model APIs"]
-    API --> Classify["classify: operation, purpose, lane"]
-    Classify --> Convert["canonical model"]
-    Convert --> Boundary["reversible redaction"]
-    Boundary --> Trace["behavior trace: origin, trust, destination"]
-    Trace --> Review["online checkpoints"]
-    Review -->|allowed| Upstream["upstream provider"]
-    Review -->|blocked| Agent
-    Upstream --> Stream["stream session: commit boundary, tool hold, review window"]
-    Stream --> Convert
-    Convert --> Agent
-    Stream --> Audit["signed audit events"]
-    Review --> Decisions["online decisions"]
-    Audit --> DB[("PostgreSQL")]
-    Decisions --> DB
-    DB --> Worker["diagnosis worker"]
-    Worker --> DB
-    DB --> Console["operator console"]
-```
-
-A call follows this path:
-
-1. The gateway authenticates the agent key, decodes the request into the canonical model and classifies it by endpoint operation, purpose and lane.
-2. Sensitive values are replaced before the request crosses the boundary. The gateway rebuilds the call as a trace: who supplied the content, whether it is trusted, and where a tool can send data.
-3. The public model name resolves to a route. The request checkpoint runs detectors and project rules; tool results added by the request are checked before they reach the upstream.
-4. The model streams back. Text and reasoning are forwarded at once unless the project's review window is open, while a complete tool call waits for its verdict.
-5. An allowed tool call is released; otherwise it is dropped and the client receives a protocol-shaped error.
-6. At the end, placeholders are restored, and events, decisions and the diagnosis job are written in one transaction. The conversation is updated for conversational lanes only, and the worker diagnoses finished main calls.
+1. The gateway authenticates the agent key, decodes the request, and classifies it by endpoint operation, purpose and lane.
+2. Sensitive values are masked; the call is recorded as a trace of content origins, trust and tool destinations.
+3. The public model name resolves to a route. The request checkpoint and any new tool results are checked before the upstream sees them.
+4. The upstream streams a response. Text and reasoning pass through, while a complete tool call waits for its verdict.
+5. The response checkpoint runs before the body or the first byte is written, masked values are restored, and the call is sealed into the audit chain. A background worker diagnoses finished main calls.
 
 ## Quick start
 
-Requirements:
-
-- Go 1.27.4
-- Node.js 22 or newer
-- GNU Make
-- PostgreSQL 17
+SafeAgent stores its data in PostgreSQL 17. Building it needs Go 1.27.4, Node.js 22 or newer, and GNU Make.
 
 ```sh
 make deps
 cp config.example.toml config.toml   # set database_url and instance_key
-# instance_key: openssl rand -base64 32
 make build
 build/bin/safeagent -config config.toml serve
 ```
 
-The example configuration enables secure cookies. Local plain-HTTP use needs the option turned off; a public deployment keeps it on behind a TLS reverse proxy.
+On first start the service initializes its database and prints the administrator password once. Open <http://127.0.0.1:8080/console/>, sign in, add a channel and a route, and issue an agent key. The [getting-started guide](docs/human/getting-started.md) covers the whole path.
 
-The first start creates the schema, seeds the built-in provider catalog and prints the initial administrator account and password once on standard output. Then:
+## Deployment and scope
 
-1. Open <http://127.0.0.1:8080/console/> and sign in with that password.
-2. Add a channel with a key, catalog models and a project route; built-in providers are already available.
-3. Create an agent key and connect an agent as described in the [getting-started guide](docs/human/getting-started.md).
-
-## Deployment and boundaries
-
-- One Go process serves the console, the gateway and a health check, and runs the diagnosis worker. No message broker, Redis instance or separate background process is required.
-- The instance key is supplied by the configuration file and is never stored in the database. Upstream keys and the decision-model key are sealed with it.
-- PostgreSQL is the only durable store. Audit events are the source of truth, and the schema is a fresh baseline with no migration path; a schema change requires recreating the database.
-- Raw audit payloads are stored as received, and access is role-based.
-- Coverage depends on where the gateway is deployed. Images, audio and other binary payloads are not inspected or rewritten.
-- A project can block a streaming response before the first byte by enabling a bounded stream review window. Text after that window cannot be recalled; only a non-streaming response is checked in full before it is written.
-- Human approval queues, cross-call semantic relations and multi-agent trajectory linking are not implemented.
-
-## Repository layout
-
-| Path | Contents |
-| --- | --- |
-| `cmd/safeagent` | the server binary: serve, schema, OpenAPI contract and audit verification |
-| `cmd/securitycheck` | the dependency and vulnerability report gate |
-| `internal/` | the gateway, control plane, console services, storage and the domain packages |
-| `web/` | the React operator console |
-| `testenv/` | the Docker acceptance lab |
-| `docs/` | human guides and the agent reference |
-
-## Verification
-
-Static and contract checks, race tests, database integration tests and the Docker acceptance lab cover the protocol matrix, agent clients, auxiliary endpoints, policy, diagnosis, security, faults, the console, load and audit chains. `make verify` runs the local layers; the [verification guide](docs/human/verification.md) explains what each layer proves and what it does not.
+SafeAgent is deployed inside the operator's infrastructure. Agents reach models through one address, and call records stay inside the operator's environment. Coverage depends on how much of an agent's traffic is routed through the gateway. Images, audio and other binary payloads are not inspected or rewritten. Stream review covers only the configured leading window. Tool destinations and data flows are inferred and need human confirmation. Human approval queues and cross-call correlation are not implemented.
 
 ## Documentation
 
 - [Getting started](docs/human/getting-started.md)
 - [Architecture](docs/human/architecture.md)
 - [Protocol conversion](docs/human/protocol-conversion.md)
-- [Safety model](docs/human/agent-safety.md)
+- [Agent safety](docs/human/agent-safety.md)
 - [Landscape](docs/human/landscape.md)
 - [Verification](docs/human/verification.md)
 - [Development guide](docs/agent/README.md)

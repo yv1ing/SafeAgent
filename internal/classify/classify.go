@@ -51,11 +51,7 @@ const (
 	PurposeSubagent    Purpose = "subagent"
 	PurposeCompaction  Purpose = "compaction"
 	PurposeTitle       Purpose = "title"
-	PurposeDescription Purpose = "description"
-	PurposeReview      Purpose = "review"
 	PurposeMemory      Purpose = "memory"
-	PurposeSuggestion  Purpose = "suggestion"
-	PurposeProbe       Purpose = "probe"
 	PurposeCountTokens Purpose = "count_tokens"
 	PurposeModelList   Purpose = "model_list"
 	PurposeEmbedding   Purpose = "embedding"
@@ -64,9 +60,8 @@ const (
 )
 
 var purposes = []Purpose{
-	PurposeChat, PurposeSubagent, PurposeCompaction, PurposeTitle, PurposeDescription,
-	PurposeReview, PurposeMemory, PurposeSuggestion, PurposeProbe, PurposeCountTokens,
-	PurposeModelList, PurposeEmbedding, PurposeModeration, PurposeUnknown,
+	PurposeChat, PurposeSubagent, PurposeCompaction, PurposeTitle, PurposeMemory,
+	PurposeCountTokens, PurposeModelList, PurposeEmbedding, PurposeModeration, PurposeUnknown,
 }
 
 func (purpose Purpose) Valid() bool {
@@ -82,8 +77,7 @@ func (purpose Purpose) Valid() bool {
 // main conversation: subagents, compaction, title generation and the like.
 func (purpose Purpose) Side() bool {
 	switch purpose {
-	case PurposeSubagent, PurposeCompaction, PurposeTitle, PurposeDescription,
-		PurposeReview, PurposeMemory, PurposeSuggestion:
+	case PurposeSubagent, PurposeCompaction, PurposeTitle, PurposeMemory:
 		return true
 	}
 	return false
@@ -122,11 +116,6 @@ func (lane Lane) Analyzed() bool {
 	return lane == LaneMain
 }
 
-// Counted reports whether a call contributes to traffic counters and failure rates.
-func (lane Lane) Counted() bool {
-	return lane == LaneMain
-}
-
 // Outcome is the terminal reason of a call, independent of whether the HTTP lifecycle completed.
 // A protocol-level "not found" for an auxiliary probe is a completed call with a not_found outcome,
 // while an upstream timeout is a failed call with an upstream_error outcome.
@@ -156,12 +145,6 @@ func (outcome Outcome) Valid() bool {
 		}
 	}
 	return false
-}
-
-// Failed reports whether the outcome is a failure the operator must see: an upstream or client
-// error, as opposed to a deliberate refusal or a successful protocol round trip.
-func (outcome Outcome) Failed() bool {
-	return outcome == OutcomeUpstreamError || outcome == OutcomeClientError
 }
 
 // Hints are the request facts the classifier may read. They are gathered once by the gateway so the

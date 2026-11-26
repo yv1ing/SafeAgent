@@ -219,7 +219,6 @@
           },
           "state": {
             "enum": [
-              "running",
               "completed",
               "failed"
             ],
@@ -568,6 +567,13 @@
             "type": "string"
           },
           "analysis_state": {
+            "description": "Diagnosis projection: a side or auxiliary call is skipped",
+            "enum": [
+              "pending",
+              "completed",
+              "skipped",
+              "failed"
+            ],
             "type": "string"
           },
           "attempts": {
@@ -654,7 +660,7 @@
             "type": "string"
           },
           "outcome": {
-            "description": "Terminal reason independent of the HTTP lifecycle",
+            "description": "Terminal reason independent of the HTTP lifecycle; absent while the call is running",
             "enum": [
               "ok",
               "blocked",
@@ -684,11 +690,7 @@
               "subagent",
               "compaction",
               "title",
-              "description",
-              "review",
               "memory",
-              "suggestion",
-              "probe",
               "count_tokens",
               "model_list",
               "embedding",
@@ -721,7 +723,7 @@
             "type": "integer"
           },
           "resolution": {
-            "description": "How the route was matched; fallback marks the project default route",
+            "description": "How the route was matched; fallback marks the project default route; absent until the call is routed",
             "enum": [
               "exact",
               "alias",
@@ -772,9 +774,7 @@
           "upstream_model",
           "channel_id",
           "route_id",
-          "resolution",
           "state",
-          "outcome",
           "error_code",
           "stream",
           "first_token_ms",
@@ -4331,6 +4331,7 @@
             "type": "string"
           },
           "outcome": {
+            "description": "Terminal reason; absent while the call is running",
             "enum": [
               "ok",
               "blocked",
@@ -4353,11 +4354,7 @@
               "subagent",
               "compaction",
               "title",
-              "description",
-              "review",
               "memory",
-              "suggestion",
-              "probe",
               "count_tokens",
               "model_list",
               "embedding",
@@ -4381,6 +4378,7 @@
             "type": "integer"
           },
           "resolution": {
+            "description": "How the route was matched; absent until the call is routed",
             "enum": [
               "exact",
               "alias",
@@ -4412,9 +4410,7 @@
           "operation",
           "purpose",
           "purpose_source",
-          "resolution",
           "state",
-          "outcome",
           "error_code",
           "input_tokens",
           "output_tokens",
@@ -7309,11 +7305,7 @@
                 "subagent",
                 "compaction",
                 "title",
-                "description",
-                "review",
                 "memory",
-                "suggestion",
-                "probe",
                 "count_tokens",
                 "model_list",
                 "embedding",

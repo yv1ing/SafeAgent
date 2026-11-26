@@ -1,11 +1,13 @@
 package console
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/yv1ing/SafeAgent/internal/classify"
 	control "github.com/yv1ing/SafeAgent/internal/service/control"
 	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
@@ -95,6 +97,25 @@ func TestEveryErrorCodeHasAConsoleLabel(t *testing.T) {
 				t.Errorf("%s catalog has no label for error code %s", name, code)
 			}
 		}
+	}
+}
+
+func TestCallViewOmitsOutcomeAndResolutionUntilKnown(t *testing.T) {
+	payload, err := json.Marshal(callView(&entity.Call{ID: "call_1", State: "running"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"outcome"`, `"resolution"`} {
+		if strings.Contains(string(payload), field) {
+			t.Fatalf("a running call must omit %s: %s", field, payload)
+		}
+	}
+	payload, err = json.Marshal(callView(&entity.Call{ID: "call_2", State: "failed", Outcome: classify.OutcomeRejected, Resolution: "exact"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"outcome":"rejected"`) || !strings.Contains(string(payload), `"resolution":"exact"`) {
+		t.Fatalf("a settled call must carry its outcome and resolution: %s", payload)
 	}
 }
 

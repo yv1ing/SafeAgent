@@ -77,6 +77,9 @@ func TestResponseToolResultsStayUntrusted(t *testing.T) {
 	if len(result.ToolResult.Content) != 1 || result.ToolResult.Content[0].Origin != observation.OriginToolResult || result.ToolResult.Content[0].Trust != observation.Untrusted {
 		t.Fatalf("tool-result content keeps its origin: %+v", result.ToolResult.Content)
 	}
+	if result.Locator.ToolID != "call_1" || result.ToolResult.Content[0].Locator.ToolID != "call_1" {
+		t.Fatalf("tool-result items must name the tool call they belong to: %+v", result)
+	}
 }
 
 func TestToolTargetAndSteps(t *testing.T) {

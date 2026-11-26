@@ -130,12 +130,12 @@ for client in chat responses messages gemini; do
 done
 
 rollback
-trap - EXIT
-rm -f "$CONSOLE_JAR"
 if api_get "/projects/$SAFEAGENT_PROJECT/policies/active" | jq -e '.document.rules | length == 0' >/dev/null; then
   pass "policy restored to the empty baseline"
 else
   fail "the empty policy was not restored"
 fi
+trap - EXIT
+rm -f "$CONSOLE_JAR"
 
 summary

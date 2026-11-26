@@ -607,7 +607,7 @@ async function classifyTraffic() {
   expect(Boolean(conversation), 'the conversation was not listed');
   expect((conversation?.calls ?? 0) >= 2, `conversation call count is ${conversation?.calls}`);
   expect(
-    ['pending', 'running', 'completed'].includes(mainCall.analysis_state),
+    ['pending', 'completed', 'failed'].includes(mainCall.analysis_state),
     `main analysis state is ${mainCall.analysis_state}`,
   );
 

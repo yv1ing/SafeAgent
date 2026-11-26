@@ -29,6 +29,7 @@ export * from './consoleCallHitView.ts';
 export * from './consoleCallHitViewAction.ts';
 export * from './consoleCallPage.ts';
 export * from './consoleCallView.ts';
+export * from './consoleCallViewAnalysisState.ts';
 export * from './consoleCallViewLane.ts';
 export * from './consoleCallViewOperation.ts';
 export * from './consoleCallViewOutcome.ts';

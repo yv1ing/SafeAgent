@@ -134,8 +134,10 @@ func (store *Store) Prune(ctx context.Context, operationLogDays int) error {
 			WHERE c.lane <> 'auxiliary' AND c.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM calls WHERE id IN (
 			SELECT c.id FROM calls c JOIN projects p ON p.id = c.project_id
-			WHERE c.lane = 'auxiliary' AND p.auxiliary_retention_days > 0
-				AND c.created_at < now() - make_interval(days => p.auxiliary_retention_days) LIMIT ?)`, []any{pruneBatch}},
+			WHERE c.lane = 'auxiliary'
+				AND c.created_at < now() - make_interval(days => CASE
+					WHEN p.auxiliary_retention_days > 0 THEN p.auxiliary_retention_days
+					ELSE p.retention_days::int END) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM conversations WHERE id IN (
 			SELECT cv.id FROM conversations cv WHERE NOT EXISTS (SELECT 1 FROM calls c WHERE c.project_id = cv.project_id AND c.session_id = cv.id) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM analysis_jobs WHERE id IN (

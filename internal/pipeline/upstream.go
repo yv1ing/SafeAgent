@@ -250,35 +250,72 @@ func (reader *idleReader) Close() error {
 }
 
 // upstreamClients keeps one HTTP client per channel version, so editing a channel replaces its
-// transport and the old idle connections are released.
+// transport and the old idle connections are released. The cache is bounded: a channel that has
+// not served a request while many others have is evicted and rebuilt on demand, so deleted
+// channels cannot accumulate transports for the life of the process.
 type upstreamClients struct {
 	mu      sync.Mutex
 	clients map[string]*http.Client
 	current map[string]string
+	used    map[string]uint64
+	clock   uint64
 }
 
+const maximumUpstreamClients = 256
+
 func newUpstreamClients() *upstreamClients {
-	return &upstreamClients{clients: map[string]*http.Client{}, current: map[string]string{}}
+	return &upstreamClients{
+		clients: map[string]*http.Client{},
+		current: map[string]string{},
+		used:    map[string]uint64{},
+	}
 }
 
 func (clients *upstreamClients) get(channel *entity.Channel) *http.Client {
-	version := strconv.FormatInt(channel.Version, 10)
 	clients.mu.Lock()
 	defer clients.mu.Unlock()
-	key := channel.ID + ":" + version
+	clients.clock++
+	clients.used[channel.ID] = clients.clock
+	key := channel.ID + ":" + strconv.FormatInt(channel.Version, 10)
 	if client, found := clients.clients[key]; found {
 		return client
 	}
-	if previous, found := clients.current[channel.ID]; found {
-		if old := clients.clients[previous]; old != nil {
-			old.CloseIdleConnections()
-		}
-		delete(clients.clients, previous)
+	clients.drop(channel.ID)
+	if len(clients.current) >= maximumUpstreamClients {
+		clients.evict()
 	}
 	client := newUpstreamClient(channel)
 	clients.clients[key] = client
 	clients.current[channel.ID] = key
 	return client
+}
+
+// drop releases the transport of a channel that is about to receive a new version.
+func (clients *upstreamClients) drop(channelID string) {
+	key, found := clients.current[channelID]
+	if !found {
+		return
+	}
+	if client := clients.clients[key]; client != nil {
+		client.CloseIdleConnections()
+	}
+	delete(clients.clients, key)
+	delete(clients.current, channelID)
+}
+
+// evict releases the channel that has gone longest without a request.
+func (clients *upstreamClients) evict() {
+	oldest := ""
+	for channelID := range clients.current {
+		if oldest == "" || clients.used[channelID] < clients.used[oldest] {
+			oldest = channelID
+		}
+	}
+	if oldest == "" {
+		return
+	}
+	clients.drop(oldest)
+	delete(clients.used, oldest)
 }
 
 func newUpstreamClient(channel *entity.Channel) *http.Client {

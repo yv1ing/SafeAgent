@@ -17,7 +17,7 @@ type CallView struct {
 	AgentKeyID             string     `json:"agent_key_id" required:"true"`
 	ClientFormat           string     `json:"client_format" required:"true"`
 	Operation              string     `json:"operation" required:"true" enum:"generation,count_tokens,models,model,responses_retrieve,responses_input_items,responses_cancel,responses_delete,embeddings,moderations" description:"Endpoint family of the request"`
-	Purpose                string     `json:"purpose" required:"true" enum:"chat,subagent,compaction,title,description,review,memory,suggestion,probe,count_tokens,model_list,embedding,moderation,unknown" description:"Why the client issued the request"`
+	Purpose                string     `json:"purpose" required:"true" enum:"chat,subagent,compaction,title,memory,count_tokens,model_list,embedding,moderation,unknown" description:"Why the client issued the request"`
 	PurposeSource          string     `json:"purpose_source" required:"true" enum:"declared,heuristic,default" description:"How the purpose was established"`
 	Lane                   string     `json:"lane" required:"true" enum:"main,side,auxiliary" description:"Role of the call in the conversation"`
 	PublicModel            string     `json:"public_model" required:"true"`
@@ -25,9 +25,9 @@ type CallView struct {
 	UpstreamModel          string     `json:"upstream_model" required:"true"`
 	ChannelID              string     `json:"channel_id" required:"true"`
 	RouteID                string     `json:"route_id" required:"true"`
-	Resolution             string     `json:"resolution" required:"true" enum:"exact,alias,explicit,fallback" description:"How the route was matched; fallback marks the project default route"`
+	Resolution             string     `json:"resolution,omitempty" enum:"exact,alias,explicit,fallback" description:"How the route was matched; fallback marks the project default route; absent until the call is routed"`
 	State                  string     `json:"state" required:"true" enum:"running,completed,failed,cancelled,interrupted"`
-	Outcome                string     `json:"outcome" required:"true" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled" description:"Terminal reason independent of the HTTP lifecycle"`
+	Outcome                string     `json:"outcome,omitempty" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled" description:"Terminal reason independent of the HTTP lifecycle; absent while the call is running"`
 	ErrorCode              string     `json:"error_code" required:"true"`
 	Stream                 bool       `json:"stream" required:"true"`
 	FirstTokenMilliseconds int        `json:"first_token_ms" required:"true"`
@@ -42,7 +42,7 @@ type CallView struct {
 	Currency               string     `json:"currency" required:"true"`
 	RedactionValues        int        `json:"redaction_values" required:"true" description:"Distinct redacted values this call introduced"`
 	RedactionLabels        []string   `json:"redaction_labels" required:"true" description:"Distinct redaction labels of this call"`
-	AnalysisState          string     `json:"analysis_state" required:"true"`
+	AnalysisState          string     `json:"analysis_state" required:"true" enum:"pending,completed,skipped,failed" description:"Diagnosis projection: a side or auxiliary call is skipped"`
 	LatestAnalysisID       string     `json:"latest_analysis_id" required:"true"`
 	FindingCount           int        `json:"finding_count" required:"true"`
 	MaxSeverity            string     `json:"max_severity" required:"true"`
@@ -239,7 +239,7 @@ type ModelView struct {
 
 type AnalysisView struct {
 	ID         string        `json:"id" required:"true"`
-	State      string        `json:"state" required:"true" enum:"running,completed,failed"`
+	State      string        `json:"state" required:"true" enum:"completed,failed"`
 	InputHash  string        `json:"input_hash" required:"true"`
 	Versions   VersionsView  `json:"versions" required:"true"`
 	Verdict    VerdictView   `json:"verdict" required:"true"`
@@ -374,7 +374,7 @@ type listCallsInput struct {
 	SessionID        string `query:"session_id" json:"-"`
 	Lane             string `query:"lane" json:"-" enum:"main,side,auxiliary"`
 	Operation        string `query:"operation" json:"-" enum:"generation,count_tokens,models,model,responses_retrieve,responses_input_items,responses_cancel,responses_delete,embeddings,moderations"`
-	Purpose          string `query:"purpose" json:"-" enum:"chat,subagent,compaction,title,description,review,memory,suggestion,probe,count_tokens,model_list,embedding,moderation,unknown"`
+	Purpose          string `query:"purpose" json:"-" enum:"chat,subagent,compaction,title,memory,count_tokens,model_list,embedding,moderation,unknown"`
 	Outcome          string `query:"outcome" json:"-" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled"`
 	IncludeAuxiliary bool   `query:"include_auxiliary" json:"-" description:"Include auxiliary protocol calls; ignored when lane is set"`
 }

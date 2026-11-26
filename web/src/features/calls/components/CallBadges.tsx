@@ -22,9 +22,9 @@ export function PurposeBadge({ purpose, source }: { purpose: string; source: str
   );
 }
 
-export function ResolutionBadge({ resolution }: { resolution: string }) {
+export function ResolutionBadge({ resolution }: { resolution?: string }) {
   const { t } = useLocale();
-  if (resolution === 'exact' || resolution === '') return null;
+  if (!resolution || resolution === 'exact') return null;
   return (
     <Badge
       tone={resolution === 'fallback' ? 'warning' : 'neutral'}

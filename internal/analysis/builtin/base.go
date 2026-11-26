@@ -38,7 +38,7 @@ func makeFinding(detectorID, code string, ref observation.ItemRef, origin observ
 		locationKey(ref, path), ordinal, analysis.EvidenceAt(ref, section, path, value, start, end),
 	)
 	finding.Attribution = []analysis.Attribution{{
-		Turn: ref.Turn, Item: ref.Position, ToolCallID: ref.Item.Locator.CallID, Source: section,
+		Turn: ref.Turn, Item: ref.Position, ToolCallID: ref.Item.Locator.ToolID, Source: section,
 		Locator: ref.Item.Locator,
 	}}
 	return finding

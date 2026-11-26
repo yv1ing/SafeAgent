@@ -188,7 +188,7 @@ func (checker *schemaChecker) add(code, path, detail string) {
 		confidenceFor(code), locationKey(checker.ref, path), ordinal,
 		analysis.EvidenceAt(checker.ref, "message", path, checker.item.ToolCall.Arguments, start, end),
 	)
-	finding.Attribution = []analysis.Attribution{{Turn: checker.ref.Turn, Item: checker.ref.Position, ToolCallID: checker.item.Locator.CallID, Source: "message", Locator: checker.item.Locator}}
+	finding.Attribution = []analysis.Attribution{{Turn: checker.ref.Turn, Item: checker.ref.Position, ToolCallID: checker.item.Locator.ToolID, Source: "message", Locator: checker.item.Locator}}
 	if !checker.probe {
 		checker.findings = append(checker.findings, finding)
 	}

@@ -7,7 +7,7 @@
  */
 
 /**
- * How the route was matched; fallback marks the project default route
+ * How the route was matched; fallback marks the project default route; absent until the call is routed
  */
 export type ConsoleCallViewResolution =
   (typeof ConsoleCallViewResolution)[keyof typeof ConsoleCallViewResolution];

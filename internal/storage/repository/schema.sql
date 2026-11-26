@@ -272,8 +272,8 @@ CREATE TABLE IF NOT EXISTS calls (
         'responses_input_items','responses_cancel','responses_delete','embeddings','moderations'
     )),
     CONSTRAINT calls_purpose CHECK (purpose IN (
-        'chat','subagent','compaction','title','description','review','memory','suggestion',
-        'probe','count_tokens','model_list','embedding','moderation','unknown'
+        'chat','subagent','compaction','title','memory','count_tokens','model_list','embedding',
+        'moderation','unknown'
     )),
     CONSTRAINT calls_purpose_source CHECK (purpose_source IN ('declared','heuristic','default')),
     CONSTRAINT calls_lane CHECK (lane IN ('main','side','auxiliary')),
@@ -283,7 +283,7 @@ CREATE TABLE IF NOT EXISTS calls (
         'rate_limited','cancelled'
     )),
     CONSTRAINT calls_resolution CHECK (resolution IN ('','exact','alias','explicit','fallback')),
-    CONSTRAINT calls_analysis_state CHECK (analysis_state IN ('pending','running','completed','skipped','failed'))
+    CONSTRAINT calls_analysis_state CHECK (analysis_state IN ('pending','completed','skipped','failed'))
 );
 CREATE INDEX IF NOT EXISTS calls_project_created ON calls (project_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS calls_project_lane_created ON calls (project_id, lane, created_at DESC, id DESC);
@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS analyses (
     error text NOT NULL DEFAULT '',
     started_at timestamptz NOT NULL,
     finished_at timestamptz,
-    CONSTRAINT analyses_state CHECK (state IN ('running','completed','failed')),
+    CONSTRAINT analyses_state CHECK (state IN ('completed','failed')),
     CONSTRAINT analyses_model_state CHECK (model_state IN ('disabled','ok','budget_exhausted','failed'))
 );
 CREATE INDEX IF NOT EXISTS analyses_call ON analyses (call_id, started_at DESC);

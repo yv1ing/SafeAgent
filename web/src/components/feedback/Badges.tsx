@@ -51,8 +51,9 @@ export function LaneBadge({ lane }: { lane: string }) {
   return <Badge tone={laneTone[lane as Lane]}>{t.lanes[lane as Lane]}</Badge>;
 }
 
-export function OutcomeBadge({ outcome }: { outcome: string }) {
+export function OutcomeBadge({ outcome }: { outcome?: string }) {
   const { t } = useLocale();
+  if (!outcome) return null;
   if (!(outcome in outcomeTone)) return <Badge>{outcome}</Badge>;
   return <Badge tone={outcomeTone[outcome as Outcome]}>{t.outcomes[outcome as Outcome]}</Badge>;
 }

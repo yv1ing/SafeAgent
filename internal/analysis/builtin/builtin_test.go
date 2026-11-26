@@ -223,6 +223,39 @@ func TestRedactedNonSecretDoesNotBecomeSecretFlow(t *testing.T) {
 	}
 }
 
+func TestFindingAttributionNamesTheToolCall(t *testing.T) {
+	arguments := `{"path":"/etc/shadow"}`
+	locator := observation.Locator{CallID: "call_1", Section: observation.SectionResponse, ToolID: "tool_1"}
+	trace := &observation.Trace{
+		Tools: []observation.ToolSpec{{Name: "read", Kind: "function", Parameters: map[string]any{
+			"type": "object", "required": []any{"path", "count"}, "properties": map[string]any{
+				"path":  map[string]any{"type": "string"},
+				"count": map[string]any{"type": "integer"},
+			},
+		}}},
+		Turns: []observation.Turn{{Role: observation.RoleAssistant, Items: []observation.Item{{
+			Kind: observation.ItemToolCall, Origin: observation.OriginAssistant, Trust: observation.Trusted,
+			Locator: locator,
+			ToolCall: &observation.ToolCall{ID: "tool_1", Name: "read", Kind: "function",
+				Arguments: observation.NewValue(arguments, arguments, nil, nil),
+				Input:     map[string]any{"path": "/etc/shadow"},
+				Sink:      observation.SinkFileRead},
+		}}}},
+	}
+	findings := append(evaluateSchema(context.Background(), trace), evaluateContent(context.Background(), trace)...)
+	if len(findings) == 0 {
+		t.Fatal("the tool call produced no finding")
+	}
+	for _, finding := range findings {
+		if len(finding.Attribution) != 1 {
+			t.Fatalf("%s has no attribution: %+v", finding.Code, finding)
+		}
+		if finding.Attribution[0].ToolCallID != "tool_1" {
+			t.Fatalf("%s attribution names %q, want the tool call id", finding.Code, finding.Attribution[0].ToolCallID)
+		}
+	}
+}
+
 func TestSchemaDetectorChecksTypesAndMissingFields(t *testing.T) {
 	arguments := `{"path":"/etc/shadow"}`
 	trace := &observation.Trace{

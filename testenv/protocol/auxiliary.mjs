@@ -4,11 +4,14 @@
 // completed/unsupported or completed/not_found outcomes of expected protocol refusals.
 import process from 'node:process';
 import {
+  base,
   consoleGet,
   consoleRequest,
   counters,
   gatewayRequest,
+  key,
   login,
+  project,
   recordFail,
   recordPass,
   recordSkip,

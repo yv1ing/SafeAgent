@@ -107,14 +107,14 @@ func TestUnknownOperationFallsBackToGeneration(t *testing.T) {
 }
 
 func TestLanePredicates(t *testing.T) {
-	if !classify.LaneMain.Conversational() || !classify.LaneMain.Analyzed() || !classify.LaneMain.Counted() {
-		t.Fatal("main must be conversational, analyzed and counted")
+	if !classify.LaneMain.Conversational() || !classify.LaneMain.Analyzed() {
+		t.Fatal("main must be conversational and analyzed")
 	}
-	if !classify.LaneSide.Conversational() || classify.LaneSide.Analyzed() || classify.LaneSide.Counted() {
-		t.Fatal("side must be conversational but neither analyzed nor counted")
+	if !classify.LaneSide.Conversational() || classify.LaneSide.Analyzed() {
+		t.Fatal("side must be conversational but not analyzed")
 	}
-	if classify.LaneAuxiliary.Conversational() || classify.LaneAuxiliary.Analyzed() || classify.LaneAuxiliary.Counted() {
-		t.Fatal("auxiliary must not be conversational, analyzed or counted")
+	if classify.LaneAuxiliary.Conversational() || classify.LaneAuxiliary.Analyzed() {
+		t.Fatal("auxiliary must be neither conversational nor analyzed")
 	}
 }
 

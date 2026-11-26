@@ -279,17 +279,18 @@ func translateItem(item *model.Item, base observation.Locator, path string, role
 		return []observation.Item{translated}
 	case model.ItemToolResult:
 		origin, trust := originOf(model.RoleTool, response)
+		resultLocator := toolLocator(base, path, item.CallID)
 		result := &observation.ToolResult{CallID: item.CallID, Name: item.Name, IsError: item.IsError}
 		for index := range item.Parts {
 			part := &item.Parts[index]
 			partPath := path + ".parts[" + strconv.Itoa(index) + "]"
-			if translated, ok := partItem(part, base, partPath, model.RoleTool, response, options); ok {
+			if translated, ok := partItem(part, resultLocator, partPath, model.RoleTool, response, options); ok {
 				result.Content = append(result.Content, translated)
 			}
 		}
 		return []observation.Item{{
 			Kind: observation.ItemToolResult, Origin: origin, Trust: trust, ToolResult: result,
-			Locator: toolLocator(base, path, item.CallID),
+			Locator: resultLocator,
 		}}
 	case model.ItemServerToolCall:
 		if item.ToolCall == nil {

@@ -525,7 +525,7 @@ func estimateTokens(request *model.Request) int64 {
 	if request.MaxOutputTokens != nil {
 		output = min(max(*request.MaxOutputTokens, 1), maximumOutputEstimate)
 	}
-	return int64(len(model.Marshal(request.Items))/4) + output
+	return int64(len(model.Marshal(request))/4) + output
 }
 
 const (

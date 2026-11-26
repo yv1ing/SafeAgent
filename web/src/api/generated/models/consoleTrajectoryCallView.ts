@@ -30,13 +30,15 @@ export interface ConsoleTrajectoryCallView {
   lane: ConsoleTrajectoryCallViewLane;
   model: string;
   operation: ConsoleTrajectoryCallViewOperation;
-  outcome: ConsoleTrajectoryCallViewOutcome;
+  /** Terminal reason; absent while the call is running */
+  outcome?: ConsoleTrajectoryCallViewOutcome;
   output_tokens: number;
   purpose: ConsoleTrajectoryCallViewPurpose;
   purpose_source: ConsoleTrajectoryCallViewPurposeSource;
   reasoning_tokens: number;
   redaction_values: number;
-  resolution: ConsoleTrajectoryCallViewResolution;
+  /** How the route was matched; absent until the call is routed */
+  resolution?: ConsoleTrajectoryCallViewResolution;
   state: ConsoleTrajectoryCallViewState;
   upstream_model: string;
 }

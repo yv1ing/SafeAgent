@@ -26,7 +26,7 @@ func TestSettlementMapping(t *testing.T) {
 		{"upstream transient", failureOf(model.ClassTransient, "upstream_unreachable"), classify.LaneMain, "failed", classify.OutcomeUpstreamError},
 		{"upstream auth", failureOf(model.ClassAuth, "upstream_auth_failed"), classify.LaneMain, "failed", classify.OutcomeUpstreamError},
 		{"rate limited", failureOf(model.ClassRateLimit, "rate_limited"), classify.LaneMain, "failed", classify.OutcomeRateLimited},
-		{"upstream rejected the request", failureOf(model.ClassRejected, "upstream_rejected"), classify.LaneMain, "failed", classify.OutcomeClientError},
+		{"upstream rejected the request", failureOf(model.ClassRejected, "upstream_rejected"), classify.LaneMain, "failed", classify.OutcomeRejected},
 		{"internal", failureOf(model.ClassInternal, "audit_unavailable"), classify.LaneMain, "failed", classify.OutcomeUpstreamError},
 		{"side model miss is a failure", failureOf(model.ClassInvalid, "model_not_found"), classify.LaneSide, "failed", classify.OutcomeClientError},
 		{"auxiliary unsupported", failureOf(model.ClassInvalid, "auxiliary_unsupported"), classify.LaneAuxiliary, "completed", classify.OutcomeUnsupported},

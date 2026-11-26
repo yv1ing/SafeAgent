@@ -60,9 +60,9 @@ test('long identifiers are shortened', () => {
 
 test('states and severities map to badge tones', () => {
   assert.equal(stateTone('completed'), 'success');
-  assert.equal(stateTone('blocked'), 'warning');
+  assert.equal(stateTone('running'), 'info');
   assert.equal(stateTone('failed'), 'danger');
-  assert.equal(stateTone('rejected'), 'danger');
+  assert.equal(stateTone('cancelled'), 'danger');
   assert.equal(stateTone(undefined), 'neutral');
   assert.equal(severityTone('high'), 'danger');
   assert.equal(severityTone(''), 'neutral');

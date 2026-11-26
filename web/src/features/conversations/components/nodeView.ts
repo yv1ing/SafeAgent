@@ -59,7 +59,7 @@ export function summarizeNode(t: Messages, node: ConsoleTrajectoryNodeView): Nod
       const badges: NodeBadge[] = [];
       if (call.lane !== 'main')
         badges.push({ label: t.lanes[call.lane], tone: laneTone[call.lane] });
-      if (call.outcome !== 'ok')
+      if (call.outcome && call.outcome !== 'ok')
         badges.push({ label: t.outcomes[call.outcome], tone: outcomeTone[call.outcome] });
       if (call.resolution === 'fallback')
         badges.push({ label: t.classify.resolutions.fallback, tone: 'warning' });
@@ -138,7 +138,7 @@ export function summarizeNode(t: Messages, node: ConsoleTrajectoryNodeView): Nod
       if (!decision) return summary(kind);
       return summary(t.call.decisionActions[decision.action] ?? decision.action, {
         subtitle: t.call.phases[decision.phase] ?? decision.phase,
-        badges: decision.blocked ? [{ label: t.states.blocked, tone: 'danger' }] : [],
+        badges: decision.blocked ? [{ label: t.outcomes.blocked, tone: 'danger' }] : [],
         meta: decision.rule_id ? [{ label: t.call.rule, value: decision.rule_id }] : [],
       });
     }

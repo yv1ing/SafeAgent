@@ -84,11 +84,11 @@ type TrajectoryCallView struct {
 	ChannelID            string `json:"channel_id" required:"true"`
 	Lane                 string `json:"lane" required:"true" enum:"main,side,auxiliary"`
 	Operation            string `json:"operation" required:"true" enum:"generation,count_tokens,models,model,responses_retrieve,responses_input_items,responses_cancel,responses_delete,embeddings,moderations"`
-	Purpose              string `json:"purpose" required:"true" enum:"chat,subagent,compaction,title,description,review,memory,suggestion,probe,count_tokens,model_list,embedding,moderation,unknown"`
+	Purpose              string `json:"purpose" required:"true" enum:"chat,subagent,compaction,title,memory,count_tokens,model_list,embedding,moderation,unknown"`
 	PurposeSource        string `json:"purpose_source" required:"true" enum:"declared,heuristic,default"`
-	Resolution           string `json:"resolution" required:"true" enum:"exact,alias,explicit,fallback"`
+	Resolution           string `json:"resolution,omitempty" enum:"exact,alias,explicit,fallback" description:"How the route was matched; absent until the call is routed"`
 	State                string `json:"state" required:"true" enum:"running,completed,failed,cancelled,interrupted"`
-	Outcome              string `json:"outcome" required:"true" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled"`
+	Outcome              string `json:"outcome,omitempty" enum:"ok,blocked,rejected,client_error,upstream_error,unsupported,not_found,rate_limited,cancelled" description:"Terminal reason; absent while the call is running"`
 	ErrorCode            string `json:"error_code" required:"true"`
 	InputTokens          int64  `json:"input_tokens" required:"true"`
 	OutputTokens         int64  `json:"output_tokens" required:"true"`

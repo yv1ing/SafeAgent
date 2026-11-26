@@ -56,7 +56,7 @@ Tests live beside the package they cover. `go test ./internal/<area>` runs one a
 
 Test files follow the package they test. A unit test is `<topic>_test.go` beside the package, named after the topic it covers rather than the production file (`admission_test.go`, not `admission_internal_test.go`). A test that only exercises the exported API may use the external `_test` package; a test that needs unexported helpers stays in the package. There is no `_internal_test.go` suffix. Test helpers live with the topic tests that use them; a helper used by several topics belongs in a file named after the helper's topic. `internal/testkit` holds the shared in-memory fixtures and is test-only.
 
-Two tests couple code to documentation and fail a refactor that forgets the docs:
+Three tests couple code to documentation and fail a refactor that forgets the docs:
 
 - `internal/app/docs_test.go` checks that every top-level agent document ends with `## Related`, every Markdown link resolves, every backticked repository path exists, every backticked make target exists, human English/Chinese twins have the same section count, and the two READMEs have the same section count.
 - `internal/storage/repository/schema_docs_test.go` checks that every table in `schema.sql` appears backticked in [storage](storage.md).

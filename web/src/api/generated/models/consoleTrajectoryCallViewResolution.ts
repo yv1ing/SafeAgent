@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.2.0
  */
 
+/**
+ * How the route was matched; absent until the call is routed
+ */
 export type ConsoleTrajectoryCallViewResolution =
   (typeof ConsoleTrajectoryCallViewResolution)[keyof typeof ConsoleTrajectoryCallViewResolution];
 

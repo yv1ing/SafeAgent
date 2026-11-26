@@ -7,7 +7,7 @@ One English term per concept. The Chinese column records the wording the human d
 | gateway | 网关 | The process and HTTP surface that admits, converts, checks and records agent traffic. |
 | call | 调用 | One admitted client request, including its attempts, response, decisions and audit events. |
 | operation | 操作 | The endpoint family a call addressed: generation, count_tokens, models, model, Responses lifecycle, embeddings or moderations. |
-| purpose | 用途 | Why a generation call was issued: chat, subagent, compaction, title, description, review, memory, suggestion and so on. |
+| purpose | 用途 | Why a generation call was issued: chat, subagent, compaction, title, memory, or an auxiliary operation such as token counting. |
 | purpose source | 用途来源 | Whether the purpose was declared by the client, inferred from the request or defaulted. |
 | lane | 通道 | The role of a call: main, side or auxiliary. It decides conversation membership, diagnosis and counting. |
 | outcome | 结果 | The terminal reason of a call, independent of whether the HTTP exchange completed. |
@@ -22,10 +22,10 @@ One English term per concept. The Chinese column records the wording the human d
 | degraded | 降级 | A stored configuration problem that reduces routing instead of preventing startup. |
 | upstream | 上游 | The model provider or endpoint a channel points at. |
 | upstream model | 上游模型 | The provider's model name after endpoint alias mapping at call time; stored as a call snapshot. |
-| public model | 公开模型 | The model name an agent sends; it is resolved by a route. |
+| public model | 对外模型名 | The model name an agent sends; it is resolved by a route. |
 | attempt | 尝试 | One upstream request to one channel, catalog model, format and key. |
 | session | 会话 | A grouping of calls from one agent key; it is not an identity. |
-| conversation | 会话记录 | The stored view of the calls that share a session. |
+| conversation | 会话 | The stored view of the calls that share a session. |
 | trace | 轨迹 | The protocol-neutral observation of one call and its bounded ancestors. |
 | trajectory | 行为轨迹 | The console projection of a conversation as typed nodes, edges and replay steps. |
 | turn | 轮次 | One role's contiguous items in a trace. |
@@ -35,7 +35,7 @@ One English term per concept. The Chinese column records the wording the human d
 | trust | 信任级别 | Whether content may be treated as instructions. Tool output and tool descriptions are untrusted. |
 | sink | 去向 | What a tool call can do: external send, shell exec, file read, file write, credential access, payment, none or unknown. |
 | finding | 发现 | One deterministic observation with a code, severity, evidence and optional three-axis labels. |
-| flow | 关系 | An edge from external content to a later side-effecting tool call inside a call. |
+| flow | 数据流 | An edge from external content to a later side-effecting tool call inside a call. |
 | decision | 决策 | One online policy or decision-model result stored with the call. |
 | checkpoint | 检查点 | A point where online policy runs: request, tool call, tool result or response. |
 | tool hold | 工具缓冲 | Holding a complete tool call until its verdict is ready. |
