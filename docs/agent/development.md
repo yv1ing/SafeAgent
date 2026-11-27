@@ -43,6 +43,15 @@ Unit tests beside packages cover:
 
 Integration tests use a real PostgreSQL database and exercise the append transaction, projections, checkpoint verification and retention. Acceptance suites live in `testenv/`.
 
+## Test layout
+
+- Unit tests live beside the package that owns the behaviour. Use `package <name>` only when the test needs unexported state; otherwise use `package <name>_test` for the public contract.
+- One test file covers one responsibility: `finding_test.go`, `engine_test.go`, `invariants_test.go` under `internal/threat`, for example. Do not create a new file for every exported function.
+- Cross-package fixtures belong in `internal/testkit` and may only be imported from `_test.go` files.
+- PostgreSQL tests use the `integration` build tag and `SAFEAGENT_TEST_DATABASE`; they do not run in `make test`.
+- Frontend tests live in `web/tests` and cover pure functions and contract validation. Rendered flows belong in the Playwright suite.
+- End-to-end gateway and console behaviour belongs in `testenv`; do not repeat acceptance coverage as unit tests.
+
 ## Package conventions
 
 - Domain packages never import transports, services or storage. The architecture test enforces this.

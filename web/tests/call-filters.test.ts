@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { filtersOf, validateCallsSearch } from '../src/features/calls/search.ts';
-import { shortId } from '../src/lib/format.ts';
 
 test('call filters accept only known values and keep selectors', () => {
   const parsed = validateCallsSearch({
@@ -31,9 +30,4 @@ test('call filters accept only known values and keep selectors', () => {
 
 test('the selected call is not part of the list filters', () => {
   assert.deepEqual(filtersOf({ state: 'failed', call: 'call_1' }), { state: 'failed' });
-});
-
-test('short identifiers are bounded', () => {
-  assert.equal(shortId('short'), 'short');
-  assert.ok(shortId('trj_abcdefghijklmnopqrstuvwxyz').includes('…'));
 });

