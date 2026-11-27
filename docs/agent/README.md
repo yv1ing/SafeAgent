@@ -1,99 +1,83 @@
-# Agent guide
+# SafeAgent agent guide
 
-SafeAgent is a self-hosted gateway between agent clients and model providers. It converts four wire formats, redacts and restores sensitive values, classifies and routes every request, enforces project policy while a call is in flight, records a signed audit chain and diagnoses finished main calls asynchronously.
+> This page describes the code at HEAD. It is not a product introduction; the human-facing documents in [docs/human](../human) cover that. Read the path that matches the change, not the whole directory.
 
-Everything in this directory describes HEAD. The code is the authority: where a sentence and the code disagree, the code is right.
+## Why the unit is a trajectory
 
-Current coverage: four-format conversion, classified calls and lanes, a stored supply graph and routing, four-checkpoint policy with reversible redaction, signed audit chains, asynchronous diagnosis and the console. [Roadmap](roadmap.md) lists exact coverage, limits and deliberate exclusions.
+A gateway sees one request and one response. That cannot explain why an agent sent an email on turn 700, whether compaction dropped a constraint, or whether a rollback left an inference cache alive. Those are questions about **state transfers** across the working context, session history, memory, the environment and the inference server. SafeAgent therefore makes one delegated task a trajectory; a call is an interval inside it, and a state transfer is the atomic audit event. The design is implemented, not aspirational; [Roadmap](roadmap.md) lists the remaining limits.
 
-## Read by task
+## Reading paths
 
-Read the path that matches the change, not the whole directory.
-
-- **Any behavioural change**: [model](model.md) → [analysis](analysis.md) → [policy](policy.md) → [storage](storage.md) → [audit](audit.md).
-- **Conversion, routing or provider work**: add [protocol](protocol.md) and [providers](providers.md).
+- **A normal gateway change**: [model](model.md) → [protocol](protocol.md) → [policy](policy.md) → [storage](storage.md) → [development](development.md).
+- **A security or threat change**: [model](model.md) → [threat](threat.md) → [audit](audit.md) → [storage](storage.md).
 - **Control plane, console or API work**: [providers](providers.md) → [storage](storage.md) → [development](development.md).
 - **Build, test or acceptance work**: [development](development.md) and [testenv](testenv.md).
 - **Context or onboarding**: this page, then [roadmap](roadmap.md) and [glossary](glossary.md).
 
 ## Document map
 
-| Document | Owns |
+| Page | Content |
 | --- | --- |
-| [model](model.md) | the protocol-neutral observation model, its wire adapter, item identity, shown values and value ids |
-| [analysis](analysis.md) | call classification, detectors, engine, verdicts, checkpoints, diagnosis, trajectory, decision model |
-| [policy](policy.md) | the ordered CEL rule document, its four phases, redaction rules and their lifecycle |
-| [storage](storage.md) | tables, supply and routing rows, calls, cascades, lease, recovery, retention and secrets |
-| [audit](audit.md) | event kinds, HMAC chain, timeline, verification and interrupted calls |
-| [protocol](protocol.md) | canonical model, stream session, raw pass-through, loss ledger, admission control, endpoint surface |
-| [providers](providers.md) | the provider seed catalog, channels, models, routes, aliases, targets and discovery |
-| [development](development.md) | build, configuration, tests, contracts, conventions and extension points |
-| [testenv](testenv.md) | the Docker acceptance lab |
-| [roadmap](roadmap.md) | current coverage, limits and deliberate exclusions |
-| [papers](papers.md) | which external concepts the code implements and where |
-| [glossary](glossary.md) | one English term per concept, with the Chinese wording used by the human docs |
+| [model](model.md) | trajectory event log, segments, edges, state machines, gates and identifiers |
+| [threat](threat.md) | invariants, deterministic checks, findings, coverage and verdict rules |
+| [policy](policy.md) | policy documents, phases, approvals, gates and failure semantics |
+| [protocol](protocol.md) | the four wire protocols, canonical IR, conversion and streaming |
+| [providers](providers.md) | provider catalog, channels, models, routes, health and discovery |
+| [storage](storage.md) | event log, content stores, projections, append transaction, retention and recovery |
+| [audit](audit.md) | event hash chain, Merkle checkpoints, evidence bundles and verification |
+| [development](development.md) | build, test, package layout, contracts and conventions |
+| [testenv](testenv.md) | acceptance lab, suites and required environment |
+| [roadmap](roadmap.md) | current coverage, deliberate limits and next work |
+| [glossary](glossary.md) | one English term per concept, with Chinese wording |
 
 ## Core invariants
 
-- One process serves the gateway, the console, the health check and the diagnosis worker. PostgreSQL is the only durable store and the only coordination point.
-- Audit events are the source of truth for a call. Every event is HMAC-chained and the call carries its own chain head and event count. The instance key comes from configuration and is never stored in the database.
-- A call is recorded once it is admitted. Authentication and decode failures before admission are returned but not persisted.
-- The lane, not the endpoint, decides behaviour: only main calls are diagnosed and counted in traffic metrics, side calls belong to the conversation and count cost, and auxiliary calls never create a conversation or enter diagnosis.
-- The supply graph is stored. Built-in provider rows are seeded from code at startup and stay editable. The gateway resolves routes from stored rows on every call; a provider mutation reloads the console's in-memory registry. A dangling supply or routing reference logs a warning and degrades routing instead of refusing to start.
-- Trajectory and redaction index are read-only projections rebuilt from calls, events, findings and hits. They are cached in process and never stored as a second source of truth.
-- A project's policy version is pinned at admission. Diagnosis never changes online policy.
-- The decision model is optional; without it, diagnosis is fully deterministic.
-- The schema is a fresh baseline. Startup compares the stored fingerprint and refuses a mismatch or a table set without a fingerprint, so a schema change requires recreating the database. Stored audit events carry the audit schema version described in [audit](audit.md); startup refuses a database whose events disagree.
-- Agent keys are stored as hashes and provide the caller identity. The console uses a session cookie, the `X-SafeAgent-Request` header and an Origin check for state-changing requests. `X-SafeAgent-Session` groups calls from one agent key; it is not an identity.
+1. **One write model.** `trajectory_events` is the only authoritative record. Calls, findings, states, edges and summaries are projections.
+2. **One state per trajectory.** `trajectory_states` is a deterministic reduction of the event range. Rebuilding projections is safe; separate projection versions are not implemented.
+3. **A call is an interval.** `action.proposed` / `action.executed` and the events between them are one call; there is no per-call terminal event.
+4. **Lineage is explicit.** Every action can be traversed to input segments and to an authorization or approval event through `edges`.
+5. **Completeness is visible.** A trajectory below its coverage threshold cannot be `safe`, and a capture gap is a finding.
+6. **The recorder cannot sign checkpoints.** The harness SDK submits events; the gateway assigns sequence numbers, signs the chain and signs checkpoints.
+7. **No compatibility path.** There is no migration and no dual write. A different schema fingerprint is refused at startup and the database is recreated.
 
-## Repository layout
+## Package layout
 
 ```text
-cmd/safeagent          server, schema, OpenAPI and audit verification
-cmd/securitycheck      vulnerability report gate
-
-internal/
-  analysis/            findings, flows, axes, detectors, engine, policy and decision model
-  app/                 composition root, lifecycle, bootstrap and architecture/document tests
-  classify/            operation, purpose, purpose source, lane and outcome vocabulary
-  llm/
-    model/             canonical IR, events, ledger, signatures, assembler and journal
-    codec/             codec contract, shared helpers and the four codecs
-    provider/          provider and endpoint catalog, discovery parsing, built-in seeds
-    stream/            streaming session: commit, hold, restore, raw, keepalive
-  observation/         protocol-neutral trace model and its only wire adapter
-  pipeline/            online call path: admission, redaction, checkpoints, routing, streaming, seal
-  platform/            infrastructure without domain knowledge
-  redact/              reversible redaction engine, detectors and value ids
-  service/             access, console, control and diagnosis use cases
-  storage/             audit contract, entities and PostgreSQL repository
-  testkit/             in-memory fixtures for tests only
-  transport/           console HTTP API and gateway HTTP/WebSocket routes
-
-web/                   React console
-testenv/               Docker acceptance lab
+cmd/safeagent            serve, schema, openapi, verify-trajectory, export-bundle, verify-bundle
+internal/classify        call classification: operation, purpose, purpose source and lane
+internal/trajectory      event types, payloads, canonical hashing and the chain
+internal/state           reducer, labels, capabilities, obligations, approvals, coverage
+internal/threat          finding model, detectors, invariants and the threat catalogue
+internal/policy          ordered CEL policy and phase compilation
+internal/decision        typed semantic decision-model boundary and client
+internal/evidence        Merkle checkpoints, bundle build and offline verification
+internal/harness         state-transfer SDK used by a harness
+internal/pipeline        online paths: admission, gates, routing, streaming and append
+internal/observation     protocol-neutral items, targets, trust and locators
+internal/llm             wire model, four codecs, providers, upstream stream engine
+internal/redact          reversible masking and value identities
+internal/storage         entities and PostgreSQL repository
+internal/service         access, console, control and decision-model guard use cases
+internal/transport       gateway and console HTTP transports
+internal/platform        configuration, limits, netguard, routing and cryptography
+internal/app             composition root and lifecycle
 ```
 
-## Layering
+The enforced dependency direction is transport → service → storage, with the domain libraries (`classify`, `trajectory`, `state`, `threat`, `policy`, `decision`, `evidence`, `harness`, `observation`, `redact`, `llm/*`) below the service and pipeline layers. The architecture test in [internal/app/architecture_test.go](../../internal/app/architecture_test.go) is the executable version of this section.
 
-The architecture tests in `internal/app` enforce these rules. A change that violates one is a design change, not a formatting problem.
+## Provenance and non-claims
 
-- `internal/llm/model` depends only on the standard library. `internal/llm/codec`, `internal/llm/provider` and `internal/llm/stream` sit below the pipeline; codec and provider do not depend on each other or on the stream engine.
-- `internal/observation` depends only on the standard library. `internal/observation/adapter` is the single bridge from the wire model to it; it may import `internal/llm/model` and `internal/redact`, and never a codec, the provider catalog, the stream engine, storage, a service, the pipeline or transport.
-- `internal/analysis`, `internal/redact` and `internal/platform/*` never import storage, pipeline, service or transport. `internal/analysis` may import only `platform/netguard` from the platform group and never depends on `llm/*`.
-- `internal/pipeline` imports the protocol stack and storage. It does not import transport, the application root, gin or bun.
-- `internal/service/access` is the shared vocabulary below the use cases. `service/console`, `service/control` and `service/diagnosis` do not import each other, and no service imports transport.
-- `internal/storage/repository` imports entities, the audit contract, `internal/classify` and `internal/platform/secure` only. `internal/storage/entity` is a pure type package that imports only `internal/classify`.
-- `internal/transport/console` maps the console API onto the three service packages and never imports the wire model, a codec or the stream engine. `internal/transport/gateway` adapts the pipeline to the `/v1` and `/v1beta` surface.
-- `internal/classify` is a leaf vocabulary package. `internal/testkit` is test-only. `internal/app` is the only package that wires transport, services, pipeline and storage together.
-- Repository methods are verbs, domain types are nouns, and a layer never imports the layer above it.
+The trajectory ledger, state-transfer taxonomy and evidence bundle follow the design in [Securing and Auditing Long-Horizon LLM Agents](https://arxiv.org/abs/2611.23346). The three finding axes come from AgentDoG; the deterministic tool and sink checks are adapted from AgentGuard. The implementation is in `internal/trajectory`, `internal/state`, `internal/threat` and `internal/evidence`.
 
-## Commands
-
-`go run ./cmd/safeagent -config config.toml serve` runs the service. The same binary provides `schema`, `openapi` and `verify-audit`. The complete workflow is in [development](development.md); the acceptance lab is in [testenv](testenv.md).
+The project does not claim formal safety, complete capture or a proven absence of prompt injection. It claims a visible, verifiable record of what crossed which boundary and which deterministic control fired.
 
 ## Related
 
-- [Human architecture guide](../human/architecture.md)
-- [Getting started](../human/getting-started.md)
-- [Project README](../../README.md)
+- [Model](model.md)
+- [Threat](threat.md)
+- [Policy](policy.md)
+- [Storage](storage.md)
+- [Audit](audit.md)
+- [Development](development.md)
+- [Testenv](testenv.md)
+- [Roadmap](roadmap.md)

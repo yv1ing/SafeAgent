@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { ApiError } from '../api/client';
 import {
   createRootRouteWithContext,
   createRoute,
@@ -8,11 +9,8 @@ import {
   redirect,
 } from '@tanstack/react-router';
 import { Loader2 } from 'lucide-react';
-import { ApiError } from '../api/client';
-import { getGetCallQueryOptions } from '../api/generated/calls/calls';
 import { getMeQueryOptions } from '../api/generated/session/session';
 import { validateCallsSearch } from '../features/calls/search';
-import { validateTrajectorySearch } from '../features/conversations/search';
 import { useLocale } from '../i18n';
 import { NotFoundPage } from './NotFoundPage';
 import { ProjectScope } from './ProjectScope';
@@ -41,19 +39,18 @@ const OverviewPage = lazyRouteComponent(
   'OverviewPage',
 );
 const CallsPage = lazyRouteComponent(() => import('../features/calls/CallsPage'), 'CallsPage');
-const ConversationsPage = lazyRouteComponent(
-  () => import('../features/conversations/ConversationsPage'),
-  'ConversationsPage',
+const TrajectoriesPage = lazyRouteComponent(
+  () => import('../features/trajectories/TrajectoriesPage'),
+  'TrajectoriesPage',
 );
 const TrajectoryPage = lazyRouteComponent(
-  () => import('../features/conversations/TrajectoryPage'),
+  () => import('../features/trajectories/TrajectoryPage'),
   'TrajectoryPage',
 );
 const MonitorPage = lazyRouteComponent(
   () => import('../features/monitor/MonitorPage'),
   'MonitorPage',
 );
-const RiskPage = lazyRouteComponent(() => import('../features/risk/RiskPage'), 'RiskPage');
 const PoliciesPage = lazyRouteComponent(
   () => import('../features/policies/PoliciesPage'),
   'PoliciesPage',
@@ -171,50 +168,10 @@ const callsRoute = createRoute({
   component: CallsPage,
 });
 
-const conversationRoute = createRoute({
+const trajectoryRoute = createRoute({
   getParentRoute: () => projectRoute,
-  path: 'conversations/$sessionId',
-  validateSearch: validateTrajectorySearch,
+  path: 'trajectories/$trajectoryId',
   component: TrajectoryPage,
-});
-
-// Risk and monitor rows only carry the stable trajectory node id, not the session id. This route
-// resolves the owning conversation once and forwards to the canonical deep link.
-const trajectoryNodeRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: 'conversations/node/$nodeId',
-  beforeLoad: async ({ params, context }) => {
-    const { projectId, nodeId } = params;
-    const callId = nodeId.startsWith('call:') ? nodeId.slice('call:'.length) : '';
-    if (callId) {
-      try {
-        const detail = await context.queryClient.ensureQueryData(
-          getGetCallQueryOptions(projectId, callId),
-        );
-        if (detail.call.session_id) {
-          throw redirect({
-            to: '/projects/$projectId/conversations/$sessionId',
-            params: { projectId, sessionId: detail.call.session_id },
-            search: { node: nodeId },
-          });
-        }
-      } catch (error) {
-        if (error instanceof ApiError) {
-          throw redirect({
-            to: '/projects/$projectId/calls',
-            params: { projectId },
-            search: { call: callId },
-          });
-        }
-        throw error;
-      }
-    }
-    throw redirect({
-      to: '/projects/$projectId/calls',
-      params: { projectId },
-      search: callId ? { call: callId } : {},
-    });
-  },
 });
 
 const adminRoute = createRoute({
@@ -244,16 +201,10 @@ const routeTree = rootRoute.addChildren([
         callsRoute,
         createRoute({
           getParentRoute: () => projectRoute,
-          path: 'conversations',
-          component: ConversationsPage,
+          path: 'trajectories',
+          component: TrajectoriesPage,
         }),
-        conversationRoute,
-        trajectoryNodeRoute,
-        createRoute({
-          getParentRoute: () => projectRoute,
-          path: 'risk',
-          component: RiskPage,
-        }),
+        trajectoryRoute,
         createRoute({
           getParentRoute: () => projectRoute,
           path: 'activity',

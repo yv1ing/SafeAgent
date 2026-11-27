@@ -7,11 +7,13 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/classify"
 )
 
-// Call is the operational row for one gateway request. Analysis state here is a materialized
-// projection of the latest analysis; analyses and analysis_findings are the authority.
+// Call is a rebuildable projection of one call interval in a trajectory. The pipeline never writes
+// this row; the projector derives it from trajectory events.
 type Call struct {
 	bun.BaseModel          `bun:"table:calls,alias:c"`
 	ID                     string                 `bun:",pk" json:"id" required:"true"`
+	TrajectoryID           string                 `json:"trajectory_id"`
+	CallSeq                int64                  `json:"call_seq"`
 	ProjectID              string                 `json:"project_id"`
 	AgentKeyID             string                 `json:"agent_key_id"`
 	ClientFormat           string                 `json:"client_format"`
@@ -43,6 +45,7 @@ type Call struct {
 	Currency               string                 `json:"currency"`
 	RedactionValues        int                    `json:"redaction_values"`
 	RedactionLabels        []string               `bun:"type:jsonb" json:"redaction_labels"`
+	RedactionValueIDs      []string               `bun:"type:jsonb" json:"redaction_value_ids"`
 	MaxSeverity            string                 `json:"max_severity"`
 	Losses                 []Loss                 `bun:"type:jsonb" json:"losses"`
 	Repairs                []Repair               `bun:"type:jsonb" json:"repairs"`
@@ -55,10 +58,8 @@ type Call struct {
 	ParentCallID           string                 `json:"parent_call_id"`
 	ConversationHash       string                 `json:"conversation_hash"`
 	MessageOffset          int                    `json:"message_offset"`
-	AuditHead              string                 `json:"audit_head"`
-	AuditEvents            int64                  `json:"audit_events"`
-	AnalysisState          string                 `json:"analysis_state"`
-	LatestAnalysisID       string                 `json:"latest_analysis_id"`
+	ToolCallIDs            []string               `bun:"type:jsonb" json:"tool_call_ids"`
+	EventCount             int64                  `json:"event_count"`
 	FindingCount           int                    `json:"finding_count"`
 	CreatedAt              time.Time              `json:"created_at"`
 	UpdatedAt              time.Time              `json:"updated_at"`
@@ -80,26 +81,4 @@ type Loss struct {
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 	ItemKey string `json:"item_key,omitempty"`
-}
-
-// Conversation is the console's unit of listing: the calls that share one session id.
-type Conversation struct {
-	bun.BaseModel `bun:"table:conversations,alias:cv"`
-	ID            string    `bun:",pk" json:"id" required:"true"`
-	ProjectID     string    `json:"project_id"`
-	FirstCallID   string    `json:"first_call_id"`
-	LastCallID    string    `json:"last_call_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	LastAt        time.Time `json:"last_at"`
-	Calls         int       `bun:",scanonly" json:"calls"`
-	MaxSeverity   string    `bun:",scanonly" json:"max_severity"`
-}
-
-// CallTool maps a tool call id to the call that issued it, so a tool result finds its parent by index.
-type CallTool struct {
-	bun.BaseModel `bun:"table:call_tools,alias:ct"`
-	ProjectID     string `bun:",pk"`
-	ToolCallID    string `bun:",pk"`
-	CallID        string
-	CreatedAt     time.Time
 }

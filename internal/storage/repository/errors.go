@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 )
@@ -35,4 +36,11 @@ type RouteNameConflictError struct {
 
 func (conflict *RouteNameConflictError) Error() string {
 	return fmt.Sprintf("the model name %q is already taken in this project", conflict.Name)
+}
+
+func missing(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }

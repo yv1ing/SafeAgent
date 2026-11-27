@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.2.0
  */
 
-/**
- * Endpoint family of the request
- */
 export type ConsoleCallViewOperation =
   (typeof ConsoleCallViewOperation)[keyof typeof ConsoleCallViewOperation];
 

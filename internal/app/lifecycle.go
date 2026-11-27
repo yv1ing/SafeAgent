@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,13 +13,14 @@ import (
 
 	"github.com/yv1ing/SafeAgent/internal/llm/provider/builtin"
 	"github.com/yv1ing/SafeAgent/internal/platform/config"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	"github.com/yv1ing/SafeAgent/internal/service/control"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
-// Run serves until ctx ends or the instance lease is lost. Shutdown runs in a fixed order: stop
-// accepting and drain in-flight calls, then flush the audit queue, then release the lease. A call
-// that is still running when the drain period ends is marked interrupted by the next start.
+// Run serves until ctx ends or the instance lease is lost. Shutdown stops accepting and drains
+// in-flight calls before the lease is released. A call that is still running when the drain period
+// ends is marked interrupted by the next start.
 func Run(ctx context.Context, configuration config.Config, database *repository.Store, frontend fs.FS) error {
 	// The advisory lock comes first: two processes must not race to create the schema.
 	lease, err := database.AcquireInstance(ctx)
@@ -55,20 +57,16 @@ func Run(ctx context.Context, configuration config.Config, database *repository.
 		}
 	}
 
-	server, diagnosisService := NewServer(configuration, database, providers, frontend)
-	if err := diagnosisService.ValidatePolicies(ctx); err != nil {
+	server := NewServer(configuration, database, providers, frontend)
+	if err := validatePolicies(ctx, database); err != nil {
 		return err
 	}
 	workers, stop := context.WithCancel(ctx)
 	defer stop()
 	var background sync.WaitGroup
-	background.Add(3)
+	background.Add(2)
 	go func() { defer background.Done(); monitorLease(workers, lease, stop) }()
 	go func() { defer background.Done(); maintain(workers, database, configuration.OperationLogDays) }()
-	go func() {
-		defer background.Done()
-		diagnosisService.RunWorker(workers, configuration.AnalysisConcurrency)
-	}()
 
 	drained := make(chan struct{})
 	go func() {
@@ -89,7 +87,6 @@ func Run(ctx context.Context, configuration config.Config, database *repository.
 	}
 	<-drained
 	background.Wait()
-	database.FlushEvents()
 	if ctx.Err() == nil {
 		return errors.New("server stopped after losing its database lease")
 	}
@@ -121,16 +118,48 @@ func monitorLease(ctx context.Context, owner leaseOwner, stop context.CancelFunc
 }
 
 func maintain(ctx context.Context, database *repository.Store, operationLogDays int) {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	prune := time.NewTicker(time.Minute)
+	defer prune.Stop()
+	rollup := time.NewTicker(5 * time.Minute)
+	defer rollup.Stop()
+	pruneNow, rollupNow := true, true
 	for {
-		if err := database.Prune(ctx, operationLogDays); err != nil && ctx.Err() == nil {
-			slog.Error("maintenance failed", "error_class", "database")
+		if pruneNow {
+			if err := database.Prune(ctx, operationLogDays); err != nil && ctx.Err() == nil {
+				slog.Error("retention failed", "error_class", "database")
+			}
+			pruneNow = false
+		}
+		if rollupNow {
+			if err := database.Rollup(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
+				slog.Error("traffic rollup failed", "error_class", "database")
+			}
+			rollupNow = false
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-prune.C:
+			pruneNow = true
+		case <-rollup.C:
+			rollupNow = true
 		}
 	}
+}
+
+func validatePolicies(ctx context.Context, database *repository.Store) error {
+	policies, err := database.ActivePolicies(ctx)
+	if err != nil {
+		return err
+	}
+	for _, version := range policies {
+		var document policy.Document
+		if err := json.Unmarshal(version.Document, &document); err != nil {
+			return fmt.Errorf("project %s policy %d is unreadable: %w", version.ProjectID, version.Version, err)
+		}
+		if _, err := policy.Compile(document); err != nil {
+			return fmt.Errorf("project %s policy %d does not compile: %w", version.ProjectID, version.Version, err)
+		}
+	}
+	return nil
 }

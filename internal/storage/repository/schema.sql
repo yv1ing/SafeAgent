@@ -1,8 +1,6 @@
--- SafeAgent schema baseline. This file is the single source of DDL truth; entities are only CRUD
--- mappings. There is no migration path: a build whose fingerprint differs refuses to start and the
--- operator recreates the database, which is acceptable because the only durable value is the audit
--- trail and this project deliberately keeps no compatibility mechanism. The instance key is
--- supplied by configuration and is never stored here.
+-- SafeAgent trajectory-native schema baseline. This is the single source of DDL truth. There is no
+-- migration path: an existing database with a different fingerprint is refused at startup and must
+-- be recreated. The instance key is supplied by configuration and is never stored here.
 
 CREATE TABLE IF NOT EXISTS users (
     id text PRIMARY KEY,
@@ -35,6 +33,7 @@ CREATE TABLE IF NOT EXISTS projects (
     default_max_output_tokens integer NOT NULL DEFAULT 0,
     stream_review_bytes integer NOT NULL DEFAULT 0,
     stream_review_timeout_ms integer NOT NULL DEFAULT 300,
+    coverage_threshold double precision NOT NULL DEFAULT 0.9,
     default_route_id text NOT NULL DEFAULT '',
     rules_version bigint NOT NULL DEFAULT 0,
     active_policy_version bigint NOT NULL DEFAULT 0,
@@ -44,7 +43,8 @@ CREATE TABLE IF NOT EXISTS projects (
     CONSTRAINT projects_auxiliary_retention CHECK (auxiliary_retention_days BETWEEN 0 AND 90),
     CONSTRAINT projects_stream_review CHECK (
         stream_review_bytes BETWEEN 0 AND 65536 AND stream_review_timeout_ms BETWEEN 0 AND 5000
-    )
+    ),
+    CONSTRAINT projects_coverage CHECK (coverage_threshold BETWEEN 0 AND 1)
 );
 
 CREATE TABLE IF NOT EXISTS project_members (
@@ -214,15 +214,137 @@ CREATE TABLE IF NOT EXISTS policy_versions (
 );
 CREATE INDEX IF NOT EXISTS policy_versions_project ON policy_versions (project_id, version DESC);
 
-CREATE TABLE IF NOT EXISTS calls (
+-- Ledger tables. Only trajectory_events is the write model; segments and blobs hold content,
+-- while edges, trajectory_states and checkpoints are derived from the event log.
+CREATE TABLE IF NOT EXISTS trajectory_events (
+    id text PRIMARY KEY,
+    trajectory_id text NOT NULL,
+    project_id text NOT NULL,
+    seq bigint NOT NULL,
+    kind text NOT NULL,
+    boundary text NOT NULL,
+    actor text NOT NULL,
+    principal text NOT NULL DEFAULT '',
+    call_id text NOT NULL DEFAULT '',
+    action_id text NOT NULL DEFAULT '',
+    occurred_at timestamptz NOT NULL,
+    inputs jsonb NOT NULL DEFAULT '[]',
+    outputs jsonb NOT NULL DEFAULT '[]',
+    auth jsonb,
+    checks jsonb NOT NULL DEFAULT '[]',
+    obligations jsonb NOT NULL DEFAULT '[]',
+    snapshot jsonb,
+    capture jsonb NOT NULL DEFAULT '{}',
+    payload jsonb NOT NULL,
+    prev_hash text NOT NULL,
+    hash text NOT NULL,
+    UNIQUE (trajectory_id, seq)
+);
+CREATE INDEX IF NOT EXISTS trajectory_events_kind ON trajectory_events (trajectory_id, kind, seq);
+CREATE INDEX IF NOT EXISTS trajectory_events_time ON trajectory_events (occurred_at);
+CREATE INDEX IF NOT EXISTS trajectory_events_call ON trajectory_events (call_id) WHERE call_id <> '';
+CREATE INDEX IF NOT EXISTS trajectory_events_action ON trajectory_events (action_id) WHERE action_id <> '';
+CREATE INDEX IF NOT EXISTS trajectory_events_payload ON trajectory_events USING GIN (payload);
+
+CREATE TABLE IF NOT EXISTS blobs (
+    hash text PRIMARY KEY,
+    bytes bytea NOT NULL,
+    media_type text NOT NULL,
+    encrypted boolean NOT NULL,
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS segments (
+    id text NOT NULL,
+    trajectory_id text NOT NULL,
+    media_type text NOT NULL,
+    bytes_ref text NOT NULL,
+    size bigint NOT NULL,
+    integrity text NOT NULL,
+    confidentiality text NOT NULL,
+    source_event text NOT NULL,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (trajectory_id, id)
+);
+CREATE INDEX IF NOT EXISTS segments_trajectory ON segments (trajectory_id, created_at);
+
+CREATE TABLE IF NOT EXISTS edges (
+    trajectory_id text NOT NULL,
+    src text NOT NULL,
+    dst text NOT NULL,
+    relation text NOT NULL,
+    event_id text NOT NULL,
+    confidence real NOT NULL DEFAULT 1,
+    PRIMARY KEY (trajectory_id, src, dst, relation)
+);
+CREATE INDEX IF NOT EXISTS edges_dst ON edges (trajectory_id, dst, relation);
+CREATE INDEX IF NOT EXISTS edges_src ON edges (trajectory_id, src, relation);
+
+CREATE TABLE IF NOT EXISTS trajectory_states (
+    trajectory_id text PRIMARY KEY,
+    version bigint NOT NULL,
+    state_hash text NOT NULL,
+    head_event text NOT NULL,
+    project_id text NOT NULL,
+    goal text NOT NULL DEFAULT '',
+    constraints jsonb NOT NULL DEFAULT '[]',
+    labels jsonb NOT NULL DEFAULT '{}',
+    capabilities jsonb NOT NULL DEFAULT '[]',
+    obligations jsonb NOT NULL DEFAULT '[]',
+    risk jsonb NOT NULL DEFAULT '{}',
+    coverage real NOT NULL DEFAULT 1,
+    state jsonb NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id text PRIMARY KEY,
+    trajectory_id text NOT NULL,
+    from_seq bigint NOT NULL,
+    to_seq bigint NOT NULL,
+    merkle_root text NOT NULL,
+    signature text NOT NULL,
+    prev_hash text NOT NULL,
+    witness_ref text,
+    created_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS checkpoints_trajectory ON checkpoints (trajectory_id, to_seq DESC);
+
+-- Projections. They are rebuildable from trajectory_events and are never read as the authority for
+-- an authorization or audit decision.
+CREATE TABLE IF NOT EXISTS trajectory_summaries (
     id text PRIMARY KEY,
     project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    agent_key_id text NOT NULL REFERENCES agent_keys(id) ON DELETE CASCADE,
-    client_format text NOT NULL,
-    operation text NOT NULL,
+    agent_key_id text NOT NULL,
+    session_id text NOT NULL DEFAULT '',
+    goal text NOT NULL DEFAULT '',
+    state text NOT NULL DEFAULT 'open',
+    coverage double precision NOT NULL DEFAULT 1,
+    risk double precision NOT NULL DEFAULT 0,
+    max_severity text NOT NULL DEFAULT '',
+    first_event_at timestamptz NOT NULL,
+    last_event_at timestamptz NOT NULL,
+    event_count bigint NOT NULL DEFAULT 0,
+    call_count bigint NOT NULL DEFAULT 0,
+    finding_count bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    ended_at timestamptz,
+    CONSTRAINT trajectory_summaries_state CHECK (state IN ('open','ended','interrupted'))
+);
+CREATE INDEX IF NOT EXISTS trajectory_summaries_project ON trajectory_summaries (project_id, last_event_at DESC, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS trajectory_summaries_session ON trajectory_summaries (project_id, agent_key_id, session_id) WHERE session_id <> '' AND state = 'open';
+
+CREATE TABLE IF NOT EXISTS calls (
+    id text PRIMARY KEY,
+    trajectory_id text NOT NULL,
+    call_seq bigint NOT NULL DEFAULT 0,
+    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_key_id text NOT NULL,
+    client_format text NOT NULL DEFAULT '',
+    operation text NOT NULL DEFAULT 'generation',
     purpose text NOT NULL DEFAULT 'unknown',
     purpose_source text NOT NULL DEFAULT 'default',
-    lane text NOT NULL,
+    lane text NOT NULL DEFAULT 'main',
     client_transport text NOT NULL DEFAULT '',
     upstream_format text NOT NULL DEFAULT '',
     public_model text NOT NULL DEFAULT '',
@@ -231,7 +353,7 @@ CREATE TABLE IF NOT EXISTS calls (
     channel_id text NOT NULL DEFAULT '',
     route_id text NOT NULL DEFAULT '',
     resolution text NOT NULL DEFAULT '',
-    state text NOT NULL,
+    state text NOT NULL DEFAULT 'running',
     outcome text NOT NULL DEFAULT '',
     error_code text NOT NULL DEFAULT '',
     stream boolean NOT NULL DEFAULT false,
@@ -247,6 +369,7 @@ CREATE TABLE IF NOT EXISTS calls (
     currency text NOT NULL DEFAULT '',
     redaction_values integer NOT NULL DEFAULT 0,
     redaction_labels jsonb NOT NULL DEFAULT '[]',
+    redaction_value_ids jsonb NOT NULL DEFAULT '[]',
     max_severity text NOT NULL DEFAULT '',
     losses jsonb NOT NULL DEFAULT '[]',
     repairs jsonb NOT NULL DEFAULT '[]',
@@ -259,10 +382,8 @@ CREATE TABLE IF NOT EXISTS calls (
     parent_call_id text NOT NULL DEFAULT '',
     conversation_hash text NOT NULL DEFAULT '',
     message_offset integer NOT NULL DEFAULT 0,
-    audit_head text NOT NULL DEFAULT '',
-    audit_events bigint NOT NULL DEFAULT 0,
-    analysis_state text NOT NULL DEFAULT 'pending',
-    latest_analysis_id text NOT NULL DEFAULT '',
+    tool_call_ids jsonb NOT NULL DEFAULT '[]',
+    event_count bigint NOT NULL DEFAULT 0,
     finding_count integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -279,166 +400,49 @@ CREATE TABLE IF NOT EXISTS calls (
     CONSTRAINT calls_lane CHECK (lane IN ('main','side','auxiliary')),
     CONSTRAINT calls_state CHECK (state IN ('running','completed','failed','cancelled','interrupted')),
     CONSTRAINT calls_outcome CHECK (outcome IN (
-        '','ok','blocked','rejected','client_error','upstream_error','unsupported','not_found',
+        '', 'ok','blocked','rejected','client_error','upstream_error','unsupported','not_found',
         'rate_limited','cancelled'
     )),
-    CONSTRAINT calls_resolution CHECK (resolution IN ('','exact','alias','explicit','fallback')),
-    CONSTRAINT calls_analysis_state CHECK (analysis_state IN ('pending','completed','skipped','failed'))
+    CONSTRAINT calls_resolution CHECK (resolution IN ('','exact','alias','explicit','fallback'))
 );
 CREATE INDEX IF NOT EXISTS calls_project_created ON calls (project_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS calls_project_lane_created ON calls (project_id, lane, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS calls_lane_created ON calls (lane, created_at);
 CREATE INDEX IF NOT EXISTS calls_project_operation ON calls (project_id, operation, created_at DESC);
 CREATE INDEX IF NOT EXISTS calls_agent ON calls (agent_key_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS calls_trajectory ON calls (trajectory_id, call_seq, id);
 CREATE INDEX IF NOT EXISTS calls_agent_conversation ON calls (agent_key_id, conversation_hash) WHERE conversation_hash <> '';
 CREATE INDEX IF NOT EXISTS calls_agent_response ON calls (agent_key_id, response_id) WHERE response_id <> '';
-CREATE INDEX IF NOT EXISTS calls_session ON calls (project_id, session_id, created_at, id) WHERE session_id <> '';
+CREATE INDEX IF NOT EXISTS calls_session ON calls (project_id, session_id, created_at, id) WHERE session_id <> '' AND state = 'open';
 CREATE INDEX IF NOT EXISTS calls_project_severity ON calls (project_id, max_severity, created_at DESC) WHERE max_severity <> '';
+CREATE INDEX IF NOT EXISTS calls_tool_calls ON calls USING GIN (tool_call_ids);
 
-CREATE TABLE IF NOT EXISTS redaction_snapshots (
+CREATE TABLE IF NOT EXISTS findings (
     id text PRIMARY KEY,
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    rules jsonb NOT NULL DEFAULT '[]',
-    rules_version bigint NOT NULL DEFAULT 0,
-    rules_hash text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
-);
-CREATE INDEX IF NOT EXISTS redaction_snapshots_call ON redaction_snapshots (call_id);
-
-CREATE TABLE IF NOT EXISTS events (
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    sequence bigint NOT NULL,
     project_id text NOT NULL,
-    kind text NOT NULL,
-    schema_version integer NOT NULL DEFAULT 8,
-    payload jsonb NOT NULL,
-    created_at timestamptz NOT NULL,
-    prev_hash text NOT NULL DEFAULT '',
-    hash text NOT NULL DEFAULT '',
-    PRIMARY KEY (call_id, sequence)
-);
-
-CREATE TABLE IF NOT EXISTS call_tools (
-    project_id text NOT NULL,
-    tool_call_id text NOT NULL,
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    created_at timestamptz NOT NULL,
-    PRIMARY KEY (project_id, tool_call_id)
-);
-CREATE INDEX IF NOT EXISTS call_tools_call ON call_tools (call_id);
-
-CREATE TABLE IF NOT EXISTS conversations (
-    id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    first_call_id text NOT NULL,
-    last_call_id text NOT NULL,
-    created_at timestamptz NOT NULL,
-    last_at timestamptz NOT NULL
-);
-CREATE INDEX IF NOT EXISTS conversations_project_last ON conversations (project_id, last_at DESC, id DESC);
-
-CREATE TABLE IF NOT EXISTS analyses (
-    id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    agent_key_id text NOT NULL,
-    batch_id text NOT NULL DEFAULT '',
-    state text NOT NULL,
-    adapter_version text NOT NULL,
-    detector_version text NOT NULL,
-    catalogue_version text NOT NULL,
-    taxonomy_version text NOT NULL,
-    decision_model text NOT NULL DEFAULT '',
-    input_hash text NOT NULL,
-    verdict jsonb NOT NULL DEFAULT '{}',
-    coverage jsonb NOT NULL DEFAULT '{}',
-    model jsonb,
-    model_state text NOT NULL DEFAULT 'disabled',
-    error text NOT NULL DEFAULT '',
-    started_at timestamptz NOT NULL,
-    finished_at timestamptz,
-    CONSTRAINT analyses_state CHECK (state IN ('completed','failed')),
-    CONSTRAINT analyses_model_state CHECK (model_state IN ('disabled','ok','budget_exhausted','failed'))
-);
-CREATE INDEX IF NOT EXISTS analyses_call ON analyses (call_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS analyses_project ON analyses (project_id, started_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS analyses_identity ON analyses (call_id, input_hash, detector_version, decision_model);
-
-CREATE TABLE IF NOT EXISTS analysis_findings (
-    id text PRIMARY KEY,
-    analysis_id text NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
-    project_id text NOT NULL,
-    call_id text NOT NULL,
+    trajectory_id text NOT NULL,
+    event_id text NOT NULL,
+    call_id text NOT NULL DEFAULT '',
     fingerprint text NOT NULL,
     code text NOT NULL,
-    origin text NOT NULL,
-    trust text NOT NULL,
-    sink text NOT NULL,
-    source text NOT NULL DEFAULT '',
-    mode text NOT NULL DEFAULT '',
-    harm text NOT NULL DEFAULT '',
-    severity text NOT NULL,
-    confidence double precision NOT NULL,
-    detector_id text NOT NULL,
-    detector_version text NOT NULL,
+    origin text NOT NULL DEFAULT '',
+    trust text NOT NULL DEFAULT '',
+    sink text NOT NULL DEFAULT '',
+    severity text NOT NULL DEFAULT 'info',
+    confidence double precision NOT NULL DEFAULT 0,
+    detector_id text NOT NULL DEFAULT '',
+    detector_version text NOT NULL DEFAULT '',
     evidence jsonb NOT NULL DEFAULT '[]',
     attribution jsonb NOT NULL DEFAULT '[]',
-    flow_source_call_id text NOT NULL DEFAULT '',
-    flow_source_section text NOT NULL DEFAULT '',
-    flow_source_ordinal integer NOT NULL DEFAULT 0,
-    flow_source_origin text NOT NULL DEFAULT '',
-    flow_source_path text NOT NULL DEFAULT '',
-    flow_relation text NOT NULL DEFAULT '',
-    flow_sink_tool_call_id text NOT NULL DEFAULT '',
+    invariant text NOT NULL DEFAULT '',
+    transfer text NOT NULL DEFAULT '',
+    control text NOT NULL DEFAULT '',
+    segments jsonb NOT NULL DEFAULT '[]',
     created_at timestamptz NOT NULL,
-    UNIQUE (analysis_id, fingerprint)
+    UNIQUE (trajectory_id, event_id, fingerprint)
 );
-CREATE INDEX IF NOT EXISTS analysis_findings_project ON analysis_findings (project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_findings_call ON analysis_findings (call_id, created_at);
-
-CREATE TABLE IF NOT EXISTS analysis_flows (
-    id text PRIMARY KEY,
-    analysis_id text NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
-    project_id text NOT NULL,
-    call_id text NOT NULL,
-    agent_key_id text NOT NULL,
-    source_call_id text NOT NULL DEFAULT '',
-    source_section text NOT NULL DEFAULT '',
-    source_ordinal integer NOT NULL DEFAULT 0,
-    source_origin text NOT NULL,
-    source_path text NOT NULL DEFAULT '',
-    sink_tool_call_id text NOT NULL DEFAULT '',
-    sink text NOT NULL,
-    relation text NOT NULL,
-    content_hash text NOT NULL,
-    confidence double precision NOT NULL,
-    created_at timestamptz NOT NULL
-);
-CREATE INDEX IF NOT EXISTS analysis_flows_agent ON analysis_flows (project_id, agent_key_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_flows_analysis ON analysis_flows (analysis_id);
-
-CREATE TABLE IF NOT EXISTS analysis_batches (
-    id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    kind text NOT NULL,
-    state text NOT NULL,
-    total integer NOT NULL DEFAULT 0,
-    completed integer NOT NULL DEFAULT 0,
-    failed integer NOT NULL DEFAULT 0,
-    created_at timestamptz NOT NULL,
-    finished_at timestamptz,
-    CONSTRAINT analysis_batches_state CHECK (state IN ('running','completed','failed'))
-);
-CREATE INDEX IF NOT EXISTS analysis_batches_project ON analysis_batches (project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_batches_created ON analysis_batches (created_at);
-
-CREATE TABLE IF NOT EXISTS analysis_batch_calls (
-    batch_id text NOT NULL REFERENCES analysis_batches(id) ON DELETE CASCADE,
-    call_id text NOT NULL,
-    failed boolean NOT NULL DEFAULT false,
-    created_at timestamptz NOT NULL,
-    PRIMARY KEY (batch_id, call_id)
-);
+CREATE INDEX IF NOT EXISTS findings_project ON findings (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS findings_trajectory ON findings (trajectory_id, event_id);
+CREATE INDEX IF NOT EXISTS findings_call ON findings (call_id) WHERE call_id <> '';
 
 CREATE TABLE IF NOT EXISTS decision_model_configs (
     project_id text PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -461,47 +465,6 @@ CREATE TABLE IF NOT EXISTS decision_model_usage (
     tokens bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (project_id, day)
 );
-
-CREATE TABLE IF NOT EXISTS decisions (
-    id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    call_id text NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    policy_version bigint NOT NULL DEFAULT 0,
-    phase text NOT NULL,
-    action text NOT NULL,
-    blocked boolean NOT NULL DEFAULT false,
-    rule_id text NOT NULL DEFAULT '',
-    code text NOT NULL DEFAULT '',
-    severity text NOT NULL DEFAULT '',
-    reason text NOT NULL DEFAULT '',
-    attributes jsonb NOT NULL DEFAULT '{}',
-    created_at timestamptz NOT NULL,
-    CONSTRAINT decisions_phase CHECK (phase IN ('request','tool_call','tool_result','response')),
-    CONSTRAINT decisions_action CHECK (action IN ('block','record'))
-);
-CREATE INDEX IF NOT EXISTS decisions_call ON decisions (call_id, created_at);
-
-CREATE TABLE IF NOT EXISTS analysis_jobs (
-    id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    kind text NOT NULL,
-    scope jsonb NOT NULL DEFAULT '{}',
-    state text NOT NULL DEFAULT 'pending',
-    attempts integer NOT NULL DEFAULT 0,
-    max_attempts integer NOT NULL DEFAULT 5,
-    priority integer NOT NULL DEFAULT 0,
-    run_after timestamptz NOT NULL DEFAULT now(),
-    locked_by text NOT NULL DEFAULT '',
-    lease_expires_at timestamptz,
-    last_error text NOT NULL DEFAULT '',
-    dedupe_key text NOT NULL UNIQUE,
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    CONSTRAINT analysis_jobs_state CHECK (state IN ('pending','running','done','failed','cancelled'))
-);
-CREATE INDEX IF NOT EXISTS analysis_jobs_claim ON analysis_jobs (state, priority DESC, run_after) WHERE state IN ('pending','running');
-CREATE INDEX IF NOT EXISTS analysis_jobs_project ON analysis_jobs (project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_jobs_updated ON analysis_jobs (state, updated_at);
 
 CREATE TABLE IF NOT EXISTS traffic_rollups (
     bucket_start timestamptz NOT NULL,

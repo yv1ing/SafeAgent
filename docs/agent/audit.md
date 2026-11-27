@@ -1,103 +1,66 @@
-# Audit events and integrity
+# Audit and evidence
 
-`internal/storage/auditevent` is the only package that knows the JSON stored in `events.payload`. The pipeline writes typed payloads, the repository moves rows, and every reader calls `auditevent.Decode`. The current schema version is 8; startup refuses a database whose stored events carry a different version.
+## Chain
 
-## Event kinds
+Every trajectory is one hash chain. An event hash is HMAC-SHA256 over the canonical typed record including `prev_hash`. The chain is per trajectory, not per call, so a long session is one causal history. Sequence numbers are contiguous; a gap is a capture or storage failure.
 
-| Kind | Emitted when | Payload |
-| --- | --- | --- |
-| `request` | A call is admitted | Added items, request parameters, tools, redaction hits, ledger, principal, session source; for an auxiliary body endpoint, the redacted request body |
-| `routing` | The public model resolves to a route | Route id and name, resolution, public model |
-| `attempt` | An upstream attempt starts | Channel, catalog model, key, format and upstream model |
-| `attempt_failed` | An attempt fails | Error code, class, channel and key |
-| `attempt_first_token` | The first content arrives | Milliseconds since admission |
-| `tool_call` | The model emits a complete tool call | ID, kind, name, arguments, blocked flag |
-| `tool_result` | A request adds a tool result | Call ID, tool name, error flag |
-| `decision` | A policy or decision-model decision is stored | ID, policy version, stage, action, rule, code, severity, reason |
-| `blocked` | The call is refused | The blocking decision |
-| `cancellation` | The client cancels the call | Code, reason, committed and truncated flags |
-| `response` | A response is stored or withheld | Response, ledger, committed, partial, truncated and blocked flags |
-| `quota_failed` | Usage settlement fails | Error |
-| `terminal` | The call is sealed | State, code and ledger |
+The signing key is derived from the instance key with a domain separator. The gateway owns the instance key; the harness SDK can submit events but cannot sign a checkpoint.
 
-`routing` is written before the first attempt, so a replay can explain a fallback the call row only summarizes as `resolution=fallback`. A `response` event is written for a completed response, for every stream termination (committed, partial or failed), and for a response blocked by the response checkpoint. A blocked response is stored with `blocked=true` and is not retrievable.
+## Verification statuses
 
-The timeline in the console is built from the same events and carries metadata only. Each entry has a sequence, time, kind, category, label, status and optional code; raw text stays behind the role-based call view.
+`verify-trajectory` reports:
 
-## Redaction hits
+- `verified`: contiguous sequence, valid previous hash, valid HMAC and a matching checkpoint;
+- `in_progress`: a live trajectory whose chain and checkpoint are valid but which has no terminal event yet;
+- `incomplete`: the range or checkpoint is incomplete;
+- `broken`: a hash, sequence or checkpoint failure, with the sequence and reason;
+- `unavailable`: the database or events could not be read.
 
-`request` events carry the call's own hits, with the identity and both views of each occurrence:
+A broken chain names the property that failed: `sequence_gap`, `previous_hash_mismatch`, `hash_mismatch`, `invalid_payload`, `merkle_root`, `checkpoint_signature`, `checkpoint_range` or `trajectory_mismatch`. Bundle verification adds `manifest_version`, `segment_missing`, `segment_content_missing`, `segment_hash` and `manifest_hash`.
 
-| Field                    | Meaning                                                            |
-| ------------------------ | ------------------------------------------------------------------ |
-| `Label`                  | the redaction rule label, which is also the placeholder prefix     |
-| `Action`                 | `replace`, `block` or `alert`                                      |
-| `ValueID`                | the deterministic placeholder digest (see [Model](model.md))       |
-| `CallID`                 | the call that owns the stored item                                 |
-| `Section`                | the item's section: `request`, `instructions`, `params` or `tools` |
-| `Ordinal`                | the stored ordinal of the item inside its section                  |
-| `Path`                   | the part inside the item, for example `tool_call.arguments`        |
-| `Start`, `End`           | the raw byte range of the occurrence                               |
-| `ShownStart`, `ShownEnd` | the same occurrence in the shown representation                    |
-| `Secret`                 | whether the rule is a high-entropy secret rule                     |
+## Checkpoints
 
-`ValueID` is the deterministic placeholder digest (see [Model](model.md)), so the session redaction index deduplicates occurrences without reading the rule set again. A hit that belonged to an ancestor item is not written here: the ancestor recorded it when it was admitted.
+Each append creates a cumulative checkpoint row over every event of the trajectory up to that batch:
 
-## Hash chain
+- `from_seq`, `to_seq`, `merkle_root` over the event hashes;
+- `signature` over the checkpoint fields with a separate HMAC key;
+- `prev_hash` chaining to the previous checkpoint signature;
+- optional `witness_ref` for an external witness.
 
-Each event carries `prev_hash` and `hash`. The chain is per call; the first event has an empty `prev_hash`.
+A checkpoint is not an event; it anchors a range of events. The verifier recomputes the Merkle root and the signature offline. The current writer recomputes the full range on each append; incremental checkpointing for very long trajectories is a deliberate limit in [Roadmap](roadmap.md).
+
+## Evidence bundle
+
+A bundle contains:
+
+- the trajectory id and its full event range;
+- events with hashes and previous hashes;
+- segments with content, labels and media type;
+- edges connecting them;
+- the policy version and hash in force for the trajectory;
+- approvals and execution counts;
+- the latest checkpoint;
+- a manifest with a bundle hash and verifier version.
+
+`export-bundle` writes it; `verify-bundle` recomputes the chain, Merkle root, checkpoint signature, every referenced segment's content hash and the manifest. A bundle that omits a referenced segment or its content fails verification. A failed bundle reports the property that failed, never a generic error. The evidence package does not import the repository or the writer.
+
+## What the chain does and does not prove
+
+It proves events were not edited after signing and that a checkpoint covers a range. It does not prove that every boundary was captured; that is the coverage model. A gap lowers coverage and produces a finding, so an incomplete recorder cannot produce a `safe` verdict.
+
+## Operator commands
 
 ```text
-auditKey = HMAC-SHA256(instanceKey, "SafeAgent/audit-chain/key/v1")
-
-material = canonicalJSON({
-  alg: "HMAC-SHA256", v: 1,
-  prev_hash, call_id, sequence, project_id, kind,
-  schema_version: 8,
-  created_at_micros,
-  payload: canonicalJSON(sanitizedPayload)
-})
-
-hash = lowercaseHex(HMAC-SHA256(auditKey, material))
+safeagent verify-trajectory [-project ID] [-trajectory ID] [-limit N] [-json]
+safeagent export-bundle -project ID -trajectory ID [-output FILE]
+safeagent verify-bundle -file FILE
 ```
 
-`canonicalJSON` sorts object keys, preserves array order, writes compact UTF-8 without HTML escaping and normalizes numbers. `\u0000` is replaced with the replacement character before signing because PostgreSQL `jsonb` cannot store a NUL escape. The recorder signs the same bytes it stores. The instance key is supplied by the configuration file; it is never stored in the database.
-
-At seal, the call row receives `audit_head` (the last hash) and `audit_events` (the event count) in the same transaction as the terminal event. The anchor detects a deleted tail or a replaced call row even when the remaining prefix verifies. A call left `running` by a previous process is marked `interrupted` at startup with a signed terminal event (`process_restarted`), so it verifies as a complete chain rather than an incomplete one.
-
-## Verification
-
-`repository.VerifyCallAudit` checks the sequence, `prev_hash`, HMAC, the call anchor and the terminal state. It returns a report:
-
-| Status        | Meaning                                                                     |
-| ------------- | --------------------------------------------------------------------------- |
-| `verified`    | The chain and the call anchor match.                                        |
-| `in_progress` | The call is still running.                                                  |
-| `incomplete`  | The chain verifies but the call anchor is missing or does not match.        |
-| `broken`      | A sequence, payload, hash, terminal event or terminal state does not match. |
-| `unavailable` | The instance key or the schema is not available.                            |
-
-Run the offline check with the service configuration:
-
-```sh
-build/bin/safeagent -config config.toml verify-audit
-build/bin/safeagent -config config.toml verify-audit -project <id> -since 24h
-build/bin/safeagent -config config.toml verify-audit -call <call-id> -json
-build/bin/safeagent -config config.toml verify-audit -limit 100
-```
-
-`-since` accepts a duration or a `YYYY-MM-DD` date; `-limit 0` verifies every selected call. The command only reads the schema state and uses the configured instance key; it never creates or migrates a schema. The console shows the same status on the call detail page.
-
-## Ordering
-
-The recorder assigns the sequence and signs under one mutex. `EventWriter` preserves per-call FIFO order: the background flusher takes pending rows in order, and seal waits for that call's in-flight rows before writing the remainder in the seal transaction. The chain is per call, so unrelated calls are not serialized.
-
-## Retention
-
-Events are deleted with their call by the retention job. Deleting a call removes its chain; the console reports a missing call as not found and never as a verified chain. The anchor is stored on the call, so an event row cannot be removed while leaving a verified call.
+`verify-trajectory` requires the instance key because every HMAC depends on it. `verify-bundle` also requires the key to verify the checkpoint; it needs no database.
 
 ## Related
 
+- [Model](model.md)
 - [Storage](storage.md)
-- [Analysis](analysis.md)
+- [Threat](threat.md)
 - [Development](development.md)

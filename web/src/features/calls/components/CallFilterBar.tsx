@@ -1,24 +1,62 @@
 import { useEffect, useState } from 'react';
 import { useListKeys } from '../../../api/generated/keys/keys';
-import {
-  ListCallsLane,
-  ListCallsMinSeverity,
-  ListCallsOperation,
-  ListCallsOutcome,
-  ListCallsPurpose,
-  ListCallsState,
-} from '../../../api/generated/models';
 import { FilterBar } from '../../../components/data/FilterBar';
 import { Badge } from '../../../components/ui/badge';
 import { Switch } from '../../../components/ui/switch';
 import { useLocale } from '../../../i18n';
 import { shortId } from '../../../lib/format';
-import type { CallFilters } from '../search';
+import type {
+  CallFilters,
+  CallLane,
+  CallOperation,
+  CallOutcome,
+  CallPurpose,
+  CallSeverity,
+  CallState,
+} from '../search';
 
 const debounceMilliseconds = 400;
+const states: CallState[] = ['running', 'completed', 'failed', 'cancelled', 'interrupted'];
+const severities: CallSeverity[] = ['info', 'medium', 'high'];
+const lanes: CallLane[] = ['main', 'side', 'auxiliary'];
+const operations: CallOperation[] = [
+  'generation',
+  'count_tokens',
+  'models',
+  'model',
+  'responses_retrieve',
+  'responses_input_items',
+  'responses_cancel',
+  'responses_delete',
+  'embeddings',
+  'moderations',
+];
+const purposes: CallPurpose[] = [
+  'chat',
+  'subagent',
+  'compaction',
+  'title',
+  'memory',
+  'count_tokens',
+  'model_list',
+  'embedding',
+  'moderation',
+  'unknown',
+];
+const outcomes: CallOutcome[] = [
+  'ok',
+  'blocked',
+  'rejected',
+  'client_error',
+  'upstream_error',
+  'unsupported',
+  'not_found',
+  'rate_limited',
+  'cancelled',
+];
 
-function options<T extends string>(catalog: Record<string, T>, labels: Record<string, string>) {
-  return Object.values(catalog).map((value) => ({ value, label: labels[value] ?? value }));
+function options<T extends string>(values: readonly T[], labels: Record<string, string>) {
+  return values.map((value) => ({ value, label: labels[value] ?? value }));
 }
 
 export function CallFilterBar({
@@ -71,9 +109,9 @@ export function CallFilterBar({
           label: t.calls.state,
           value: filters.state ?? '',
           width: 'w-36',
-          options: [{ value: '', label: t.calls.anyState }, ...options(ListCallsState, t.states)],
+          options: [{ value: '', label: t.calls.anyState }, ...options(states, t.states)],
           onChange: (state) =>
-            onChange({ ...filters, state: (state || undefined) as CallFilters['state'] }),
+            onChange({ ...filters, state: (state || undefined) as CallState | undefined }),
         },
         {
           key: 'severity',
@@ -82,12 +120,12 @@ export function CallFilterBar({
           width: 'w-36',
           options: [
             { value: '', label: t.calls.anySeverity },
-            ...options(ListCallsMinSeverity, t.severities),
+            ...options(severities, t.severities),
           ],
           onChange: (severity) =>
             onChange({
               ...filters,
-              min_severity: (severity || undefined) as CallFilters['min_severity'],
+              min_severity: (severity || undefined) as CallSeverity | undefined,
             }),
         },
         {
@@ -95,9 +133,9 @@ export function CallFilterBar({
           label: t.calls.lane,
           value: filters.lane ?? '',
           width: 'w-32',
-          options: [{ value: '', label: t.calls.anyLane }, ...options(ListCallsLane, t.lanes)],
+          options: [{ value: '', label: t.calls.anyLane }, ...options(lanes, t.lanes)],
           onChange: (lane) =>
-            onChange({ ...filters, lane: (lane || undefined) as CallFilters['lane'] }),
+            onChange({ ...filters, lane: (lane || undefined) as CallLane | undefined }),
         },
         {
           key: 'operation',
@@ -106,12 +144,12 @@ export function CallFilterBar({
           width: 'w-40',
           options: [
             { value: '', label: t.calls.anyOperation },
-            ...options(ListCallsOperation, t.classify.operations),
+            ...options(operations, t.classify.operations),
           ],
           onChange: (operation) =>
             onChange({
               ...filters,
-              operation: (operation || undefined) as CallFilters['operation'],
+              operation: (operation || undefined) as CallOperation | undefined,
             }),
         },
         {
@@ -121,22 +159,19 @@ export function CallFilterBar({
           width: 'w-40',
           options: [
             { value: '', label: t.calls.anyPurpose },
-            ...options(ListCallsPurpose, t.classify.purposes),
+            ...options(purposes, t.classify.purposes),
           ],
           onChange: (purpose) =>
-            onChange({ ...filters, purpose: (purpose || undefined) as CallFilters['purpose'] }),
+            onChange({ ...filters, purpose: (purpose || undefined) as CallPurpose | undefined }),
         },
         {
           key: 'outcome',
           label: t.calls.outcome,
           value: filters.outcome ?? '',
           width: 'w-40',
-          options: [
-            { value: '', label: t.calls.anyOutcome },
-            ...options(ListCallsOutcome, t.outcomes),
-          ],
+          options: [{ value: '', label: t.calls.anyOutcome }, ...options(outcomes, t.outcomes)],
           onChange: (outcome) =>
-            onChange({ ...filters, outcome: (outcome || undefined) as CallFilters['outcome'] }),
+            onChange({ ...filters, outcome: (outcome || undefined) as CallOutcome | undefined }),
         },
         {
           key: 'key',
@@ -145,10 +180,7 @@ export function CallFilterBar({
           width: 'w-40',
           options: [
             { value: '', label: t.calls.anyKey },
-            ...(keys.data ?? []).map((key) => ({
-              value: key.id,
-              label: key.label ?? key.id,
-            })),
+            ...(keys.data ?? []).map((key) => ({ value: key.id, label: key.label ?? key.id })),
           ],
           onChange: (agentKeyId) => onChange({ ...filters, agent_key_id: agentKeyId || undefined }),
         },

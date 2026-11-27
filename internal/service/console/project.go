@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
@@ -19,6 +19,7 @@ const (
 	DefaultRequestsPerMinute      = 120
 	DefaultConcurrency            = 8
 	DefaultStreamReviewTimeoutMS  = 300
+	DefaultCoverageThreshold      = 0.9
 	MaximumRetentionDays          = 3650
 	MaximumOutputTokens           = 1 << 20
 	MaximumRequestsPerMinute      = 1_000_000
@@ -46,6 +47,7 @@ type ProjectInput struct {
 	DefaultMaxOutputTokens int
 	StreamReviewBytes      int
 	StreamReviewTimeoutMS  int
+	CoverageThreshold      float64
 	Version                int64
 }
 
@@ -61,6 +63,7 @@ type ProjectCreateInput struct {
 	DefaultMaxOutputTokens *int
 	StreamReviewBytes      *int
 	StreamReviewTimeoutMS  *int
+	CoverageThreshold      *float64
 }
 
 func (input ProjectCreateInput) resolve() ProjectInput {
@@ -70,6 +73,7 @@ func (input ProjectCreateInput) resolve() ProjectInput {
 		DefaultRouteID:         &input.DefaultRouteID,
 		RequestsPerMinute:      DefaultRequestsPerMinute,
 		Concurrency:            DefaultConcurrency, StreamReviewTimeoutMS: DefaultStreamReviewTimeoutMS,
+		CoverageThreshold: DefaultCoverageThreshold,
 	}
 	if input.RetentionDays != nil {
 		resolved.RetentionDays = *input.RetentionDays
@@ -94,6 +98,9 @@ func (input ProjectCreateInput) resolve() ProjectInput {
 	}
 	if input.StreamReviewTimeoutMS != nil {
 		resolved.StreamReviewTimeoutMS = *input.StreamReviewTimeoutMS
+	}
+	if input.CoverageThreshold != nil {
+		resolved.CoverageThreshold = *input.CoverageThreshold
 	}
 	return resolved
 }
@@ -121,6 +128,9 @@ func (input ProjectInput) normalize() (ProjectInput, error) {
 	if input.StreamReviewTimeoutMS == 0 {
 		input.StreamReviewTimeoutMS = DefaultStreamReviewTimeoutMS
 	}
+	if input.CoverageThreshold <= 0 || input.CoverageThreshold > 1 {
+		input.CoverageThreshold = DefaultCoverageThreshold
+	}
 	return input, nil
 }
 
@@ -139,7 +149,7 @@ func (input ProjectInput) entity() entity.Project {
 		RequestsPerMinute: input.RequestsPerMinute,
 		Concurrency:       input.Concurrency, DailyTokenQuota: input.DailyTokenQuota,
 		DefaultMaxOutputTokens: input.DefaultMaxOutputTokens, StreamReviewBytes: input.StreamReviewBytes,
-		StreamReviewTimeoutMS: input.StreamReviewTimeoutMS,
+		StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, CoverageThreshold: input.CoverageThreshold,
 	}
 }
 
@@ -154,7 +164,8 @@ func (input ProjectInput) changesAdministratorFields(existing *entity.Project) b
 		input.DailyTokenQuota != existing.DailyTokenQuota ||
 		input.DefaultMaxOutputTokens != existing.DefaultMaxOutputTokens ||
 		input.StreamReviewBytes != existing.StreamReviewBytes ||
-		input.StreamReviewTimeoutMS != existing.StreamReviewTimeoutMS
+		input.StreamReviewTimeoutMS != existing.StreamReviewTimeoutMS ||
+		input.CoverageThreshold != existing.CoverageThreshold
 }
 
 func (service *ProjectService) List(ctx context.Context, actor access.Actor) ([]entity.Project, error) {

@@ -1,12 +1,13 @@
 import type { ConsoleRouteView } from '../../../api/generated/models';
 import { useLocale } from '../../../i18n';
 import { Field } from '../../../components/form/Field';
-import { Input, IntegerInput } from '../../../components/ui/input';
+import { DecimalInput, Input, IntegerInput } from '../../../components/ui/input';
 import { Select } from '../../../components/ui/select';
 
 export interface ProjectDraft {
   name: string;
   retention_days: number;
+  coverage_threshold: number;
   requests_per_minute: number;
   concurrency: number;
   daily_token_quota: number;
@@ -50,6 +51,19 @@ export function ProjectFields({
             value={draft.retention_days}
             disabled={limitsReadOnly}
             onValueChange={(retention_days) => set({ retention_days })}
+          />
+        )}
+      </Field>
+      <Field label={t.projects.coverageThreshold} hint={t.projects.coverageThresholdHint}>
+        {(id) => (
+          <DecimalInput
+            id={id}
+            min={0}
+            max={1}
+            step={0.01}
+            value={draft.coverage_threshold}
+            disabled={limitsReadOnly}
+            onValueChange={(coverage_threshold) => set({ coverage_threshold })}
           />
         )}
       </Field>

@@ -5,26 +5,16 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleAnalysisView } from './consoleAnalysisView.ts';
 import type { ConsoleAttemptView } from './consoleAttemptView.ts';
-import type { ConsoleAuditIntegrityView } from './consoleAuditIntegrityView.ts';
-import type { ConsoleCallHitView } from './consoleCallHitView.ts';
+import type { ConsoleCallEventView } from './consoleCallEventView.ts';
 import type { ConsoleCallView } from './consoleCallView.ts';
-import type { ConsoleDecisionView } from './consoleDecisionView.ts';
-import type { ConsoleEventView } from './consoleEventView.ts';
-import type { ConsoleTimelineEntryView } from './consoleTimelineEntryView.ts';
-import type { ConsoleTranscriptView } from './consoleTranscriptView.ts';
+import type { ConsoleFindingView } from './consoleFindingView.ts';
+import type { ConsoleIntegrityView } from './consoleIntegrityView.ts';
 
 export interface ConsoleCallDetailView {
-  analyses: ConsoleAnalysisView[];
   attempts: ConsoleAttemptView[];
   call: ConsoleCallView;
-  decisions: ConsoleDecisionView[];
-  /** Only returned to administrators */
-  events: ConsoleEventView[];
-  /** Distinct redacted values introduced by this call */
-  hits: ConsoleCallHitView[];
-  integrity: ConsoleAuditIntegrityView;
-  timeline: ConsoleTimelineEntryView[];
-  transcript: ConsoleTranscriptView;
+  events: ConsoleCallEventView[];
+  findings: ConsoleFindingView[];
+  integrity: ConsoleIntegrityView;
 }

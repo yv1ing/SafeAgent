@@ -1,6 +1,6 @@
 // Exercises the endpoints an agent client uses outside generation: model listing, token counting,
 // the Responses lifecycle, embeddings passthrough and the Responses WebSocket. It then checks the
-// console accounting of those calls: auxiliary lane, no conversation, no failure counter, and the
+// console accounting of those calls: auxiliary lane, standalone trajectory, no failure counter, and the
 // completed/unsupported or completed/not_found outcomes of expected protocol refusals.
 import process from 'node:process';
 import {
@@ -56,7 +56,6 @@ await login();
 
 const beforeCalls = await callPage(`/projects/${project}/calls?limit=100`);
 const beforeIds = new Set(beforeCalls.map((call) => call.id));
-const beforeConversations = await callPage(`/projects/${project}/conversations?limit=100`);
 const beforeStats = await consoleGet(`/projects/${project}/stats?window=24h`);
 const beforeMonitor = await consoleGet('/monitor?window=24h');
 const projectMonitor = (snapshot) =>
@@ -233,7 +232,6 @@ const auxiliary = allCalls.filter((call) => call.lane === 'auxiliary');
 const newCalls = allCalls.filter((call) => !beforeIds.has(call.id));
 const newMain = newCalls.filter((call) => call.lane === 'main');
 const afterCalls = await callPage(`/projects/${project}/calls?limit=100`);
-const afterConversations = await callPage(`/projects/${project}/conversations?limit=100`);
 const afterStats = await consoleGet(`/projects/${project}/stats?window=24h`);
 const afterMonitor = projectMonitor(await consoleGet('/monitor?window=24h'));
 
@@ -277,8 +275,7 @@ await check('auxiliary calls carry the derived axes', async () => {
       throw new Error(`${call.id} purpose ${call.purpose}`);
     }
     if (call.session_id !== '') throw new Error(`${call.id} has session ${call.session_id}`);
-    if (call.analysis_state !== 'skipped')
-      throw new Error(`${call.id} analysis state ${call.analysis_state}`);
+    if (!call.trajectory_id) throw new Error(`${call.id} has no trajectory`);
     if (call.state === 'failed') throw new Error(`${call.id} is a failed call`);
     if (call.outcome === 'upstream_error' || call.outcome === 'client_error') {
       throw new Error(`${call.id} counted as a failure with outcome ${call.outcome}`);
@@ -304,23 +301,14 @@ await check('expected refusals are completed calls, not failures', async () => {
   pass('expected refusals are completed calls, not failures');
 });
 
-await check('auxiliary calls never create conversations', async () => {
-  const beforeConversationIds = new Set(beforeConversations.map((entry) => entry.id));
-  const created = afterConversations.filter((entry) => !beforeConversationIds.has(entry.id));
-  const newMainSessions = new Set(
-    newMain.map((call) => call.session_id).filter((session) => session !== ''),
-  );
-  for (const conversation of created) {
-    if (!newMainSessions.has(conversation.id)) {
-      throw new Error(`conversation ${conversation.id} has no main call`);
-    }
+await check('auxiliary calls are standalone trajectories', async () => {
+  if (auxiliary.some((call) => call.session_id !== '')) {
+    throw new Error('an auxiliary call joined a session');
   }
-  for (const session of newMainSessions) {
-    if (!created.some((conversation) => conversation.id === session)) {
-      throw new Error(`main call session ${session} was not listed as a conversation`);
-    }
+  if (!auxiliary.every((call) => Boolean(call.trajectory_id))) {
+    throw new Error('an auxiliary call has no trajectory');
   }
-  pass('auxiliary calls never create conversations');
+  pass('auxiliary calls are standalone trajectories');
 });
 
 await check('stats and monitor count the main lane only', async () => {
@@ -395,9 +383,9 @@ await check('an auxiliary-only project has empty denominators', async () => {
   const monitorNow = await consoleGet('/monitor?window=24h');
   const row = (monitorNow?.projects ?? []).find((entry) => entry.project_id === temporaryID);
   if ((row?.calls ?? 0) !== 0) throw new Error(`monitor calls ${row?.calls}`);
-  const conversations = await consoleGet(`/projects/${temporaryID}/conversations?limit=10`);
-  if ((conversations?.items ?? []).length !== 0) {
-    throw new Error('the auxiliary call created a conversation');
+  const trajectories = await consoleGet(`/projects/${temporaryID}/trajectories?limit=10`);
+  if ((trajectories?.items ?? []).length !== 1 || trajectories.items[0].session_id !== '') {
+    throw new Error('the auxiliary call did not create exactly one standalone trajectory');
   }
   const visible = await consoleGet(
     `/projects/${temporaryID}/calls?limit=10&include_auxiliary=true`,

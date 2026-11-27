@@ -129,18 +129,24 @@ if [ -z "$redacted_call" ]; then
   fail "no call with a redaction hit was available for the raw-access check"
 else
   admin_detail=$(api_get "/projects/$SAFEAGENT_PROJECT/calls/$redacted_call")
-  member_detail=$(api_get "/projects/$SAFEAGENT_PROJECT/calls/$redacted_call" "$user_jar")
-  admin_text=$(jq -r '[.transcript.turns[] | select(.role == "user") | .items[].text] | join(" ")' <<<"$admin_detail")
-  member_text=$(jq -r '[.transcript.turns[] | select(.role == "user") | .items[].text] | join(" ")' <<<"$member_detail")
-  if [[ "$admin_text" == *"alice@example.com"* && "$member_text" != *"alice@example.com"* && "$member_text" == *"[EMAIL_"* ]]; then
-    pass "administrators see raw values and members see the redacted view"
+  trajectory_id=$(jq -r '.call.trajectory_id // empty' <<<"$admin_detail")
+  segment_id=$(jq -r '[.events[] | select(.kind == "action.proposed") | .inputs[]] | first // empty' <<<"$admin_detail")
+  if [ -z "$trajectory_id" ] || [ -z "$segment_id" ]; then
+    fail "the redacted call has no request segment to inspect"
   else
-    fail "raw/redacted views are not separated (admin=$admin_text member=$member_text)"
-  fi
-  if api_get "/projects/$SAFEAGENT_PROJECT/operations?limit=50" | jq -e '[.items[].action] | index("readCallRaw") != null' >/dev/null; then
-    pass "raw access is written to the operation log"
-  else
-    fail "raw access was not written to the operation log"
+    admin_segment=$(api_get "/projects/$SAFEAGENT_PROJECT/trajectories/$trajectory_id/segments/$segment_id")
+    admin_text=$(jq -r '.content // empty' <<<"$admin_segment")
+    member_status=$(api_status "$user_jar" GET "/projects/$SAFEAGENT_PROJECT/trajectories/$trajectory_id/segments/$segment_id")
+    if [[ "$admin_text" == *"alice@example.com"* && "$member_status" = "403" ]]; then
+      pass "an administrator can read raw segment content and a member cannot"
+    else
+      fail "raw segment access is not administrator-only (member=$member_status)"
+    fi
+    if api_get "/projects/$SAFEAGENT_PROJECT/operations?limit=50" | jq -e '[.items[].action] | index("readTrajectorySegment") != null' >/dev/null; then
+      pass "raw segment access is written to the operation log"
+    else
+      fail "raw segment access was not written to the operation log"
+    fi
   fi
 fi
 

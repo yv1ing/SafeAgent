@@ -30,6 +30,3 @@ operation_log_days = 365
 
 # Upper bound on frames queued while a tool call waits for its policy verdict.
 tool_hold_bytes = 1048576
-
-# Asynchronous analysis workers running in this process.
-analysis_concurrency = 2

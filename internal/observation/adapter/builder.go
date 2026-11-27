@@ -1,5 +1,5 @@
 // Package adapter is the only adapter between wire protocols and the protocol-neutral observation
-// model. A protocol upgrade changes this package and nothing in analysis or the console.
+// model. A protocol upgrade changes this package and nothing in detection or the console.
 package adapter
 
 import (
@@ -8,7 +8,6 @@ import (
 
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/observation"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 )
 
 const AdapterVersion = "observe/4"
@@ -104,16 +103,12 @@ func appendItems(trace *observation.Trace, items []model.Item, response bool, op
 
 // Stored rebuilds a trace from the persisted event payloads. It is the asynchronous and replay
 // path; the online path builds incrementally from the same item translation.
-func Stored(request auditevent.Request, response *auditevent.Response, options Options) *observation.Trace {
-	expanded := request.Params
-	expanded.Items = request.Items
+func Stored(request model.Request, response *model.Response, options Options) *observation.Trace {
+	expanded := request
 	expanded.Tools = nil
-	if len(request.Tools) > 0 {
-		expanded.Tools = request.Tools
-	}
 	trace := Request(&expanded, options)
 	if response != nil {
-		AppendResponse(trace, &response.Response, options)
+		AppendResponse(trace, response, options)
 	}
 	return trace
 }
@@ -122,15 +117,15 @@ func Stored(request auditevent.Request, response *auditevent.Response, options O
 type Ancestor struct {
 	Found    bool
 	CallID   string
-	Request  auditevent.Request
-	Response *auditevent.Response
+	Request  model.Request
+	Response *model.Response
 }
 
 // History prepends the ancestor conversation to the items a call added and returns one origin per
 // resulting item, so every merged item keeps the identity of the call that stored it. The bool
 // reports that an ancestor request was missing, which makes the trace truncated rather than
 // silently partial.
-func History(request auditevent.Request, ancestors []Ancestor) (auditevent.Request, []observation.Locator, bool) {
+func History(request model.Request, ancestors []Ancestor) (model.Request, []observation.Locator, bool) {
 	history, origins, missing := AncestorItems(ancestors)
 	if missing {
 		return request, nil, true
@@ -157,7 +152,7 @@ func AncestorItems(ancestors []Ancestor) ([]model.Item, []observation.Locator, b
 			origins = append(origins, observation.Locator{CallID: ancestor.CallID, Section: observation.SectionRequest, Ordinal: item.Ordinal})
 		}
 		if ancestor.Response != nil {
-			for index, item := range ancestor.Response.Response.Items {
+			for index, item := range ancestor.Response.Items {
 				history = append(history, item)
 				origins = append(origins, observation.Locator{CallID: ancestor.CallID, Section: observation.SectionResponse, Ordinal: index})
 			}

@@ -49,6 +49,7 @@ func TestOmittedStreamReviewTimeoutKeepsTheDefault(t *testing.T) {
 	existing := &entity.Project{
 		Name: "p", RetentionDays: 30, RequestsPerMinute: 1, Concurrency: 1,
 		StreamReviewTimeoutMS: DefaultStreamReviewTimeoutMS,
+		CoverageThreshold:     DefaultCoverageThreshold,
 	}
 	normalized, err := (ProjectInput{Name: "p", RetentionDays: 30, RequestsPerMinute: 1, Concurrency: 1}).normalize()
 	if err != nil {

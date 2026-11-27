@@ -5,11 +5,8 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleRedactionValueView } from './consoleRedactionValueView.ts';
+import type { ConsoleRedactionValue } from './consoleRedactionValue.ts';
 
 export interface ConsoleRedactionIndexView {
-  session_id: string;
-  /** Number of occurrences across the conversation */
-  total: number;
-  values: ConsoleRedactionValueView[];
+  items: ConsoleRedactionValue[];
 }

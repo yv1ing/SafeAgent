@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yv1ing/SafeAgent/internal/service/access"
+	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
 
@@ -40,7 +41,7 @@ type MonitorSnapshot struct {
 	Projects []MonitorProjectRow        `json:"projects"`
 	Series   []repository.TrafficBucket `json:"series"`
 	Agents   []repository.TopAgent      `json:"agents"`
-	Recent   []repository.HighRiskCall  `json:"recent"`
+	Recent   []entity.Call              `json:"recent"`
 }
 
 var windows = map[string]struct {
@@ -63,7 +64,7 @@ func (service *MonitorService) Snapshot(ctx context.Context, actor access.Actor,
 	}
 	now := time.Now().UTC()
 	since := now.Add(-definition.length)
-	snapshot := MonitorSnapshot{Window: window, Since: since, Projects: []MonitorProjectRow{}, Series: []repository.TrafficBucket{}, Agents: []repository.TopAgent{}, Recent: []repository.HighRiskCall{}}
+	snapshot := MonitorSnapshot{Window: window, Since: since, Projects: []MonitorProjectRow{}, Series: []repository.TrafficBucket{}, Agents: []repository.TopAgent{}, Recent: []entity.Call{}}
 	projects, err := service.store.VisibleProjects(ctx, actor.UserID, actor.Administrator)
 	if err != nil {
 		return snapshot, err

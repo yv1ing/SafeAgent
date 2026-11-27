@@ -14,6 +14,8 @@ export interface ConsoleProjectView {
   calls_24h?: number;
   /** 0 means unlimited */
   concurrency: number;
+  /** Minimum observed-boundary coverage for a safe verdict */
+  coverage_threshold: number;
   created_at: string;
   /** 0 means unlimited */
   daily_token_quota: number;

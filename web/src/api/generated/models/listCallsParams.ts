@@ -5,12 +5,6 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ListCallsLane } from './listCallsLane.ts';
-import type { ListCallsMinSeverity } from './listCallsMinSeverity.ts';
-import type { ListCallsOperation } from './listCallsOperation.ts';
-import type { ListCallsOutcome } from './listCallsOutcome.ts';
-import type { ListCallsPurpose } from './listCallsPurpose.ts';
-import type { ListCallsState } from './listCallsState.ts';
 
 export type ListCallsParams = {
   /** RFC 3339 time of the last row of the previous page */
@@ -22,15 +16,14 @@ export type ListCallsParams = {
    * @maximum 100
    */
   limit?: number;
-  state?: ListCallsState;
-  min_severity?: ListCallsMinSeverity;
-  model?: string;
+  state?: string;
   agent_key_id?: string;
+  model?: string;
   session_id?: string;
-  lane?: ListCallsLane;
-  operation?: ListCallsOperation;
-  purpose?: ListCallsPurpose;
-  outcome?: ListCallsOutcome;
-  /** Include auxiliary protocol calls; ignored when lane is set */
+  lane?: string;
+  operation?: string;
+  purpose?: string;
+  outcome?: string;
+  min_severity?: string;
   include_auxiliary?: boolean;
 };

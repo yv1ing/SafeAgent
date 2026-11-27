@@ -2,14 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis"
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/classify"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
@@ -17,14 +16,18 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
+	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	"github.com/yv1ing/SafeAgent/internal/redact"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/threat"
+	"github.com/yv1ing/SafeAgent/internal/trajectory"
 )
 
 // call carries everything one client call needs from admission to its terminal state.
 type call struct {
 	ctx           context.Context
+	record        *entity.Call
 	pipeline      *Pipeline
 	kind          model.Format
 	coder         codec.Codec
@@ -46,7 +49,7 @@ type call struct {
 	started       time.Time
 	stickyKey     string
 	release       func()
-	callHits      []auditevent.Hit
+	callHits      []trajectory.RedactionHit
 	// redactedOccurrences counts every redaction applied to the forwarded request, including the
 	// ones relocated to ancestor items. Raw pass-through is only safe when it is zero.
 	redactedOccurrences int
@@ -55,30 +58,34 @@ type call struct {
 	parent              *entity.Call
 	parentSource        string
 	offset              int
-	// client is the request as the client sent it; analysis and fingerprints are taken from it,
+	// client is the request as the client sent it; findings and fingerprints are taken from it,
 	// never from the redacted copy that goes upstream.
-	client          *model.Request
-	clientHeader    http.Header
-	body            []byte
-	stream          bool
-	historyExpanded bool
-	streamCommitted bool
-	streamTruncated bool
-	sessionSource   string
-	explicitSession string
-	sessionConflict *model.Error
-	hasSignatures   bool
-	reviewBytes     int
-	reviewTimeout   time.Duration
-	reviewBlocked   bool
-	toolKinds       map[string]model.ToolKind
-	failureLedger   model.Ledger
-	findings        []analysis.Finding
-	decisions       []entity.Decision
-	redactionRules  []redact.Rule
-	reserved        bool
-	opened          bool
-	blockedRecorded bool
+	client            *model.Request
+	clientHeader      http.Header
+	body              []byte
+	stream            bool
+	historyExpanded   bool
+	streamCommitted   bool
+	streamTruncated   bool
+	sessionSource     string
+	explicitSession   string
+	sessionConflict   *model.Error
+	hasSignatures     bool
+	reviewBytes       int
+	reviewTimeout     time.Duration
+	reviewBlocked     bool
+	toolKinds         map[string]model.ToolKind
+	failureLedger     model.Ledger
+	findings          []threat.Finding
+	redactionRules    []redact.Rule
+	trajectorySummary *entity.TrajectorySummary
+	principal         string
+	requestSegment    string
+	responseSegment   string
+	endTrajectory     bool
+	reserved          bool
+	opened            bool
+	approvalID        string
 }
 
 func requestHasSignature(request *model.Request) bool {
@@ -165,9 +172,10 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 		ClientFormat: string(input.Kind), Operation: classification.Operation,
 		Purpose: classification.Purpose, PurposeSource: classification.PurposeSource, Lane: classification.Lane,
 		ClientTransport: transport, PublicModel: request.Model, State: "running", Stream: request.Stream,
-		AnalysisState: analysisStateOf(classification.Lane), CreatedAt: started, UpdatedAt: started,
+		CreatedAt: started, UpdatedAt: started,
 	}
-	state.recorder = NewRecorder(pipeline.repository, pipeline.logger, pipeline.secret, record)
+	state.record = record
+	state.principal = identity.AgentKey.ID
 	state.origins = nil
 
 	release, err := pipeline.limiter.Acquire(
@@ -218,15 +226,6 @@ func (pipeline *Pipeline) admit(ctx context.Context, input Request, writer Write
 		return state, refusal
 	}
 	return state, nil
-}
-
-// analysisStateOf is the initial diagnosis projection of a lane. Only a main call is queued for
-// analysis; side calls are counted in traffic but never diagnosed.
-func analysisStateOf(lane classify.Lane) string {
-	if lane.Analyzed() {
-		return "pending"
-	}
-	return "skipped"
 }
 
 // requestHints gathers the request facts the classifier may read. The prompt is the leading
@@ -283,7 +282,7 @@ func firstConversationText(items []model.Item) string {
 }
 
 func (state *call) open() *model.Error {
-	record := state.recorder.Call()
+	record := state.record
 	record.MessageOffset = state.offset
 	if state.lane.Conversational() {
 		if state.parent != nil {
@@ -301,6 +300,7 @@ func (state *call) open() *model.Error {
 			state.sessionSource = "call_id"
 		}
 		state.stickyKey = record.SessionID
+		state.endTrajectory = state.explicitSession == "" && state.parent == nil
 	} else {
 		record.SessionID = ""
 		record.ParentCallID = ""
@@ -310,6 +310,16 @@ func (state *call) open() *model.Error {
 	if state.kind == model.Responses && state.lane.Conversational() {
 		record.ResponseID = model.ResponseID(state.kind, record.ID, "")
 	}
+	summary, err := state.pipeline.repository.EnsureTrajectory(state.ctx, record.ProjectID, record.AgentKeyID, record.SessionID, promptHint(state.request), state.identity.Project.CoverageThreshold)
+	if err != nil {
+		state.pipeline.logger.Error("trajectory could not be opened", "call", record.ID, "error", err)
+		return internal("audit_unavailable", "The call could not be recorded.")
+	}
+	record.TrajectoryID = summary.ID
+	state.trajectorySummary = summary
+	state.recorder = NewRecorder(state.pipeline.repository, state.pipeline.logger, record, summary, state.principal)
+	state.recorder.EndOnFinish = state.endTrajectory
+	state.recorder.CoverageThreshold = state.identity.Project.CoverageThreshold
 	if err := state.recorder.Open(state.ctx); err != nil {
 		state.pipeline.logger.Error("call could not be recorded", "call", record.ID, "error", err)
 		return internal("audit_unavailable", "The call could not be recorded.")
@@ -325,7 +335,7 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 	original := model.CloneRequest(request)
 	state.client = original
 	if state.sessionConflict != nil {
-		state.recordRequest(original, nil)
+		state.recordRequest(original)
 		return state.sessionConflict
 	}
 	state.toolKinds = map[string]model.ToolKind{}
@@ -334,11 +344,13 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 	}
 	engine, rules, err := pipeline.redactionEngine(state.ctx, identity.Project)
 	if err != nil {
-		state.recordRequest(original, nil)
+		state.recordRequest(original)
 		return internal("rules_unavailable", "The redaction rules are unavailable.")
 	}
 	state.scope = engine.NewScope()
 	state.redactionRules = rules
+	rulesJSON, _ := json.Marshal(rules)
+	state.recorder.SetPolicy(state.policyVersion, state.compiled.Hash(), identity.Project.RulesVersion, secure.Digest(string(rulesJSON)), rules)
 	result, err := state.scope.ApplyRequest(request)
 	if result != nil {
 		state.callHits = state.storedHits(result)
@@ -350,12 +362,12 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 		applyRedactionSummary(state.recorder.Call(), nil)
 	}
 	if err != nil {
-		state.recordRequest(original, nil)
+		state.recordRequest(original)
 		state.recordRedactionBlock("redaction_immutable", "Sensitive content appears in a position that cannot be rewritten safely.")
 		return blocked("redaction_immutable", "Sensitive content appears in a position that cannot be redacted safely.", http.StatusUnprocessableEntity)
 	}
 	if result.Blocked {
-		state.recordRequest(original, nil)
+		state.recordRequest(original)
 		reason := "The request matches a blocking redaction rule."
 		for _, hit := range result.Hits {
 			if hit.Action == redact.ActionBlock {
@@ -367,7 +379,7 @@ func (state *call) screen(unsealLosses []model.Loss) *model.Error {
 		return blocked("sensitive_content_blocked", reason, http.StatusForbidden)
 	}
 
-	state.recordRequest(original, unsealLosses)
+	state.recordRequest(original)
 	state.recordRequestToolResults()
 	if refusal := state.evaluateRequest(state.baseTrace()); refusal != nil {
 		return refusal
@@ -464,11 +476,15 @@ func (state *call) baseTrace() *observation.Trace {
 func (state *call) recordRequestToolResults() {
 	offset := min(state.offset, len(state.request.Items))
 	for index := offset; index < len(state.request.Items); index++ {
-		item := &state.request.Items[index]
+		item := state.request.Items[index]
 		if item.Kind != model.ItemToolResult {
 			continue
 		}
-		state.recorder.ToolResult(auditevent.ToolResult{CallID: item.CallID, Name: item.Name, IsError: item.IsError})
+		actionCallID := state.record.ID
+		if found, err := state.pipeline.repository.CallByToolCall(state.ctx, state.identity.Project.ID, state.identity.AgentKey.ID, item.CallID); err == nil && found != nil {
+			actionCallID = found.ID
+		}
+		state.recorder.ToolResult(actionCallID, item.CallID, item.IsError, item)
 	}
 }
 
@@ -498,24 +514,18 @@ func (state *call) newToolResults() []policy.ToolResult {
 
 const maxPolicyResultBytes = 8 << 10
 
-func (state *call) recordRequest(original *model.Request, losses []model.Loss) {
-	params := *original
-	params.Items = nil
-	params.Tools = nil
+func (state *call) recordRequest(original *model.Request) {
 	offset := min(state.offset, len(original.Items))
-	record := auditevent.Request{
-		Items: original.Items[offset:], Params: params, Tools: original.Tools,
-		Hits: nonNil(state.callHits), Ledger: model.Ledger{Losses: losses}, SessionSource: state.sessionSource,
-		Principal: &auditevent.Principal{AgentKeyID: state.identity.AgentKey.ID, Role: state.identity.AgentKey.Role, TrustLevel: state.identity.AgentKey.TrustLevel},
+	proposalID := trajectory.NewID("evt")
+	payload, _ := json.Marshal(original)
+	state.requestSegment = state.recorder.Segment(proposalID, payload, "application/json", trajectory.IntegrityTrusted, trajectory.ConfidentialityPrivate)
+	inputs := []trajectory.Ref{}
+	if state.requestSegment != "" {
+		inputs = append(inputs, trajectory.Ref{Segment: state.requestSegment, Role: "prompt"})
 	}
-	state.recorder.Event(auditevent.KindRequest, record)
-}
-
-func nonNil[T any](values []T) []T {
-	if values == nil {
-		return []T{}
-	}
-	return values
+	state.recorder.Propose(proposalID, state.requestSegment, inputs)
+	state.recorder.ObserveRequest(original.Items, offset, state.callHits)
+	state.recorder.AssembleTools(original.Tools)
 }
 
 // estimateTokens is a deliberately rough reservation: a quarter of the JSON size plus the output

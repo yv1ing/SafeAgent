@@ -13,6 +13,8 @@ export interface ConsoleUpdateProjectInput {
    */
   auxiliary_retention_days?: number | null;
   concurrency: number;
+  /** Minimum observed-boundary coverage for a safe verdict */
+  coverage_threshold?: number;
   daily_token_quota: number;
   /** Applied when an upstream requires an output limit and the client omits one */
   default_max_output_tokens?: number;

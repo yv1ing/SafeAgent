@@ -10,9 +10,9 @@ This comparison is qualitative. It draws on the three projects' public documenta
 
 ## SafeAgent
 
-SafeAgent is a self-hosted security gateway for agent behavior. It accepts Chat Completions, Responses, Anthropic Messages and Gemini, converts them through one canonical model, masks sensitive values on the way out and restores them on the way back, and records every admitted call in a signed audit chain.
+SafeAgent is a self-hosted security gateway for agent behavior. It accepts Chat Completions, Responses, Anthropic Messages and Gemini, converts them through one canonical model, masks sensitive values on the way out and restores them on the way back, and records every trajectory in a signed event chain; calls are projections of that chain.
 
-Its analysis unit is one call, and a chain of calls forms a conversation. The control plane separates a global supply graph (providers, channels, models) from per-project routing (routes, targets, aliases). The gateway, the console and diagnosis share one call record, so an operator's view matches what was enforced at the time.
+Its analysis unit is one trajectory, and a call is an interval inside it. The control plane separates a global supply graph (providers, channels, models) from per-project routing (routes, targets, aliases). The gateway, the console and the evidence tools read one event log, so an operator's view matches what was enforced at the time.
 
 ## AxonHub
 
@@ -37,14 +37,14 @@ Its analysis unit is the individual request; usage and operational errors are ac
 | Dimension | SafeAgent | AxonHub | magpie | Sub2API |
 | --- | --- | --- | --- | --- |
 | Positioning | agent behavior security gateway | multi-provider AI gateway and platform | local multi-agent CLI gateway and config coordinator | subscription quota, billing and relay |
-| Analysis unit | one call; the call chain forms a conversation | trace or thread, request and execution layers | one gateway call, grouped by client session | one request, with usage and error ledgers |
+| Analysis unit | one trajectory; a call is an interval | trace or thread, request and execution layers | one gateway call, grouped by client session | one request, with usage and error ledgers |
 | Control plane | provider → channel → model supply graph, plus project routes and aliases | channels and models, plus association rules | providers, accounts, groups and routes | accounts, groups, channels and composite groups |
 | Protocol strategy | canonical model for four formats, same-format raw pass-through | unified OpenAI-shaped representation, pairwise transforms | four-format conversion, rewrites agent configuration | pairwise conversion, Responses as a hub |
-| Storage | PostgreSQL, configuration and signed audit chain | relational schema managed through an ORM | local files | relational database plus a cache layer |
+| Storage | PostgreSQL, configuration and signed trajectory ledger | relational schema managed through an ORM | local files | relational database plus a cache layer |
 
 ## Adopted ideas
 
-- **From AxonHub:** the separation between provider configuration and routing policy, a visible history of requests and attempts, and a trajectory rebuilt from typed nodes into several views. The OpenAI-shaped representation and its client-specific handling remain AxonHub's choices.
+- **From AxonHub:** the separation between provider configuration and routing policy, a visible history of requests and attempts, and a trajectory view over typed event nodes. The OpenAI-shaped representation and its client-specific handling remain AxonHub's choices.
 - **From magpie:** call classification by endpoint, declared purpose and lane, and the use of a deterministic placeholder as a value identity so repeated masking collapses into one entry.
 - **From Sub2API:** a soft-delete lifecycle with an impact check, and the practice of accounting for usage separately from errors.
 

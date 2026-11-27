@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.2.0
  */
 
-/**
- * Terminal reason independent of the HTTP lifecycle; absent while the call is running
- */
 export type ConsoleCallViewOutcome =
   (typeof ConsoleCallViewOutcome)[keyof typeof ConsoleCallViewOutcome];
 

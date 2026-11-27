@@ -32,7 +32,7 @@ instance_key = "<output of: openssl rand -base64 32>"
 secure_cookies = false
 ```
 
-The instance key must be 32 bytes encoded as standard base64. It signs the audit chain and seals stored credentials, and it is never written to the database. Store it securely: without it, existing channel keys and audit chains cannot be read. Every other setting has a default. Two of them depend on the deployment:
+The instance key must be 32 bytes encoded as standard base64. It signs the trajectory event chains and seals stored credentials, and it is never written to the database. Store it securely: without it, existing channel keys and trajectory chains cannot be read. Every other setting has a default. Two of them depend on the deployment:
 
 - `secure_cookies` is `true` by default. Set it to `false` only while the console is reached over plain HTTP on loopback. Any other deployment should use HTTPS and keep it `true`, because a Secure cookie is dropped over plain HTTP.
 - `sslmode=disable` is for a local database only. A remote database should use TLS.
@@ -100,7 +100,7 @@ Give the agent the gateway address and the key, and use the route name as the mo
 | Anthropic Messages | `http://127.0.0.1:8080`    | `x-api-key: <key>`                  |
 | Gemini             | `http://127.0.0.1:8080`    | `x-goog-api-key: <key>`, or `?key=` |
 
-Most clients accept a custom base URL, so Claude Code, Codex, Gemini CLI or a plain HTTP client can all use the same endpoint. An optional `X-SafeAgent-Session` header groups calls from one agent key into one conversation; identity still comes from the key. Use `previous_response_id` when the client supports it.
+Most clients accept a custom base URL, so Claude Code, Codex, Gemini CLI or a plain HTTP client can all use the same endpoint. An optional `X-SafeAgent-Session` header groups calls from one agent key into one trajectory; identity still comes from the key. Use `previous_response_id` when the client supports it.
 
 A first request:
 
@@ -115,9 +115,9 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 The call now appears on the project's Calls page. Each row carries the lane, operation, purpose and outcome, so a main call, a background call and an auxiliary protocol call are distinguishable at a glance. Auxiliary calls are hidden until enabled, while side calls carry a lane badge and can be folded together.
 
-Open a conversation to see the trajectory: a flow graph by default, with a tree and a flat list over the same nodes. Select a node to inspect its call, item or finding, step forward and backward through the audit events, and open the redaction summary to see each distinct masked value and where it appears. The conversation header reports how many distinct values were masked and how many occurrences the conversation produced.
+Open a trajectory to see its state, coverage, calls, findings and event timeline. Coverage shows observed and expected boundaries and any capture gap; the timeline is the audit log itself. A call detail shows its attempts, findings and events, and links back to the trajectory. Redacted values are listed for the trajectory without revealing the original.
 
-The project's Risk page aggregates findings by risk source, failure mode, harm and severity, ranks finding codes and agent keys, and links recent high-risk calls; opening an agent key shows the data flows detected for it. Monitor gives traffic, failures and recent high-risk calls across projects. Policies and Redaction hold the ordered rule table and the detector rules; both are validated when saved and take effect immediately.
+The project's Trajectories page lists delegated tasks with coverage, risk and finding counts; a trajectory shows its state, calls, findings, segments, event timeline and integrity status. Monitor gives traffic, failures and recent high-severity calls across projects. Policies and Redaction hold the ordered rule table and the detector rules; both are validated when saved and take effect immediately.
 
 To check redaction end to end, send a prompt that contains an e-mail address. The request that reaches the provider contains a placeholder such as `[EMAIL_…]`, the console shows the same placeholder, the reply the client receives contains the original address, and the call reports one distinct masked value.
 
@@ -153,8 +153,8 @@ With `secure_cookies = true` the console requires HTTPS. Serve it through a reve
 | Sign-in works but a reload signs the session out | The deployment uses HTTP with `secure_cookies = true`. Use HTTPS, or set it to false on loopback. |
 | Console writes fail behind a proxy | Set `public_origin` to the origin users open in the browser. |
 | A provider or model shows a warning in the console | A route references a deleted or disabled object. Restore it, or remove the affected target. |
-| A request returns 403, or a stream ends with a tool-call error | A blocking redaction rule, a policy rule or the decision model blocked it. The call record names the source, and asynchronous diagnosis still runs. |
-| A background call works but is missing from the conversation | Side and auxiliary calls are folded or hidden by design; switch on the lane filter. |
+| A request returns 403, or a stream ends with a tool-call error | A blocking redaction rule, a policy rule or the decision model blocked it. The gate decision names the source, and the trajectory is still recorded. |
+| A background call works but is missing from the trajectory list | Side and auxiliary calls are folded or hidden by design; switch on the lane filter. |
 
 ## Further reading
 

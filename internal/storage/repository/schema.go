@@ -9,7 +9,6 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -79,22 +78,10 @@ func (store *Store) Prepare(ctx context.Context) error {
 	return store.VerifySchema(ctx)
 }
 
-var errStaleEvents = errors.New("the database contains events with a different schema version; recreate the database")
-
-// VerifySchema checks the stored DDL fingerprint and every stored event's schema version without
-// creating or modifying anything. It is used at startup and by the offline audit command.
+// VerifySchema checks the stored DDL fingerprint without creating or modifying anything.
 func (store *Store) VerifySchema(ctx context.Context) error {
-	if _, err := store.loadState(ctx); err != nil {
-		return err
-	}
-	var incompatible int
-	if err := store.DB.NewRaw(`SELECT count(*) FROM events WHERE schema_version <> ?`, auditevent.SchemaVersion).Scan(ctx, &incompatible); err != nil {
-		return err
-	}
-	if incompatible > 0 {
-		return errStaleEvents
-	}
-	return nil
+	_, err := store.loadState(ctx)
+	return err
 }
 
 // loadState reads the schema anchor without creating or modifying anything.

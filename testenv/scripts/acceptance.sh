@@ -33,7 +33,7 @@ run protocol make lab-protocol
 run auxiliary make lab-auxiliary
 run agents make lab-agents
 run policy make lab-policy
-run analysis make lab-analysis
+run threat make lab-threat
 run security make lab-security
 run faults make lab-faults
 run trajectory make lab-trajectory

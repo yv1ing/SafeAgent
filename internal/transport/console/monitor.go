@@ -88,7 +88,7 @@ func monitorView(snapshot service.MonitorSnapshot) MonitorView {
 		view.Agents = append(view.Agents, MonitorAgentView{ProjectID: agent.ProjectID, AgentKeyID: agent.AgentKeyID, Label: agent.Label, Calls: agent.Calls, Blocked: agent.Blocked, HighFindings: agent.HighFindings, LastAt: stamp(agent.LastAt)})
 	}
 	for _, recent := range snapshot.Recent {
-		view.Recent = append(view.Recent, MonitorRecentView{CallID: recent.CallID, NodeID: service.CallNodeID(recent.CallID), ProjectID: recent.ProjectID, AgentKeyID: recent.AgentKeyID, Model: recent.Model, Severity: recent.Severity, State: recent.State, CreatedAt: stamp(recent.CreatedAt)})
+		view.Recent = append(view.Recent, MonitorRecentView{CallID: recent.ID, NodeID: "call:" + recent.ID, ProjectID: recent.ProjectID, AgentKeyID: recent.AgentKeyID, Model: recent.PublicModel, Severity: recent.MaxSeverity, State: recent.State, CreatedAt: stamp(recent.CreatedAt)})
 	}
 	return view
 }

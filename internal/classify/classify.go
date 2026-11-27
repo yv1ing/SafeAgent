@@ -92,8 +92,8 @@ const (
 	SourceDefault   PurposeSource = "default"
 )
 
-// Lane groups calls by the role they play in a conversation. The lane, not the endpoint, decides
-// whether a call joins a conversation, is analyzed, and is counted in traffic metrics.
+// Lane groups calls by their role in a trajectory. The lane, not the endpoint, decides whether a
+// call joins a session and is counted in traffic metrics.
 type Lane string
 
 const (
@@ -109,11 +109,6 @@ func (lane Lane) Valid() bool {
 // Conversational reports whether a call belongs to a conversation and therefore stores a session.
 func (lane Lane) Conversational() bool {
 	return lane == LaneMain || lane == LaneSide
-}
-
-// Analyzed reports whether a call is subject to asynchronous diagnosis.
-func (lane Lane) Analyzed() bool {
-	return lane == LaneMain
 }
 
 // Outcome is the terminal reason of a call, independent of whether the HTTP lifecycle completed.

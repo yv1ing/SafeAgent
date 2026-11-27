@@ -5,23 +5,22 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleAttributionView } from './consoleAttributionView.ts';
-import type { ConsoleAxesView } from './consoleAxesView.ts';
-import type { ConsoleEvidenceView } from './consoleEvidenceView.ts';
-import type { ConsoleFlowView } from './consoleFlowView.ts';
 
 export interface ConsoleFindingView {
-  attribution: ConsoleAttributionView[];
-  axes: ConsoleAxesView;
+  call_id: string;
   code: string;
   confidence: number;
-  detector_id: string;
-  detector_version: string;
-  evidence: ConsoleEvidenceView[];
+  control: string;
+  created_at: string;
+  event_id: string;
+  evidence: unknown;
   fingerprint: string;
-  flow?: ConsoleFlowView;
+  id: string;
+  invariant: string;
   origin: string;
+  segments: unknown;
   severity: string;
   sink: string;
+  transfer: string;
   trust: string;
 }

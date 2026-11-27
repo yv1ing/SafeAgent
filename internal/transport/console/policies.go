@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yv1ing/SafeAgent/internal/analysis"
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/observation"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	access "github.com/yv1ing/SafeAgent/internal/service/access"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
+	"github.com/yv1ing/SafeAgent/internal/threat"
 )
 
 type PolicyVersionView struct {
@@ -172,13 +172,13 @@ func (console *Console) registerPolicies() {
 		}
 		findings := make([]FindingView, 0, len(result.Findings))
 		for index := range result.Findings {
-			findings = append(findings, findingView(&result.Findings[index]))
+			findings = append(findings, threatFindingView(result.Findings[index]))
 		}
 		decisions := make([]PolicyDecisionView, 0, len(result.Decisions))
 		for _, decision := range result.Decisions {
 			decisions = append(decisions, PolicyDecisionView{RuleID: decision.RuleID, RuleName: decision.Name, Action: decision.Action, Severity: decision.Severity, Reason: decision.Reason})
 		}
-		summary := analysis.Summarize(result.Findings)
+		summary := threat.Summarize(result.Findings)
 		return PolicyTestView{Findings: findings, Decisions: decisions, Verdict: result.Verdict.Value, MaxSeverity: summary.MaxSeverity}, nil
 	})
 }

@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.2.0
  */
 
-/**
- * How the purpose was established
- */
 export type ConsoleCallViewPurposeSource =
   (typeof ConsoleCallViewPurposeSource)[keyof typeof ConsoleCallViewPurposeSource];
 

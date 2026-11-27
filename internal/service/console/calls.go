@@ -4,32 +4,25 @@ import (
 	"context"
 	"slices"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/classify"
-	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/service/access"
-	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/threat"
+	"github.com/yv1ing/SafeAgent/internal/trajectory"
 )
 
 var (
 	CallStates     = []string{"running", "completed", "failed", "cancelled", "interrupted"}
-	CallSeverities = []string{analysis.SeverityInfo, analysis.SeverityMedium, analysis.SeverityHigh}
+	CallSeverities = []string{threat.SeverityInfo, threat.SeverityMedium, threat.SeverityHigh}
 )
 
 type CallService struct {
-	store    *repository.Store
-	analyzer *diagnosis.Service
+	store *repository.Store
 }
 
-func NewCallService(store *repository.Store, analyzer *diagnosis.Service) *CallService {
-	return &CallService{store: store, analyzer: analyzer}
-}
+func NewCallService(store *repository.Store) *CallService { return &CallService{store: store} }
 
-// CallFilter is the query of the call listing. Lane, operation, purpose and outcome are validated
-// against internal/classify; the auxiliary lane is hidden unless the caller asks for it explicitly.
 type CallFilter struct {
 	State            string
 	MinSeverity      string
@@ -93,11 +86,6 @@ func (service *CallService) List(ctx context.Context, actor access.Actor, projec
 	if err := filter.validate(); err != nil {
 		return Page[entity.Call]{}, err
 	}
-	if filter.SessionID != "" {
-		if _, err := service.store.Conversation(ctx, projectID, filter.SessionID); err != nil {
-			return Page[entity.Call]{}, access.Translate(err)
-		}
-	}
 	rows, err := service.store.Calls(ctx, projectID, filter.repositoryFilter(cursor))
 	if err != nil {
 		return Page[entity.Call]{}, err
@@ -107,28 +95,14 @@ func (service *CallService) List(ctx context.Context, actor access.Actor, projec
 	}), nil
 }
 
-// Transcript is the rebuilt conversation of one call, including its ancestors. Findings and
-// redaction spans already carry the identity of the call that stored each item.
-type Transcript struct {
-	Trace     *observation.Trace
-	Truncated bool
-}
-
 type CallDetail struct {
 	Call       *entity.Call
-	Transcript Transcript
-	Analyses   []*diagnosis.AnalysisView
-	Decisions  []entity.Decision
-	Attempts   []CallAttempt
-	Events     []entity.Event
-	Timeline   []auditevent.Entry
-	Integrity  auditevent.ChainReport
-	Hits       []RedactionValue
+	Trajectory *entity.TrajectorySummary
+	Events     []trajectory.Event
+	Findings   []entity.Finding
+	Integrity  trajectory.ChainReport
 }
 
-// Detail assembles the replay of one call: the conversation up to and including it, every analysis
-// of the call, the online decisions, the upstream attempts, the call's own redaction values and the
-// raw events.
 func (service *CallService) Detail(ctx context.Context, actor access.Actor, projectID, callID string) (*CallDetail, error) {
 	if err := actor.RequireProject(ctx, service.store, projectID); err != nil {
 		return nil, err
@@ -137,52 +111,80 @@ func (service *CallService) Detail(ctx context.Context, actor access.Actor, proj
 	if err != nil {
 		return nil, access.Translate(err)
 	}
-	detail := &CallDetail{
-		Call: call, Analyses: []*diagnosis.AnalysisView{}, Decisions: []entity.Decision{}, Hits: []RedactionValue{},
-		Transcript: Transcript{Trace: &observation.Trace{ID: call.ID, Principal: observation.Principal{ProjectID: projectID, AgentKeyID: call.AgentKeyID}}},
+	detail := &CallDetail{Call: call}
+	if call.TrajectoryID != "" {
+		summary, err := service.store.Trajectory(ctx, projectID, call.TrajectoryID)
+		if err != nil {
+			return nil, access.Translate(err)
+		}
+		detail.Trajectory = summary
+		events, err := service.store.TrajectoryEvents(ctx, projectID, call.TrajectoryID)
+		if err != nil {
+			return nil, err
+		}
+		detail.Events = make([]trajectory.Event, 0, len(events))
+		for _, event := range events {
+			if event.CallID == callID {
+				detail.Events = append(detail.Events, event)
+			}
+		}
+		if detail.Integrity, err = service.store.VerifyTrajectory(ctx, projectID, call.TrajectoryID); err != nil {
+			return nil, err
+		}
 	}
-	events, err := service.store.CallEvents(ctx, projectID, call.ID)
+	findings, err := service.store.FindingsOfCalls(ctx, projectID, []string{callID})
 	if err != nil {
 		return nil, err
 	}
-	records := make([]auditevent.Record, 0, len(events))
-	for _, event := range events {
-		records = append(records, auditevent.Record{
-			CallID: event.CallID, Sequence: event.Sequence, ProjectID: event.ProjectID,
-			Kind: event.Kind, SchemaVersion: event.SchemaVersion, Payload: event.Payload,
-			CreatedAt: event.CreatedAt, PrevHash: event.PrevHash, Hash: event.Hash,
-		})
-	}
-	if detail.Timeline, err = auditevent.BuildTimeline(records); err != nil {
-		return nil, err
-	}
-	detail.Attempts, _ = BuildAttempts(call, detail.Timeline)
-	// A running or interrupted call may not have a sealed trace yet; the detail must still show its
-	// attempts and timeline. Any other state has all of its events, so a rebuild failure is a defect
-	// that must surface rather than be hidden.
-	if rebuild, rebuildErr := service.analyzer.BuildTrace(ctx, call); rebuildErr == nil {
-		detail.Transcript = Transcript{Trace: rebuild.Trace, Truncated: rebuild.Truncated}
-		detail.Hits = CallRedactions(call, rebuild.Hits)
-	} else if call.State != "running" && call.State != "interrupted" {
-		return nil, rebuildErr
-	}
-	analyses, err := service.analyzer.AnalysesOfCall(ctx, actor, projectID, call.ID)
-	if err != nil {
-		return nil, err
-	}
-	detail.Analyses = analyses
-	decisions, err := service.store.DecisionsOfCall(ctx, call.ID)
-	if err != nil {
-		return nil, err
-	}
-	detail.Decisions = decisions
-	detail.Integrity, err = service.store.VerifyCallAudit(ctx, projectID, call.ID)
-	if err != nil {
-		detail.Integrity = auditevent.ChainReport{Status: auditevent.StatusUnavailable, Error: "verification unavailable"}
-	}
-	// Raw events can approach the stream limit; only administrators receive the payloads.
-	if actor.Administrator {
-		detail.Events = events
-	}
+	detail.Findings = findings
 	return detail, nil
+}
+
+type CallAttempt struct {
+	Index            int
+	ChannelID        string
+	ChannelName      string
+	ModelID          string
+	UpstreamModel    string
+	Format           string
+	Result           string
+	Code             string
+	DurationMillis   int
+	FirstTokenMillis int
+}
+
+func Attempts(events []trajectory.Event) []CallAttempt {
+	attempts := []CallAttempt{}
+	current := map[string]int{}
+	for _, event := range events {
+		switch event.Kind {
+		case trajectory.KindActionProposed:
+			payload, err := trajectory.DecodePayload[trajectory.ActionProposed](&event)
+			if err != nil || payload.ActionType != trajectory.ActionProviderAttempt {
+				continue
+			}
+			current[payload.ActionID] = len(attempts)
+			attempts = append(attempts, CallAttempt{
+				Index: len(attempts), ChannelID: payload.ChannelID, ChannelName: payload.ChannelName,
+				ModelID: payload.ModelID, UpstreamModel: payload.UpstreamModel, Format: payload.Format, Result: "running",
+			})
+		case trajectory.KindActionExecuted:
+			payload, err := trajectory.DecodePayload[trajectory.ActionExecuted](&event)
+			if err != nil || payload.ActionType != trajectory.ActionProviderAttempt {
+				continue
+			}
+			index, found := current[payload.ActionID]
+			if !found {
+				continue
+			}
+			attempts[index].Result = "succeeded"
+			attempts[index].Code = payload.ErrorCode
+			if payload.ErrorCode != "" {
+				attempts[index].Result = "failed"
+			}
+			attempts[index].DurationMillis = payload.DurationMS
+			attempts[index].FirstTokenMillis = payload.FirstTokenMS
+		}
+	}
+	return attempts
 }

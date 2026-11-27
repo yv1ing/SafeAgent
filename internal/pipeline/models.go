@@ -48,7 +48,7 @@ func (pipeline *Pipeline) Models(ctx context.Context, key string) ([]string, *mo
 	defer release()
 	records, err := pipeline.repository.Routes(ctx, identity.Project.ID, false)
 	if err != nil {
-		return nil, internal("store_failure", "The model list could not be loaded.")
+		return nil, pipeline.recordAuxiliary(ctx, identity, classify.Models, Request{Kind: model.Chat, Operation: classify.Models}, nil, "", nil, internal("store_failure", "The model list could not be loaded."))
 	}
 	names := make([]string, 0, len(records))
 	seen := map[string]bool{}

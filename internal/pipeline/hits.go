@@ -8,33 +8,33 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/redact"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/trajectory"
 )
 
 // storedHits relocates the hits of the expanded request onto the items this call stores. A hit that
 // belongs to an ancestor item is dropped: the ancestor stored its own copy when it was admitted, so
-// keeping it here is what made hits accumulate across a conversation.
-func (state *call) storedHits(result *redact.Result) []auditevent.Hit {
+// a continuation does not copy the same hit into a later call.
+func (state *call) storedHits(result *redact.Result) []trajectory.RedactionHit {
 	return relocateHits(state.request, state.offset, state.recorder.Call().ID, result)
 }
 
 // relocateHits is the lane-independent relocation: offline auxiliary calls pass offset zero and
 // their decoded items, which carry the same ordinals a generation call stores.
-func relocateHits(request *model.Request, offset int, callID string, result *redact.Result) []auditevent.Hit {
+func relocateHits(request *model.Request, offset int, callID string, result *redact.Result) []trajectory.RedactionHit {
 	if result == nil || len(result.Hits) == 0 {
 		return nil
 	}
 	shown := shownRanges(result)
-	hits := make([]auditevent.Hit, 0, len(result.Hits))
+	hits := make([]trajectory.RedactionHit, 0, len(result.Hits))
 	for index, hit := range result.Hits {
 		section, ordinal, path, keep := relocateHit(request, offset, hit.Path)
 		if !keep {
 			continue
 		}
 		shownStart, shownEnd := shown[index].start, shown[index].end
-		hits = append(hits, auditevent.Hit{
-			Label: hit.Label, Action: hit.Action, ValueID: hit.ValueID,
+		hits = append(hits, trajectory.RedactionHit{
+			Label: hit.Label, Action: string(hit.Action), ValueID: hit.ValueID,
 			CallID: callID, Section: string(section), Ordinal: ordinal, Path: path,
 			Start: hit.Start, End: hit.End, ShownStart: shownStart, ShownEnd: shownEnd, Secret: hit.Secret,
 		})
@@ -172,7 +172,7 @@ func shownRanges(result *redact.Result) []shownRange {
 // applyRedactionSummary stores the distinct value and label counts the console shows. A value
 // repeated inside the call is counted once; a value repeated in an ancestor was already counted by
 // that ancestor because its hit was dropped here.
-func applyRedactionSummary(record *entity.Call, hits []auditevent.Hit) {
+func applyRedactionSummary(record *entity.Call, hits []trajectory.RedactionHit) {
 	values := map[string]struct{}{}
 	labels := map[string]struct{}{}
 	for _, hit := range hits {

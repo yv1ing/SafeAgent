@@ -1,5 +1,5 @@
-// Package pipeline is the online request pipeline: admission, redaction, policy checkpoints,
-// routing, upstream attempts, streaming and the terminal call seal.
+// Package pipeline is the online request pipeline: admission, redaction, gate decisions, routing,
+// upstream attempts, streaming and terminal trajectory settlement.
 package pipeline
 
 import (
@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis"
-	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/chat"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/gemini"
@@ -21,6 +19,8 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/threat"
+	_ "github.com/yv1ing/SafeAgent/internal/threat/builtin"
 )
 
 const persistenceTimeout = 10 * time.Second
@@ -37,7 +37,7 @@ type Pipeline struct {
 	ids        func() string
 	logger     *slog.Logger
 	engines    *engineCache
-	analysis   *analysis.Engine
+	threat     *threat.Engine
 	policies   *policyCache
 	veto       Veto
 	inflight   *inflight
@@ -104,7 +104,7 @@ func New(repository Repository, secret []byte, options Options) *Pipeline {
 		ids:        options.IDs,
 		logger:     options.Logger,
 		engines:    &engineCache{entries: map[string]engineEntry{}},
-		analysis:   analysis.NewEngine(nil),
+		threat:     threat.NewEngine(nil),
 		policies:   &policyCache{entries: map[string]policyEntry{}},
 		veto:       options.Veto,
 		inflight:   newInflight(),

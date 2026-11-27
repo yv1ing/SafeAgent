@@ -9,13 +9,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/llm/stream"
 	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
-	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 )
 
 // blockReviewedStream seals a stream whose leading review blocked before the response was committed.
@@ -62,8 +60,14 @@ func (state *call) completeStream(session *stream.Session, upstream *upstreamCal
 		return attemptFailed, transient("empty_response", "The upstream returned no content.")
 	}
 	if err := session.StageComplete(); err != nil {
-		session.Close()
-		return attemptEnded, internal("encode_failed", "The response could not be encoded.")
+		failure := internal("encode_failed", "The response could not be encoded.")
+		if session.Committed() {
+			state.failStream(session, upstream, failure)
+		} else {
+			session.Close()
+			state.finish(failure)
+		}
+		return attemptEnded, failure
 	}
 	ledger := state.ledger(journal)
 	state.recordResponse(response, ledger, responseMeta{Committed: true, Identify: true, Stored: state.responseStore()})
@@ -289,19 +293,18 @@ type responseMeta struct {
 
 func (state *call) recordResponse(response *model.Response, ledger model.Ledger, meta responseMeta) {
 	record := state.recorder.Call()
-	record.Losses, record.Repairs = convertLosses(ledger.Losses), convertRepairs(ledger.Repairs)
 	if meta.Identify && !meta.Blocked {
 		record.ResponseID = response.Meta.ID
 		record.ResponseStore = meta.Stored
 		record.ConversationHash = model.ConversationFingerprint(state.pipeline.secret, state.client, response)
 	}
-	if !meta.Blocked {
-		state.recordToolCalls(response)
+	state.responseSegment = state.recorder.BindResponse(response)
+	checks := checksFromFindings(state.findings)
+	action := "release"
+	if meta.Blocked {
+		action = "block"
 	}
-	state.recorder.Event(auditevent.KindResponse, auditevent.Response{
-		Response: *response, Ledger: ledger, Committed: meta.Committed,
-		Partial: meta.Partial, Truncated: meta.Truncated, Blocked: meta.Blocked,
-	})
+	state.recorder.GateDecision("release", action, meta.Blocked, false, "", responseCode(response), threatSeverity(meta.Blocked), "the response left the gateway", checks)
 }
 
 func (state *call) responseStore() bool {
@@ -309,20 +312,6 @@ func (state *call) responseStore() bool {
 		return false
 	}
 	return state.request.Store == nil || *state.request.Store
-}
-
-// recordToolCalls writes one event per tool call the model issued. Tool results this request added
-// are recorded once at admission, so this does not repeat them.
-func (state *call) recordToolCalls(response *model.Response) {
-	for index := range response.Items {
-		item := &response.Items[index]
-		if item.Kind == model.ItemToolCall && item.ToolCall != nil {
-			state.recorder.ToolCall(auditevent.ToolCall{
-				ID: item.ToolCall.ID, Kind: string(item.ToolCall.Kind), Name: item.ToolCall.Name,
-				Arguments: item.ToolCall.Arguments,
-			})
-		}
-	}
 }
 
 // normalizeCustomTools turns a lowered function call back into the custom tool the client
@@ -429,18 +418,16 @@ func mergeUnique[T comparable](groups ...[]T) []T {
 	return merged
 }
 
-func convertRepairs(repairs []model.Repair) []entity.Repair {
-	converted := make([]entity.Repair, 0, len(repairs))
-	for _, item := range repairs {
-		converted = append(converted, entity.Repair{Kind: item.Kind, Path: item.Path, Detail: item.Detail, ItemKey: item.ItemKey})
+func threatSeverity(blocked bool) string {
+	if blocked {
+		return "high"
 	}
-	return converted
+	return "info"
 }
 
-func convertLosses(losses []model.Loss) []entity.Loss {
-	converted := make([]entity.Loss, 0, len(losses))
-	for _, item := range losses {
-		converted = append(converted, entity.Loss{Path: item.Path, Code: string(item.Code), Class: string(item.Class), Detail: item.Detail, From: string(item.From), To: string(item.To), ItemKey: item.ItemKey})
+func responseCode(response *model.Response) string {
+	if response != nil && response.Failure != nil && response.Failure.Code != "" {
+		return response.Failure.Code
 	}
-	return converted
+	return "response_released"
 }

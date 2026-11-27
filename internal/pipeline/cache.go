@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"sync"
 
-	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	_ "github.com/yv1ing/SafeAgent/internal/threat/builtin"
 )
 
 type policyEntry struct {

@@ -6,7 +6,6 @@ import process from 'node:process';
 import {
   base,
   clientSpecs,
-  consoleGet,
   counters,
   listCalls,
   login,
@@ -541,8 +540,8 @@ async function redactionProved(route, before, since) {
 }
 
 // Real traffic must carry the classification axes the console filters on: a main call is a main
-// generation chat call that the worker analyzes, and a declared subagent call is a side call that
-// joins the same conversation without being analyzed.
+// generation chat call in the session trajectory, and a declared subagent call is a side call that
+// shares the trajectory without becoming a main call.
 async function classifyTraffic() {
   const route = routes.includes('chat') ? 'chat' : routes[0];
   if (!route || !routeNames[route]) return { skip: 'no configured route' };
@@ -591,25 +590,12 @@ async function classifyTraffic() {
     sideCall.purpose_source === 'declared',
     `side purpose source is ${sideCall.purpose_source}`,
   );
+  expect(sideCall.session_id === mainCall.session_id, 'the side call did not join the session');
   expect(
-    sideCall.session_id === mainCall.session_id,
-    'the side call did not join the conversation',
+    Boolean(mainCall.trajectory_id) && sideCall.trajectory_id === mainCall.trajectory_id,
+    `session calls use different trajectories: ${mainCall.trajectory_id} / ${sideCall.trajectory_id}`,
   );
-  expect(
-    sideCall.analysis_state === 'skipped',
-    `side analysis state is ${sideCall.analysis_state}`,
-  );
-
-  const conversations = await consoleGet(`/projects/${project}/conversations?limit=100`);
-  const conversation = (conversations?.items ?? []).find(
-    (entry) => entry.id === mainCall.session_id,
-  );
-  expect(Boolean(conversation), 'the conversation was not listed');
-  expect((conversation?.calls ?? 0) >= 2, `conversation call count is ${conversation?.calls}`);
-  expect(
-    ['pending', 'completed', 'failed'].includes(mainCall.analysis_state),
-    `main analysis state is ${mainCall.analysis_state}`,
-  );
+  expect(Boolean(mainCall.trajectory_id), 'the main call has no trajectory');
 
   if (problems.length > 0) return { fail: problems.join('; ') };
   return {

@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.2.0
  */
 
-/**
- * Role of the call in the conversation
- */
 export type ConsoleCallViewLane = (typeof ConsoleCallViewLane)[keyof typeof ConsoleCallViewLane];
 
 export const ConsoleCallViewLane = {

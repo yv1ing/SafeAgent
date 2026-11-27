@@ -72,181 +72,6 @@
         ],
         "type": "object"
       },
-      "ConsoleAnalysisBatchInput": {
-        "properties": {
-          "agent_key_id": {
-            "type": "string"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "from": {
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "call",
-              "session",
-              "window",
-              "agent_key"
-            ],
-            "type": "string"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "to": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "type": "object"
-      },
-      "ConsoleAnalysisBatchPage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleAnalysisBatchView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "ConsoleAnalysisBatchView": {
-        "properties": {
-          "completed": {
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "failed": {
-            "type": "integer"
-          },
-          "finished_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "running",
-              "completed",
-              "failed"
-            ],
-            "type": "string"
-          },
-          "total": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "state",
-          "total",
-          "completed",
-          "failed",
-          "created_at",
-          "finished_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleAnalysisPage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleAnalysisView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "ConsoleAnalysisView": {
-        "properties": {
-          "coverage": {
-            "$ref": "#/components/schemas/ConsoleCoverageView"
-          },
-          "error": {
-            "type": "string"
-          },
-          "findings": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFindingView"
-            },
-            "type": "array"
-          },
-          "finished_at": {
-            "type": "string"
-          },
-          "flows": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFlowView"
-            },
-            "type": "array"
-          },
-          "id": {
-            "type": "string"
-          },
-          "input_hash": {
-            "type": "string"
-          },
-          "model": {
-            "$ref": "#/components/schemas/ConsoleModelView"
-          },
-          "model_state": {
-            "type": "string"
-          },
-          "started_at": {
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "completed",
-              "failed"
-            ],
-            "type": "string"
-          },
-          "verdict": {
-            "$ref": "#/components/schemas/ConsoleVerdictView"
-          },
-          "versions": {
-            "$ref": "#/components/schemas/ConsoleVersionsView"
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "input_hash",
-          "versions",
-          "verdict",
-          "coverage",
-          "model_state",
-          "error",
-          "started_at",
-          "finished_at",
-          "findings",
-          "flows"
-        ],
-        "type": "object"
-      },
       "ConsoleAttemptView": {
         "properties": {
           "channel_id": {
@@ -255,16 +80,10 @@
           "channel_name": {
             "type": "string"
           },
-          "class": {
-            "type": "string"
-          },
           "code": {
             "type": "string"
           },
           "duration_ms": {
-            "type": "integer"
-          },
-          "end_ms": {
             "type": "integer"
           },
           "first_token_ms": {
@@ -276,15 +95,8 @@
           "index": {
             "type": "integer"
           },
-          "key_id": {
-            "type": "string"
-          },
           "model_id": {
             "type": "string"
-          },
-          "recovered": {
-            "description": "A later attempt of the same call succeeded",
-            "type": "boolean"
           },
           "result": {
             "enum": [
@@ -294,9 +106,6 @@
               "cancelled"
             ],
             "type": "string"
-          },
-          "start_ms": {
-            "type": "integer"
           },
           "upstream_model": {
             "type": "string"
@@ -309,91 +118,10 @@
           "model_id",
           "upstream_model",
           "format",
-          "key_id",
-          "start_ms",
-          "end_ms",
-          "first_token_ms",
-          "duration_ms",
           "result",
           "code",
-          "class",
-          "recovered"
-        ],
-        "type": "object"
-      },
-      "ConsoleAttributionView": {
-        "properties": {
-          "item": {
-            "type": "integer"
-          },
-          "source": {
-            "type": "string"
-          },
-          "tool_call_id": {
-            "type": "string"
-          },
-          "turn": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "turn",
-          "item",
-          "tool_call_id",
-          "source"
-        ],
-        "type": "object"
-      },
-      "ConsoleAuditIntegrityView": {
-        "properties": {
-          "broken_at": {
-            "type": "integer"
-          },
-          "error": {
-            "type": "string"
-          },
-          "events": {
-            "type": "integer"
-          },
-          "head": {
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "verified",
-              "in_progress",
-              "incomplete",
-              "broken",
-              "unavailable"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "events",
-          "head",
-          "broken_at",
-          "error"
-        ],
-        "type": "object"
-      },
-      "ConsoleAxesView": {
-        "properties": {
-          "harm": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "source",
-          "mode",
-          "harm"
+          "duration_ms",
+          "first_token_ms"
         ],
         "type": "object"
       },
@@ -443,12 +171,6 @@
       },
       "ConsoleCallDetailView": {
         "properties": {
-          "analyses": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleAnalysisView"
-            },
-            "type": "array"
-          },
           "attempts": {
             "items": {
               "$ref": "#/components/schemas/ConsoleAttemptView"
@@ -458,89 +180,99 @@
           "call": {
             "$ref": "#/components/schemas/ConsoleCallView"
           },
-          "decisions": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleDecisionView"
-            },
-            "type": "array"
-          },
           "events": {
-            "description": "Only returned to administrators",
             "items": {
-              "$ref": "#/components/schemas/ConsoleEventView"
+              "$ref": "#/components/schemas/ConsoleCallEventView"
             },
             "type": "array"
           },
-          "hits": {
-            "description": "Distinct redacted values introduced by this call",
+          "findings": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleCallHitView"
+              "$ref": "#/components/schemas/ConsoleFindingView"
             },
             "type": "array"
           },
           "integrity": {
-            "$ref": "#/components/schemas/ConsoleAuditIntegrityView"
-          },
-          "timeline": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleTimelineEntryView"
-            },
-            "type": "array"
-          },
-          "transcript": {
-            "$ref": "#/components/schemas/ConsoleTranscriptView"
+            "$ref": "#/components/schemas/ConsoleIntegrityView"
           }
         },
         "required": [
           "call",
-          "transcript",
-          "decisions",
-          "analyses",
           "attempts",
-          "timeline",
-          "integrity",
           "events",
-          "hits"
+          "findings",
+          "integrity"
         ],
         "type": "object"
       },
-      "ConsoleCallHitView": {
+      "ConsoleCallEventView": {
         "properties": {
-          "action": {
-            "enum": [
-              "replace",
-              "block",
-              "alert"
-            ],
+          "action_id": {
             "type": "string"
           },
-          "detector": {
-            "description": "Derived hint; empty when the label is not a built-in detector",
+          "actor": {
             "type": "string"
           },
-          "label": {
+          "at": {
             "type": "string"
           },
-          "occurrences": {
+          "boundary": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleHitLocationView"
+              "type": "string"
             },
             "type": "array"
           },
-          "secret": {
-            "type": "boolean"
+          "kind": {
+            "type": "string"
           },
-          "value_id": {
+          "occurred_at": {
+            "type": "string"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "payload": {},
+          "seq": {
+            "type": "integer"
+          },
+          "summary": {
             "type": "string"
           }
         },
         "required": [
-          "value_id",
-          "label",
-          "action",
-          "detector",
-          "secret",
-          "occurrences"
+          "id",
+          "seq",
+          "kind",
+          "boundary",
+          "actor",
+          "at",
+          "call_id",
+          "action_id",
+          "summary",
+          "code",
+          "payload",
+          "inputs",
+          "outputs",
+          "checks",
+          "occurred_at"
         ],
         "type": "object"
       },
@@ -566,16 +298,6 @@
           "agent_key_id": {
             "type": "string"
           },
-          "analysis_state": {
-            "description": "Diagnosis projection: a side or auxiliary call is skipped",
-            "enum": [
-              "pending",
-              "completed",
-              "skipped",
-              "failed"
-            ],
-            "type": "string"
-          },
           "attempts": {
             "type": "integer"
           },
@@ -583,6 +305,9 @@
             "type": "integer"
           },
           "cache_write_tokens": {
+            "type": "integer"
+          },
+          "call_seq": {
             "type": "integer"
           },
           "channel_id": {
@@ -620,15 +345,11 @@
             "type": "integer"
           },
           "lane": {
-            "description": "Role of the call in the conversation",
             "enum": [
               "main",
               "side",
               "auxiliary"
             ],
-            "type": "string"
-          },
-          "latest_analysis_id": {
             "type": "string"
           },
           "losses": {
@@ -644,7 +365,6 @@
             "type": "string"
           },
           "operation": {
-            "description": "Endpoint family of the request",
             "enum": [
               "generation",
               "count_tokens",
@@ -660,7 +380,6 @@
             "type": "string"
           },
           "outcome": {
-            "description": "Terminal reason independent of the HTTP lifecycle; absent while the call is running",
             "enum": [
               "ok",
               "blocked",
@@ -684,7 +403,6 @@
             "type": "string"
           },
           "purpose": {
-            "description": "Why the client issued the request",
             "enum": [
               "chat",
               "subagent",
@@ -700,7 +418,6 @@
             "type": "string"
           },
           "purpose_source": {
-            "description": "How the purpose was established",
             "enum": [
               "declared",
               "heuristic",
@@ -712,18 +429,15 @@
             "type": "integer"
           },
           "redaction_labels": {
-            "description": "Distinct redaction labels of this call",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "redaction_values": {
-            "description": "Distinct redacted values this call introduced",
             "type": "integer"
           },
           "resolution": {
-            "description": "How the route was matched; fallback marks the project default route; absent until the call is routed",
             "enum": [
               "exact",
               "alias",
@@ -754,6 +468,9 @@
           "terminated_at": {
             "type": "string"
           },
+          "trajectory_id": {
+            "type": "string"
+          },
           "upstream_model": {
             "type": "string"
           },
@@ -763,6 +480,8 @@
         },
         "required": [
           "id",
+          "trajectory_id",
+          "call_seq",
           "agent_key_id",
           "client_format",
           "operation",
@@ -789,8 +508,6 @@
           "currency",
           "redaction_values",
           "redaction_labels",
-          "analysis_state",
-          "latest_analysis_id",
           "finding_count",
           "max_severity",
           "losses",
@@ -1315,58 +1032,6 @@
         ],
         "type": "object"
       },
-      "ConsoleConversationPage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleConversationView"
-            },
-            "type": "array"
-          },
-          "next": {
-            "$ref": "#/components/schemas/ConsoleCursorView"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "ConsoleConversationView": {
-        "properties": {
-          "calls": {
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "first_call_id": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "last_at": {
-            "type": "string"
-          },
-          "last_call_id": {
-            "type": "string"
-          },
-          "max_severity": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "first_call_id",
-          "last_call_id",
-          "calls",
-          "max_severity",
-          "created_at",
-          "last_at"
-        ],
-        "type": "object"
-      },
       "ConsoleCostView": {
         "properties": {
           "cost_micros": {
@@ -1379,38 +1044,6 @@
         "required": [
           "currency",
           "cost_micros"
-        ],
-        "type": "object"
-      },
-      "ConsoleCoverageView": {
-        "properties": {
-          "complete": {
-            "type": "boolean"
-          },
-          "errors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "evaluated": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "evaluated",
-          "skipped",
-          "errors",
-          "complete"
         ],
         "type": "object"
       },
@@ -1608,63 +1241,6 @@
         ],
         "type": "object"
       },
-      "ConsoleDecisionView": {
-        "properties": {
-          "action": {
-            "enum": [
-              "block",
-              "record"
-            ],
-            "type": "string"
-          },
-          "blocked": {
-            "type": "boolean"
-          },
-          "code": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "phase": {
-            "enum": [
-              "request",
-              "tool_call",
-              "tool_result",
-              "response"
-            ],
-            "type": "string"
-          },
-          "policy_version": {
-            "type": "integer"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "rule_id": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "phase",
-          "action",
-          "blocked",
-          "rule_id",
-          "code",
-          "severity",
-          "reason",
-          "policy_version",
-          "created_at"
-        ],
-        "type": "object"
-      },
       "ConsoleDetectorView": {
         "properties": {
           "default": {
@@ -1690,58 +1266,6 @@
         ],
         "type": "object"
       },
-      "ConsoleDiffView": {
-        "properties": {
-          "added": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFindingView"
-            },
-            "type": "array"
-          },
-          "after_count": {
-            "type": "integer"
-          },
-          "after_id": {
-            "type": "string"
-          },
-          "before_count": {
-            "type": "integer"
-          },
-          "before_id": {
-            "type": "string"
-          },
-          "changed": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFindingChangeView"
-            },
-            "type": "array"
-          },
-          "comparable": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "removed": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFindingView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "before_id",
-          "after_id",
-          "comparable",
-          "reason",
-          "added",
-          "removed",
-          "changed",
-          "before_count",
-          "after_count"
-        ],
-        "type": "object"
-      },
       "ConsoleDiscoveryView": {
         "properties": {
           "models": {
@@ -1753,90 +1277,17 @@
         },
         "type": "object"
       },
-      "ConsoleEventView": {
+      "ConsoleEdgePage": {
         "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "payload": {},
-          "schema_version": {
-            "type": "integer"
-          },
-          "sequence": {
-            "type": "integer"
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleTrajectoryEdgeView"
+            },
+            "type": "array"
           }
         },
         "required": [
-          "sequence",
-          "kind",
-          "schema_version",
-          "payload",
-          "created_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleEvidenceView": {
-        "properties": {
-          "end": {
-            "type": "integer"
-          },
-          "item": {
-            "type": "integer"
-          },
-          "path": {
-            "type": "string"
-          },
-          "quote": {
-            "type": "string"
-          },
-          "section": {
-            "type": "string"
-          },
-          "start": {
-            "type": "integer"
-          },
-          "turn": {
-            "type": "integer"
-          },
-          "view": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "turn",
-          "item",
-          "section",
-          "path",
-          "view",
-          "start",
-          "end",
-          "quote"
-        ],
-        "type": "object"
-      },
-      "ConsoleFindingChangeView": {
-        "properties": {
-          "after": {
-            "$ref": "#/components/schemas/ConsoleFindingView"
-          },
-          "before": {
-            "$ref": "#/components/schemas/ConsoleFindingView"
-          },
-          "code": {
-            "type": "string"
-          },
-          "fingerprint": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "fingerprint",
-          "code",
-          "before",
-          "after"
+          "items"
         ],
         "type": "object"
       },
@@ -1877,14 +1328,8 @@
       },
       "ConsoleFindingView": {
         "properties": {
-          "attribution": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleAttributionView"
-            },
-            "type": "array"
-          },
-          "axes": {
-            "$ref": "#/components/schemas/ConsoleAxesView"
+          "call_id": {
+            "type": "string"
           },
           "code": {
             "type": "string"
@@ -1892,31 +1337,36 @@
           "confidence": {
             "type": "number"
           },
-          "detector_id": {
+          "control": {
             "type": "string"
           },
-          "detector_version": {
+          "created_at": {
             "type": "string"
           },
-          "evidence": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleEvidenceView"
-            },
-            "type": "array"
+          "event_id": {
+            "type": "string"
           },
+          "evidence": {},
           "fingerprint": {
             "type": "string"
           },
-          "flow": {
-            "$ref": "#/components/schemas/ConsoleFlowView"
+          "id": {
+            "type": "string"
+          },
+          "invariant": {
+            "type": "string"
           },
           "origin": {
             "type": "string"
           },
+          "segments": {},
           "severity": {
             "type": "string"
           },
           "sink": {
+            "type": "string"
+          },
+          "transfer": {
             "type": "string"
           },
           "trust": {
@@ -1924,96 +1374,22 @@
           }
         },
         "required": [
+          "id",
           "fingerprint",
           "code",
           "origin",
           "trust",
           "sink",
-          "axes",
           "severity",
           "confidence",
-          "detector_id",
-          "detector_version",
+          "invariant",
+          "transfer",
+          "control",
+          "event_id",
+          "call_id",
           "evidence",
-          "attribution"
-        ],
-        "type": "object"
-      },
-      "ConsoleFlowPage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleFlowView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "ConsoleFlowView": {
-        "properties": {
-          "confidence": {
-            "type": "number"
-          },
-          "content_hash": {
-            "type": "string"
-          },
-          "relation": {
-            "type": "string"
-          },
-          "sink": {
-            "type": "string"
-          },
-          "sink_tool_call_id": {
-            "type": "string"
-          },
-          "source_call_id": {
-            "type": "string"
-          },
-          "source_item": {
-            "description": "Detector-time item index; kept for detector parity",
-            "type": "integer"
-          },
-          "source_ordinal": {
-            "type": "integer"
-          },
-          "source_origin": {
-            "type": "string"
-          },
-          "source_path": {
-            "type": "string"
-          },
-          "source_section": {
-            "enum": [
-              "request",
-              "response",
-              "instructions",
-              "params",
-              "tools"
-            ],
-            "type": "string"
-          },
-          "source_turn": {
-            "description": "Detector-time turn index; kept for detector parity",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "source_turn",
-          "source_item",
-          "source_call_id",
-          "source_section",
-          "source_ordinal",
-          "source_origin",
-          "source_path",
-          "sink_tool_call_id",
-          "sink",
-          "relation",
-          "content_hash",
-          "confidence"
+          "segments",
+          "created_at"
         ],
         "type": "object"
       },
@@ -2096,41 +1472,6 @@
           "state",
           "consecutive_failures",
           "cooldown_seconds"
-        ],
-        "type": "object"
-      },
-      "ConsoleHitLocationView": {
-        "properties": {
-          "end": {
-            "type": "integer"
-          },
-          "ordinal": {
-            "type": "integer"
-          },
-          "path": {
-            "type": "string"
-          },
-          "section": {
-            "type": "string"
-          },
-          "shown_end": {
-            "type": "integer"
-          },
-          "shown_start": {
-            "type": "integer"
-          },
-          "start": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "section",
-          "ordinal",
-          "path",
-          "start",
-          "end",
-          "shown_start",
-          "shown_end"
         ],
         "type": "object"
       },
@@ -2222,77 +1563,28 @@
         },
         "type": "object"
       },
-      "ConsoleItemView": {
+      "ConsoleIntegrityView": {
         "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "media": {
-            "$ref": "#/components/schemas/ConsoleMediaView"
-          },
-          "ordinal": {
+          "broken_at": {
             "type": "integer"
           },
-          "origin": {
+          "error": {
             "type": "string"
           },
-          "path": {
+          "events": {
+            "type": "integer"
+          },
+          "head": {
             "type": "string"
           },
-          "redaction_labels": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "section": {
-            "enum": [
-              "request",
-              "response",
-              "instructions",
-              "params",
-              "tools"
-            ],
-            "type": "string"
-          },
-          "shown_redactions": {
-            "description": "Ranges of the shown text the UI highlights",
-            "items": {
-              "$ref": "#/components/schemas/ConsoleShownRedactionView"
-            },
-            "type": "array"
-          },
-          "shown_text": {
-            "description": "Shown text, always present when the item has redactions",
-            "type": "string"
-          },
-          "text": {
-            "description": "Raw text for administrators, shown text otherwise",
-            "type": "string"
-          },
-          "tool_call": {
-            "$ref": "#/components/schemas/ConsoleToolCallView"
-          },
-          "tool_result": {
-            "$ref": "#/components/schemas/ConsoleToolResultView"
-          },
-          "trust": {
+          "status": {
             "type": "string"
           }
         },
         "required": [
-          "kind",
-          "origin",
-          "trust",
-          "text",
-          "call_id",
-          "section",
-          "ordinal",
-          "shown_redactions",
-          "redaction_labels"
+          "status",
+          "events",
+          "head"
         ],
         "type": "object"
       },
@@ -2314,7 +1606,6 @@
       "ConsoleLossView": {
         "properties": {
           "class": {
-            "description": "fatal or degraded",
             "type": "string"
           },
           "code": {
@@ -2345,25 +1636,6 @@
         ],
         "type": "object"
       },
-      "ConsoleMediaView": {
-        "properties": {
-          "filename": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "mime_type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "mime_type",
-          "filename"
-        ],
-        "type": "object"
-      },
       "ConsoleMemberView": {
         "properties": {
           "administrator": {
@@ -2384,53 +1656,6 @@
           "username",
           "administrator",
           "disabled"
-        ],
-        "type": "object"
-      },
-      "ConsoleModelView": {
-        "properties": {
-          "asked_at": {
-            "type": "string"
-          },
-          "confidence": {
-            "type": "number"
-          },
-          "confidence_known": {
-            "type": "boolean"
-          },
-          "harm": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "probability": {
-            "type": "number"
-          },
-          "severity": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          },
-          "unsafe": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "unsafe",
-          "probability",
-          "confidence",
-          "confidence_known",
-          "source",
-          "mode",
-          "harm",
-          "severity",
-          "model",
-          "asked_at"
         ],
         "type": "object"
       },
@@ -2854,6 +2079,11 @@
             "nullable": true,
             "type": "integer"
           },
+          "coverage_threshold": {
+            "description": "Minimum observed-boundary coverage for a safe verdict",
+            "nullable": true,
+            "type": "number"
+          },
           "daily_token_quota": {
             "nullable": true,
             "type": "integer"
@@ -2912,6 +2142,10 @@
           "concurrency": {
             "description": "0 means unlimited",
             "type": "integer"
+          },
+          "coverage_threshold": {
+            "description": "Minimum observed-boundary coverage for a safe verdict",
+            "type": "number"
           },
           "created_at": {
             "type": "string"
@@ -2972,6 +2206,7 @@
           "daily_token_quota",
           "stream_review_bytes",
           "stream_review_timeout_ms",
+          "coverage_threshold",
           "active_policy_version",
           "version",
           "created_at"
@@ -3063,92 +2298,21 @@
       },
       "ConsoleRedactionIndexView": {
         "properties": {
-          "session_id": {
-            "type": "string"
-          },
-          "total": {
-            "description": "Number of occurrences across the conversation",
-            "type": "integer"
-          },
-          "values": {
+          "items": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleRedactionValueView"
+              "$ref": "#/components/schemas/ConsoleRedactionValue"
             },
             "type": "array"
           }
         },
         "required": [
-          "session_id",
-          "total",
-          "values"
+          "items"
         ],
         "type": "object"
       },
-      "ConsoleRedactionLocationView": {
-        "properties": {
-          "call_created_at": {
-            "type": "string"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "end": {
-            "type": "integer"
-          },
-          "ordinal": {
-            "type": "integer"
-          },
-          "path": {
-            "type": "string"
-          },
-          "section": {
-            "enum": [
-              "request",
-              "response",
-              "instructions",
-              "params",
-              "tools"
-            ],
-            "type": "string"
-          },
-          "shown_end": {
-            "type": "integer"
-          },
-          "shown_start": {
-            "type": "integer"
-          },
-          "start": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "call_id",
-          "section",
-          "ordinal",
-          "path",
-          "call_created_at",
-          "start",
-          "end",
-          "shown_start",
-          "shown_end"
-        ],
-        "type": "object"
-      },
-      "ConsoleRedactionValueView": {
+      "ConsoleRedactionValue": {
         "properties": {
           "action": {
-            "enum": [
-              "replace",
-              "block",
-              "alert"
-            ],
-            "type": "string"
-          },
-          "count": {
-            "type": "integer"
-          },
-          "detector": {
-            "description": "Derived hint; empty when the label is not a built-in detector",
             "type": "string"
           },
           "first_call_id": {
@@ -3161,10 +2325,7 @@
             "type": "string"
           },
           "occurrences": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRedactionLocationView"
-            },
-            "type": "array"
+            "type": "integer"
           },
           "secret": {
             "type": "boolean"
@@ -3173,17 +2334,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "value_id",
-          "label",
-          "action",
-          "detector",
-          "secret",
-          "count",
-          "first_call_id",
-          "last_call_id",
-          "occurrences"
-        ],
         "type": "object"
       },
       "ConsoleRedactionView": {
@@ -3199,183 +2349,6 @@
         "required": [
           "label",
           "values"
-        ],
-        "type": "object"
-      },
-      "ConsoleRiskAgentView": {
-        "properties": {
-          "agent_key_id": {
-            "type": "string"
-          },
-          "findings": {
-            "type": "integer"
-          },
-          "flows": {
-            "type": "integer"
-          },
-          "high": {
-            "type": "integer"
-          },
-          "label": {
-            "type": "string"
-          },
-          "last_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "agent_key_id",
-          "label",
-          "findings",
-          "high",
-          "flows",
-          "last_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleRiskCallView": {
-        "properties": {
-          "agent_key_id": {
-            "type": "string"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "node_id": {
-            "description": "Trajectory call node; the inspector opens it when available",
-            "type": "string"
-          },
-          "severity": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "call_id",
-          "node_id",
-          "agent_key_id",
-          "model",
-          "severity",
-          "state",
-          "created_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleRiskCodeView": {
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "count": {
-            "type": "integer"
-          },
-          "harm": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "source",
-          "mode",
-          "harm",
-          "severity",
-          "count"
-        ],
-        "type": "object"
-      },
-      "ConsoleRiskCountView": {
-        "properties": {
-          "count": {
-            "type": "integer"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "count"
-        ],
-        "type": "object"
-      },
-      "ConsoleRiskView": {
-        "properties": {
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskAgentView"
-            },
-            "type": "array"
-          },
-          "codes": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCodeView"
-            },
-            "type": "array"
-          },
-          "harms": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCountView"
-            },
-            "type": "array"
-          },
-          "high_recent": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCallView"
-            },
-            "type": "array"
-          },
-          "modes": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCountView"
-            },
-            "type": "array"
-          },
-          "severities": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCountView"
-            },
-            "type": "array"
-          },
-          "since": {
-            "type": "string"
-          },
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleRiskCountView"
-            },
-            "type": "array"
-          },
-          "total_findings": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "since",
-          "total_findings",
-          "sources",
-          "modes",
-          "harms",
-          "severities",
-          "codes",
-          "agents",
-          "high_recent"
         ],
         "type": "object"
       },
@@ -3792,33 +2765,6 @@
         ],
         "type": "object"
       },
-      "ConsoleShownRedactionView": {
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "end": {
-            "type": "integer"
-          },
-          "label": {
-            "type": "string"
-          },
-          "start": {
-            "type": "integer"
-          },
-          "value_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "start",
-          "end",
-          "label",
-          "action",
-          "value_id"
-        ],
-        "type": "object"
-      },
       "ConsoleStatsView": {
         "properties": {
           "costs": {
@@ -3854,33 +2800,6 @@
         ],
         "type": "object"
       },
-      "ConsoleTargetView": {
-        "properties": {
-          "command": {
-            "type": "string"
-          },
-          "host": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "value",
-          "host",
-          "path",
-          "command"
-        ],
-        "type": "object"
-      },
       "ConsoleTestPolicyInput": {
         "properties": {
           "document": {},
@@ -3907,233 +2826,6 @@
         "required": [
           "rule",
           "text"
-        ],
-        "type": "object"
-      },
-      "ConsoleTimelineEntryView": {
-        "properties": {
-          "at": {
-            "type": "string"
-          },
-          "category": {
-            "type": "string"
-          },
-          "channel_id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "is_error": {
-            "type": "boolean"
-          },
-          "key_id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "model_id": {
-            "type": "string"
-          },
-          "resolution": {
-            "type": "string"
-          },
-          "response": {
-            "$ref": "#/components/schemas/ConsoleTimelineResponse"
-          },
-          "route_id": {
-            "type": "string"
-          },
-          "route_name": {
-            "type": "string"
-          },
-          "sequence": {
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
-          },
-          "tool_call_id": {
-            "type": "string"
-          },
-          "tool_name": {
-            "type": "string"
-          },
-          "upstream_model": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sequence",
-          "at",
-          "kind",
-          "category",
-          "label",
-          "status",
-          "code",
-          "message",
-          "tool_call_id",
-          "tool_name",
-          "is_error",
-          "channel_id",
-          "model_id",
-          "upstream_model",
-          "key_id",
-          "route_id",
-          "route_name",
-          "resolution"
-        ],
-        "type": "object"
-      },
-      "ConsoleTimelineResponse": {
-        "properties": {
-          "blocked": {
-            "type": "boolean"
-          },
-          "finish": {
-            "type": "string"
-          },
-          "input_tokens": {
-            "type": "integer"
-          },
-          "items": {
-            "type": "integer"
-          },
-          "output_tokens": {
-            "type": "integer"
-          },
-          "partial": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string"
-          },
-          "truncated": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "status",
-          "finish",
-          "items",
-          "input_tokens",
-          "output_tokens",
-          "partial",
-          "truncated",
-          "blocked"
-        ],
-        "type": "object"
-      },
-      "ConsoleToolCallView": {
-        "properties": {
-          "arguments": {
-            "type": "string"
-          },
-          "capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "shown_arguments": {
-            "description": "Shown arguments, present when they differ from the raw arguments",
-            "type": "string"
-          },
-          "sink": {
-            "type": "string"
-          },
-          "target": {
-            "$ref": "#/components/schemas/ConsoleTargetView"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "kind",
-          "arguments",
-          "target",
-          "capabilities",
-          "sink"
-        ],
-        "type": "object"
-      },
-      "ConsoleToolResultView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "content": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleItemView"
-            },
-            "type": "array"
-          },
-          "is_error": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "call_id",
-          "name",
-          "is_error",
-          "content"
-        ],
-        "type": "object"
-      },
-      "ConsoleToolView": {
-        "properties": {
-          "boundary": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "integrity": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "sensitivity": {
-            "type": "string"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "kind",
-          "description",
-          "boundary",
-          "sensitivity",
-          "integrity",
-          "tags"
         ],
         "type": "object"
       },
@@ -4192,881 +2884,416 @@
         ],
         "type": "object"
       },
-      "ConsoleTrajectoryAttemptView": {
+      "ConsoleTrajectoryDetailView": {
         "properties": {
-          "channel_id": {
-            "type": "string"
-          },
-          "channel_name": {
-            "type": "string"
-          },
-          "class": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "duration_ms": {
-            "type": "integer"
-          },
-          "end_ms": {
-            "type": "integer"
-          },
-          "first_token_ms": {
-            "type": "integer"
-          },
-          "format": {
-            "type": "string"
-          },
-          "index": {
-            "type": "integer"
-          },
-          "key_id": {
-            "type": "string"
-          },
-          "model_id": {
-            "type": "string"
-          },
-          "recovered": {
-            "type": "boolean"
-          },
-          "result": {
-            "enum": [
-              "running",
-              "succeeded",
-              "failed",
-              "cancelled"
-            ],
-            "type": "string"
-          },
-          "start_ms": {
-            "type": "integer"
-          },
-          "upstream_model": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "index",
-          "channel_id",
-          "channel_name",
-          "model_id",
-          "upstream_model",
-          "format",
-          "key_id",
-          "start_ms",
-          "end_ms",
-          "first_token_ms",
-          "duration_ms",
-          "result",
-          "code",
-          "class",
-          "recovered"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryCallView": {
-        "properties": {
-          "attempts": {
-            "type": "integer"
-          },
-          "cache_read_tokens": {
-            "type": "integer"
-          },
-          "cache_write_tokens": {
-            "type": "integer"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "channel_id": {
-            "type": "string"
-          },
-          "cost_micros": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "duration_ms": {
-            "type": "integer"
-          },
-          "error_code": {
-            "type": "string"
-          },
-          "finding_count": {
-            "type": "integer"
-          },
-          "input_tokens": {
-            "type": "integer"
-          },
-          "lane": {
-            "enum": [
-              "main",
-              "side",
-              "auxiliary"
-            ],
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "operation": {
-            "enum": [
-              "generation",
-              "count_tokens",
-              "models",
-              "model",
-              "responses_retrieve",
-              "responses_input_items",
-              "responses_cancel",
-              "responses_delete",
-              "embeddings",
-              "moderations"
-            ],
-            "type": "string"
-          },
-          "outcome": {
-            "description": "Terminal reason; absent while the call is running",
-            "enum": [
-              "ok",
-              "blocked",
-              "rejected",
-              "client_error",
-              "upstream_error",
-              "unsupported",
-              "not_found",
-              "rate_limited",
-              "cancelled"
-            ],
-            "type": "string"
-          },
-          "output_tokens": {
-            "type": "integer"
-          },
-          "purpose": {
-            "enum": [
-              "chat",
-              "subagent",
-              "compaction",
-              "title",
-              "memory",
-              "count_tokens",
-              "model_list",
-              "embedding",
-              "moderation",
-              "unknown"
-            ],
-            "type": "string"
-          },
-          "purpose_source": {
-            "enum": [
-              "declared",
-              "heuristic",
-              "default"
-            ],
-            "type": "string"
-          },
-          "reasoning_tokens": {
-            "type": "integer"
-          },
-          "redaction_values": {
-            "type": "integer"
-          },
-          "resolution": {
-            "description": "How the route was matched; absent until the call is routed",
-            "enum": [
-              "exact",
-              "alias",
-              "explicit",
-              "fallback"
-            ],
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "running",
-              "completed",
-              "failed",
-              "cancelled",
-              "interrupted"
-            ],
-            "type": "string"
-          },
-          "upstream_model": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "call_id",
-          "model",
-          "upstream_model",
-          "channel_id",
-          "lane",
-          "operation",
-          "purpose",
-          "purpose_source",
-          "state",
-          "error_code",
-          "input_tokens",
-          "output_tokens",
-          "cache_read_tokens",
-          "cache_write_tokens",
-          "reasoning_tokens",
-          "currency",
-          "duration_ms",
-          "attempts",
-          "finding_count",
-          "redaction_values",
-          "created_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryDecisionView": {
-        "properties": {
-          "action": {
-            "enum": [
-              "block",
-              "record"
-            ],
-            "type": "string"
-          },
-          "blocked": {
-            "type": "boolean"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "decision_id": {
-            "type": "string"
-          },
-          "phase": {
-            "enum": [
-              "request",
-              "tool_call",
-              "tool_result",
-              "response"
-            ],
-            "type": "string"
-          },
-          "policy_version": {
-            "type": "integer"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "rule_id": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "decision_id",
-          "call_id",
-          "phase",
-          "action",
-          "blocked",
-          "rule_id",
-          "code",
-          "severity",
-          "reason",
-          "policy_version",
-          "created_at"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryEdgeView": {
-        "properties": {
-          "from": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "inferred": {
-            "description": "The reader had to infer this relation",
-            "type": "boolean"
-          },
-          "kind": {
-            "enum": [
-              "contains",
-              "continues",
-              "produces",
-              "consumes",
-              "blocks",
-              "flows",
-              "retried"
-            ],
-            "type": "string"
-          },
-          "to": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "from",
-          "to",
-          "inferred"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryFindingView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "confidence": {
-            "type": "number"
-          },
-          "evidence": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleTrajectoryLocatorView"
-            },
-            "type": "array"
-          },
-          "finding_id": {
-            "type": "string"
-          },
-          "fingerprint": {
-            "type": "string"
-          },
-          "origin": {
-            "type": "string"
-          },
-          "relation": {
-            "type": "string"
-          },
-          "severity": {
-            "enum": [
-              "info",
-              "medium",
-              "high"
-            ],
-            "type": "string"
-          },
-          "sink": {
-            "type": "string"
-          },
-          "sink_tool_call_id": {
-            "type": "string"
-          },
-          "trust": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "finding_id",
-          "fingerprint",
-          "call_id",
-          "code",
-          "severity",
-          "confidence",
-          "origin",
-          "trust",
-          "sink",
-          "evidence",
-          "sink_tool_call_id",
-          "relation"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryItemView": {
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "locator": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryLocatorView"
-          },
-          "origin": {
-            "type": "string"
-          },
-          "preview": {
-            "type": "string"
-          },
-          "redaction_labels": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "shown_redactions": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleShownRedactionView"
-            },
-            "type": "array"
-          },
-          "trust": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "locator",
-          "kind",
-          "origin",
-          "trust",
-          "preview",
-          "shown_redactions",
-          "redaction_labels"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryLocatorView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "ordinal": {
-            "type": "integer"
-          },
-          "path": {
-            "type": "string"
-          },
-          "section": {
-            "enum": [
-              "request",
-              "response",
-              "instructions",
-              "params",
-              "tools"
-            ],
-            "type": "string"
-          },
-          "tool_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "call_id",
-          "section",
-          "ordinal",
-          "path",
-          "tool_id"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryNodeView": {
-        "properties": {
-          "attempt": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryAttemptView"
-          },
-          "call": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryCallView"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryDecisionView"
-          },
-          "finding": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryFindingView"
-          },
-          "id": {
-            "type": "string"
-          },
-          "item": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryItemView"
-          },
-          "kind": {
-            "enum": [
-              "session",
-              "call",
-              "turn",
-              "request",
-              "response",
-              "tool_call",
-              "tool_result",
-              "attempt",
-              "decision",
-              "finding",
-              "redaction"
-            ],
-            "type": "string"
-          },
-          "redaction": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryRedactionView"
-          },
-          "session": {
-            "$ref": "#/components/schemas/ConsoleTrajectorySessionView"
-          },
-          "tool_call": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryToolCallView"
-          },
-          "tool_result": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryToolResultView"
-          },
-          "turn": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryTurnView"
-          }
-        },
-        "required": [
-          "id",
-          "kind"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryRedactionView": {
-        "properties": {
-          "action": {
-            "enum": [
-              "replace",
-              "block",
-              "alert"
-            ],
-            "type": "string"
-          },
-          "detector": {
-            "type": "string"
-          },
-          "first_call_id": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "last_call_id": {
-            "type": "string"
-          },
-          "occurrences": {
-            "type": "integer"
-          },
-          "secret": {
-            "type": "boolean"
-          },
-          "value_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "value_id",
-          "label",
-          "action",
-          "detector",
-          "secret",
-          "occurrences",
-          "first_call_id",
-          "last_call_id"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectorySessionView": {
-        "properties": {
-          "project_id": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "session_id",
-          "project_id"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryStatsView": {
-        "properties": {
-          "attempts": {
-            "type": "integer"
-          },
           "calls": {
-            "type": "integer"
-          },
-          "cost_micros": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "duration_ms": {
-            "type": "integer"
-          },
-          "findings": {
-            "type": "integer"
-          },
-          "input_tokens": {
-            "type": "integer"
-          },
-          "items": {
-            "type": "integer"
-          },
-          "output_tokens": {
-            "type": "integer"
-          },
-          "redactions": {
-            "type": "integer"
-          },
-          "tool_calls": {
-            "type": "integer"
-          },
-          "turns": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "calls",
-          "turns",
-          "items",
-          "tool_calls",
-          "attempts",
-          "findings",
-          "redactions",
-          "input_tokens",
-          "output_tokens",
-          "currency",
-          "duration_ms"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryStepView": {
-        "properties": {
-          "at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "call_id": {
-            "type": "string"
-          },
-          "category": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "node_ids": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ConsoleCallView"
             },
             "type": "array"
           },
-          "sequence": {
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sequence",
-          "call_id",
-          "kind",
-          "category",
-          "label",
-          "status",
-          "code",
-          "node_ids",
-          "at"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryToolCallView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "preview": {
-            "type": "string"
-          },
-          "sink": {
-            "type": "string"
-          },
-          "target": {
-            "$ref": "#/components/schemas/ConsoleTargetView"
-          },
-          "tool_call_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "tool_call_id",
-          "call_id",
-          "name",
-          "kind",
-          "sink",
-          "target",
-          "preview"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryToolResultView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "is_error": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "preview": {
-            "type": "string"
-          },
-          "tool_call_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "tool_call_id",
-          "call_id",
-          "name",
-          "is_error",
-          "preview"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryTurnView": {
-        "properties": {
-          "call_id": {
-            "type": "string"
-          },
-          "index": {
-            "type": "integer"
-          },
-          "role": {
-            "enum": [
-              "system",
-              "developer",
-              "user",
-              "assistant",
-              "tool"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "index",
-          "role",
-          "call_id"
-        ],
-        "type": "object"
-      },
-      "ConsoleTrajectoryView": {
-        "properties": {
           "edges": {
             "items": {
               "$ref": "#/components/schemas/ConsoleTrajectoryEdgeView"
             },
             "type": "array"
           },
-          "nodes": {
+          "events": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleTrajectoryNodeView"
+              "$ref": "#/components/schemas/ConsoleTrajectoryEventView"
             },
             "type": "array"
           },
-          "project_id": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "stats": {
-            "$ref": "#/components/schemas/ConsoleTrajectoryStatsView"
-          },
-          "steps": {
+          "findings": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleTrajectoryStepView"
+              "$ref": "#/components/schemas/ConsoleFindingView"
             },
             "type": "array"
           },
-          "truncated": {
-            "type": "boolean"
+          "integrity": {
+            "$ref": "#/components/schemas/ConsoleIntegrityView"
           },
-          "warnings": {
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/ConsoleTrajectorySegmentView"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConsoleTrajectoryStateView"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ConsoleTrajectorySummaryView"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ConsoleTrajectoryVerdictView"
+          }
+        },
+        "required": [
+          "summary",
+          "verdict",
+          "state",
+          "calls",
+          "events",
+          "findings",
+          "segments",
+          "edges",
+          "integrity"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectoryEdgeView": {
+        "properties": {
+          "confidence": {
+            "type": "number"
+          },
+          "dst": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "src": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "src",
+          "dst",
+          "relation",
+          "event_id",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectoryEventView": {
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "boundary": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryCheck"
+            },
+            "type": "array"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
             "items": {
               "type": "string"
             },
             "type": "array"
-          }
-        },
-        "required": [
-          "session_id",
-          "project_id",
-          "nodes",
-          "edges",
-          "steps",
-          "stats",
-          "truncated",
-          "warnings"
-        ],
-        "type": "object"
-      },
-      "ConsoleTranscriptView": {
-        "properties": {
-          "tools": {
+          },
+          "kind": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "outputs": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleToolView"
+              "type": "string"
             },
             "type": "array"
           },
-          "truncated": {
-            "type": "boolean"
+          "payload": {},
+          "prev_hash": {
+            "type": "string"
           },
-          "turns": {
-            "items": {
-              "$ref": "#/components/schemas/ConsoleTurnView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "turns",
-          "tools",
-          "truncated"
-        ],
-        "type": "object"
-      },
-      "ConsoleTurnView": {
-        "properties": {
-          "index": {
+          "principal": {
+            "type": "string"
+          },
+          "seq": {
             "type": "integer"
-          },
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "kind",
+          "boundary",
+          "actor",
+          "principal",
+          "call_id",
+          "action_id",
+          "occurred_at",
+          "inputs",
+          "outputs",
+          "checks",
+          "prev_hash",
+          "hash"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectoryPage": {
+        "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ConsoleItemView"
+              "$ref": "#/components/schemas/ConsoleTrajectorySummaryView"
             },
             "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectorySegmentContentView": {
+        "properties": {
+          "confidentiality": {
+            "type": "string"
           },
-          "role": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string"
+          },
+          "media_type": {
             "type": "string"
           }
         },
         "required": [
-          "index",
-          "role",
-          "items"
+          "id",
+          "media_type",
+          "integrity",
+          "confidentiality",
+          "content"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectorySegmentView": {
+        "properties": {
+          "confidentiality": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "source_event": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "media_type",
+          "size",
+          "integrity",
+          "confidentiality",
+          "source_event"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectoryStateView": {
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/StateApproval"
+            },
+            "type": "array"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/StateCapability"
+            },
+            "type": "array"
+          },
+          "capture_gaps": {
+            "type": "integer"
+          },
+          "constraints": {
+            "items": {
+              "$ref": "#/components/schemas/StateConstraint"
+            },
+            "type": "array"
+          },
+          "coverage": {
+            "type": "number"
+          },
+          "coverage_threshold": {
+            "type": "number"
+          },
+          "expected_boundaries": {
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "head_event": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "obligations": {
+            "items": {
+              "$ref": "#/components/schemas/StateObligation"
+            },
+            "type": "array"
+          },
+          "observed_boundaries": {
+            "type": "integer"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "policy_version": {
+            "type": "integer"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/StateRisk"
+          },
+          "trajectory_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trajectory_id",
+          "version",
+          "head_event",
+          "goal",
+          "open",
+          "coverage",
+          "coverage_threshold",
+          "expected_boundaries",
+          "observed_boundaries",
+          "capture_gaps",
+          "risk",
+          "constraints",
+          "capabilities",
+          "obligations",
+          "approvals",
+          "policy_version",
+          "model"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectorySummaryView": {
+        "properties": {
+          "agent_key_id": {
+            "type": "string"
+          },
+          "call_count": {
+            "type": "integer"
+          },
+          "coverage": {
+            "type": "number"
+          },
+          "ended_at": {
+            "type": "string"
+          },
+          "event_count": {
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "first_event_at": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_event_at": {
+            "type": "string"
+          },
+          "max_severity": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "ended",
+              "interrupted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "agent_key_id",
+          "session_id",
+          "goal",
+          "state",
+          "coverage",
+          "risk",
+          "max_severity",
+          "event_count",
+          "call_count",
+          "finding_count",
+          "first_event_at",
+          "last_event_at",
+          "ended_at"
+        ],
+        "type": "object"
+      },
+      "ConsoleTrajectoryVerdictView": {
+        "properties": {
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "value": {
+            "enum": [
+              "safe",
+              "unsafe",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "confidence",
+          "reason"
         ],
         "type": "object"
       },
@@ -5255,6 +3482,10 @@
           },
           "concurrency": {
             "type": "integer"
+          },
+          "coverage_threshold": {
+            "description": "Minimum observed-boundary coverage for a safe verdict",
+            "type": "number"
           },
           "daily_token_quota": {
             "type": "integer"
@@ -5469,55 +3700,714 @@
         ],
         "type": "object"
       },
-      "ConsoleVerdictView": {
+      "EvidenceApproval": {
+        "properties": {
+          "approver": {
+            "type": "string"
+          },
+          "execution_count": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invocation_hash": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EvidenceBundle": {
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceApproval"
+            },
+            "type": "array"
+          },
+          "checkpoint": {
+            "$ref": "#/components/schemas/EvidenceCheckpoint"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryEdge"
+            },
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryEvent"
+            },
+            "type": "array"
+          },
+          "from_seq": {
+            "type": "integer"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/EvidenceManifest"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/EvidencePolicy"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSegment"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateState"
+          },
+          "to_seq": {
+            "type": "integer"
+          },
+          "trajectory_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EvidenceCheckpoint": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "from_seq": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "merkle_root": {
+            "type": "string"
+          },
+          "prev_hash": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "to_seq": {
+            "type": "integer"
+          },
+          "trajectory_id": {
+            "type": "string"
+          },
+          "witness_ref": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EvidenceManifest": {
+        "properties": {
+          "bundle_hash": {
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "verifier": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EvidencePolicy": {
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "rules": {},
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EvidenceSegment": {
+        "properties": {
+          "confidentiality": {
+            "type": "string"
+          },
+          "content": {
+            "format": "base64",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateAction": {
+        "properties": {
+          "approval_id": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "executed_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "external_effect": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_segments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "invocation_hash": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "boolean"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sink": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateApproval": {
+        "properties": {
+          "execution_count": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invocation_hash": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateCapability": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "delegated": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_risk": {
+            "type": "number"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "source_event": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateConstraint": {
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateLabel": {
+        "properties": {
+          "confidentiality": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateMemory": {
+        "properties": {
+          "authority": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "source_segments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "StateObligation": {
+        "properties": {
+          "deadline": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateRisk": {
+        "properties": {
+          "max_severity": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "StateState": {
+        "properties": {
+          "actions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StateAction"
+            },
+            "type": "object"
+          },
+          "agent_key_id": {
+            "type": "string"
+          },
+          "approvals": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StateApproval"
+            },
+            "type": "object"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/StateCapability"
+            },
+            "type": "array"
+          },
+          "capture_gaps": {
+            "type": "integer"
+          },
+          "constraints": {
+            "items": {
+              "$ref": "#/components/schemas/StateConstraint"
+            },
+            "type": "array"
+          },
+          "coverage": {
+            "type": "number"
+          },
+          "coverage_threshold": {
+            "type": "number"
+          },
+          "expected_boundaries": {
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "head_event": {
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StateLabel"
+            },
+            "type": "object"
+          },
+          "last_recorder": {
+            "type": "string"
+          },
+          "last_sequence": {
+            "type": "integer"
+          },
+          "memories": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StateMemory"
+            },
+            "type": "object"
+          },
+          "model": {
+            "type": "string"
+          },
+          "next_call_seq": {
+            "type": "integer"
+          },
+          "obligations": {
+            "items": {
+              "$ref": "#/components/schemas/StateObligation"
+            },
+            "type": "array"
+          },
+          "observed_boundaries": {
+            "type": "integer"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "policy_hash": {
+            "type": "string"
+          },
+          "policy_version": {
+            "type": "integer"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "redaction_rules": {},
+          "risk": {
+            "$ref": "#/components/schemas/StateRisk"
+          },
+          "rules_hash": {
+            "type": "string"
+          },
+          "rules_version": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "trajectory_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectoryAuth": {
+        "properties": {
+          "approval": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "execution_count": {
+            "type": "integer"
+          },
+          "invocation_hash": {
+            "type": "string"
+          },
+          "lease": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectoryCapture": {
+        "properties": {
+          "attested": {
+            "type": "boolean"
+          },
+          "coverage": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "placement": {
+            "type": "string"
+          },
+          "recorder": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectoryCheck": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectoryEdge": {
         "properties": {
           "confidence": {
             "type": "number"
           },
-          "reason": {
+          "dst": {
             "type": "string"
           },
-          "value": {
-            "enum": [
-              "safe",
-              "unsafe",
-              "unknown"
-            ],
+          "event_id": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "src": {
+            "type": "string"
+          },
+          "trajectory_id": {
             "type": "string"
           }
         },
-        "required": [
-          "value",
-          "confidence",
-          "reason"
-        ],
         "type": "object"
       },
-      "ConsoleVersionsView": {
+      "TrajectoryEvent": {
         "properties": {
-          "adapter": {
+          "action_id": {
             "type": "string"
           },
-          "catalogue": {
+          "actor": {
             "type": "string"
           },
-          "decision_model": {
+          "auth": {
+            "$ref": "#/components/schemas/TrajectoryAuth"
+          },
+          "boundary": {
             "type": "string"
           },
-          "detectors": {
+          "call_id": {
             "type": "string"
           },
-          "taxonomy": {
+          "capture": {
+            "$ref": "#/components/schemas/TrajectoryCapture"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryCheck"
+            },
+            "type": "array"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryRef"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "obligations": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryObligation"
+            },
+            "type": "array"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryRef"
+            },
+            "type": "array"
+          },
+          "payload": {},
+          "prev_hash": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/TrajectorySnapshot"
+          },
+          "trajectory_id": {
             "type": "string"
           }
         },
-        "required": [
-          "adapter",
-          "detectors",
-          "catalogue",
-          "taxonomy",
-          "decision_model"
-        ],
+        "type": "object"
+      },
+      "TrajectoryObligation": {
+        "properties": {
+          "deadline": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectoryRef": {
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "segment": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TrajectorySnapshot": {
+        "properties": {
+          "cache": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "memory": {
+            "type": "string"
+          },
+          "opaque": {
+            "type": "boolean"
+          },
+          "session": {
+            "type": "string"
+          },
+          "transcript": {
+            "type": "string"
+          }
+        },
         "type": "object"
       }
     },
@@ -7028,165 +5918,6 @@
         ]
       }
     },
-    "/console/api/projects/{project_id}/analyses/diff": {
-      "get": {
-        "operationId": "diffAnalyses",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "before",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "after",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleDiffView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "analyses"
-        ]
-      }
-    },
-    "/console/api/projects/{project_id}/analysis-batches": {
-      "get": {
-        "operationId": "listAnalysisBatches",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAnalysisBatchPage"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "analysis-batches"
-        ]
-      },
-      "post": {
-        "operationId": "createAnalysisBatch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConsoleAnalysisBatchInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAnalysisBatchView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "analysis-batches"
-        ]
-      }
-    },
     "/console/api/projects/{project_id}/calls": {
       "get": {
         "operationId": "listCalls",
@@ -7222,38 +5953,19 @@
             "in": "query",
             "name": "state",
             "schema": {
-              "enum": [
-                "running",
-                "completed",
-                "failed",
-                "cancelled",
-                "interrupted"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "min_severity",
-            "schema": {
-              "enum": [
-                "info",
-                "medium",
-                "high"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "model",
-            "schema": {
               "type": "string"
             }
           },
           {
             "in": "query",
             "name": "agent_key_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
             "schema": {
               "type": "string"
             }
@@ -7269,11 +5981,6 @@
             "in": "query",
             "name": "lane",
             "schema": {
-              "enum": [
-                "main",
-                "side",
-                "auxiliary"
-              ],
               "type": "string"
             }
           },
@@ -7281,18 +5988,6 @@
             "in": "query",
             "name": "operation",
             "schema": {
-              "enum": [
-                "generation",
-                "count_tokens",
-                "models",
-                "model",
-                "responses_retrieve",
-                "responses_input_items",
-                "responses_cancel",
-                "responses_delete",
-                "embeddings",
-                "moderations"
-              ],
               "type": "string"
             }
           },
@@ -7300,18 +5995,6 @@
             "in": "query",
             "name": "purpose",
             "schema": {
-              "enum": [
-                "chat",
-                "subagent",
-                "compaction",
-                "title",
-                "memory",
-                "count_tokens",
-                "model_list",
-                "embedding",
-                "moderation",
-                "unknown"
-              ],
               "type": "string"
             }
           },
@@ -7319,26 +6002,20 @@
             "in": "query",
             "name": "outcome",
             "schema": {
-              "enum": [
-                "ok",
-                "blocked",
-                "rejected",
-                "client_error",
-                "upstream_error",
-                "unsupported",
-                "not_found",
-                "rate_limited",
-                "cancelled"
-              ],
               "type": "string"
             }
           },
           {
-            "description": "Include auxiliary protocol calls; ignored when lane is set",
+            "in": "query",
+            "name": "min_severity",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "query",
             "name": "include_auxiliary",
             "schema": {
-              "description": "Include auxiliary protocol calls; ignored when lane is set",
               "type": "boolean"
             }
           },
@@ -7436,110 +6113,6 @@
         ]
       }
     },
-    "/console/api/projects/{project_id}/calls/{call_id}/analyses": {
-      "get": {
-        "operationId": "listCallAnalyses",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "call_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAnalysisPage"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "calls"
-        ]
-      },
-      "post": {
-        "operationId": "reanalyzeCall",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "call_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAnalysisView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "calls"
-        ]
-      }
-    },
     "/console/api/projects/{project_id}/channel-options": {
       "get": {
         "operationId": "listChannelOptions",
@@ -7585,184 +6158,6 @@
         ],
         "tags": [
           "channel-options"
-        ]
-      }
-    },
-    "/console/api/projects/{project_id}/conversations": {
-      "get": {
-        "operationId": "listConversations",
-        "parameters": [
-          {
-            "description": "RFC 3339 time of the last row of the previous page",
-            "in": "query",
-            "name": "before",
-            "schema": {
-              "description": "RFC 3339 time of the last row of the previous page",
-              "type": "string"
-            }
-          },
-          {
-            "description": "ID of the last row of the previous page",
-            "in": "query",
-            "name": "before_id",
-            "schema": {
-              "description": "ID of the last row of the previous page",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "maximum": 100,
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleConversationPage"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
-    "/console/api/projects/{project_id}/conversations/{session_id}/redactions": {
-      "get": {
-        "operationId": "getConversationRedactions",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleRedactionIndexView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
-    "/console/api/projects/{project_id}/conversations/{session_id}/trajectory": {
-      "get": {
-        "operationId": "getConversationTrajectory",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleTrajectoryView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "conversations"
         ]
       }
     },
@@ -7861,71 +6256,6 @@
         ],
         "tags": [
           "decision-model"
-        ]
-      }
-    },
-    "/console/api/projects/{project_id}/flows": {
-      "get": {
-        "operationId": "listProjectFlows",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "agent_key_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "window",
-            "schema": {
-              "enum": [
-                "24h",
-                "7d",
-                "30d"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleFlowPage"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "flows"
         ]
       }
     },
@@ -8669,63 +6999,6 @@
         ]
       }
     },
-    "/console/api/projects/{project_id}/risk": {
-      "get": {
-        "operationId": "getProjectRisk",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "window",
-            "schema": {
-              "enum": [
-                "24h",
-                "7d",
-                "30d"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleRiskView"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleAPIError"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "tags": [
-          "risk"
-        ]
-      }
-    },
     "/console/api/projects/{project_id}/routes": {
       "get": {
         "operationId": "listRoutes",
@@ -9436,6 +7709,705 @@
         ],
         "tags": [
           "stats"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories": {
+      "get": {
+        "operationId": "listTrajectories",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_key_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_severity",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleTrajectoryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}": {
+      "get": {
+        "operationId": "getTrajectory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleTrajectoryDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/approvals/{approval_id}/deny": {
+      "post": {
+        "operationId": "denyApproval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/approvals/{approval_id}/grant": {
+      "post": {
+        "operationId": "grantApproval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/blast/{segment_id}": {
+      "get": {
+        "operationId": "getTrajectoryBlast",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "segment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleEdgePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/bundle": {
+      "get": {
+        "operationId": "getTrajectoryBundle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundle"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/coverage": {
+      "get": {
+        "operationId": "getTrajectoryCoverage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleTrajectoryStateView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/rebuild": {
+      "post": {
+        "operationId": "rebuildTrajectory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/redactions": {
+      "get": {
+        "operationId": "getTrajectoryRedactions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleRedactionIndexView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/segments/{segment_id}": {
+      "get": {
+        "operationId": "getTrajectorySegment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "segment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleTrajectorySegmentContentView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/timeline": {
+      "get": {
+        "operationId": "getTrajectoryTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleTrajectoryEventView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
+        ]
+      }
+    },
+    "/console/api/projects/{project_id}/trajectories/{trajectory_id}/why/{event_id}": {
+      "get": {
+        "operationId": "getTrajectoryWhy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trajectory_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleEdgePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleAPIError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "tags": [
+          "trajectories"
         ]
       }
     },

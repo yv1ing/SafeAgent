@@ -77,7 +77,6 @@ var errorMessages = map[string]string{
 	"password_change_required":    "The password must be changed before any other operation.",
 	"forbidden":                   "The action is not permitted.",
 	"not_found":                   "The resource does not exist.",
-	"call_running":                "The call is still running and cannot be analyzed.",
 	"scope_too_large":             "The selected scope is too large for one batch.",
 	"rate_limited":                "The request rate limit has been reached.",
 	"version_conflict":            "The record was modified concurrently. Reload the page and retry.",

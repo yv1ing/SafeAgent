@@ -12,7 +12,7 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
 	control "github.com/yv1ing/SafeAgent/internal/service/control"
-	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
+	guard "github.com/yv1ing/SafeAgent/internal/service/guard"
 )
 
 // unlogged lists changes that are not worth an operation log entry: the rule tester changes nothing.
@@ -35,7 +35,7 @@ type Services struct {
 	Calls      *service.CallService
 	Stats      *service.StatsService
 	Operations *service.OperationService
-	Analysis   *diagnosis.Service
+	Guard      *guard.Service
 	Policy     *service.PolicyService
 	Monitor    *service.MonitorService
 	Trajectory *service.TrajectoryService
@@ -49,11 +49,10 @@ type Options struct {
 
 type Console struct {
 	Services
-	options       Options
-	endpoints     []endpoint
-	loginLimit    *limit.Bucket
-	ruleLimit     *limit.Bucket
-	analysisLimit *limit.Bucket
+	options    Options
+	endpoints  []endpoint
+	loginLimit *limit.Bucket
+	ruleLimit  *limit.Bucket
 }
 
 type handler func(ctx *gin.Context, identity *Identity) (any, error)
@@ -70,11 +69,10 @@ type endpoint struct {
 
 func New(services Services, options Options) *Console {
 	console := &Console{
-		Services:      services,
-		options:       options,
-		loginLimit:    limit.NewBucket(10, time.Minute),
-		ruleLimit:     limit.NewBucket(30, time.Minute),
-		analysisLimit: limit.NewBucket(30, time.Minute),
+		Services:   services,
+		options:    options,
+		loginLimit: limit.NewBucket(10, time.Minute),
+		ruleLimit:  limit.NewBucket(30, time.Minute),
 	}
 	console.register()
 	return console
@@ -93,16 +91,13 @@ func (console *Console) register() {
 	console.registerConfiguration()
 	console.registerRules()
 	console.registerCalls()
-	console.registerConversations()
-	console.registerTrajectory()
+	console.registerTrajectories()
 	console.registerRedactions()
 	console.registerStats()
 	console.registerOperations()
 	console.registerPolicies()
 	console.registerDecisionModel()
-	console.registerBatches()
 	console.registerMonitor()
-	console.registerRisk()
 }
 
 func (console *Console) add(method, path, operation string, input, output any, handle handler) {

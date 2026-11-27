@@ -5,13 +5,11 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import type { ConsoleTrajectoryEdgeViewKind } from './consoleTrajectoryEdgeViewKind.ts';
 
 export interface ConsoleTrajectoryEdgeView {
-  from: string;
-  id: string;
-  /** The reader had to infer this relation */
-  inferred: boolean;
-  kind: ConsoleTrajectoryEdgeViewKind;
-  to: string;
+  confidence: number;
+  dst: string;
+  event_id: string;
+  relation: string;
+  src: string;
 }

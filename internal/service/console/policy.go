@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis"
-	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
-	"github.com/yv1ing/SafeAgent/internal/analysis/policy"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
+	"github.com/yv1ing/SafeAgent/internal/policy"
 	"github.com/yv1ing/SafeAgent/internal/service/access"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/threat"
+	_ "github.com/yv1ing/SafeAgent/internal/threat/builtin"
 )
 
 type PolicyService struct {
@@ -147,9 +147,9 @@ func decode(row *entity.PolicyVersion) (PolicyVersion, error) {
 
 // PolicyTestResult previews one document: deterministic findings plus the decisions each rule produces.
 type PolicyTestResult struct {
-	Findings  []analysis.Finding
-	Verdict   analysis.Verdict
-	Coverage  analysis.Coverage
+	Findings  []threat.Finding
+	Verdict   threat.Verdict
+	Coverage  threat.Coverage
 	Decisions []policy.DecisionResult
 }
 
@@ -169,9 +169,9 @@ func (service *PolicyService) Test(ctx context.Context, actor access.Actor, proj
 	if trace == nil {
 		return nil, access.Invalid("invalid_request")
 	}
-	engine := analysis.NewEngine(analysis.DefaultRegistry())
-	result := engine.Evaluate(ctx, trace, analysis.Options{})
-	coverage := analysis.BuildCoverage(result)
+	engine := threat.NewEngine(threat.DefaultRegistry())
+	result := engine.Evaluate(ctx, trace, threat.Options{})
+	coverage := threat.BuildCoverage(result)
 	decisions := []policy.DecisionResult{}
 	seen := map[string]bool{}
 	evaluate := func(phase string, tool observation.ToolCall, tags observation.ToolTags) error {
@@ -208,7 +208,7 @@ func (service *PolicyService) Test(ctx context.Context, actor access.Actor, proj
 	}
 	return &PolicyTestResult{
 		Findings: result.Findings, Coverage: coverage,
-		Verdict:   analysis.DeriveVerdict(result.Findings, coverage, nil, analysis.ModelDisabled),
+		Verdict:   threat.DeriveVerdict(result.Findings, coverage, nil, threat.ModelDisabled),
 		Decisions: decisions,
 	}, nil
 }

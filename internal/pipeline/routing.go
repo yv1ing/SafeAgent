@@ -10,7 +10,6 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/provider"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 )
@@ -173,10 +172,7 @@ func (pipeline *Pipeline) recordRouting(recorder *Recorder, plan routePlan, publ
 	record.RouteID = plan.resolution.Route.ID
 	record.Resolution = plan.rule
 	record.PublicModel = publicModel
-	recorder.Event(auditevent.KindRouting, auditevent.Routing{
-		RouteID: plan.resolution.Route.ID, RouteName: plan.resolution.Route.Name,
-		Resolution: plan.rule, PublicModel: publicModel,
-	})
+	recorder.ModelChange(plan.resolution.Route.ID, plan.resolution.Route.Name, plan.rule, publicModel, "", "", "", "")
 }
 
 // capabilityOverrides is the only access to the runtime capability rejections. Keeping it in one

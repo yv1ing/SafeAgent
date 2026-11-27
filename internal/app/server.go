@@ -16,13 +16,13 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	serviceconsole "github.com/yv1ing/SafeAgent/internal/service/console"
 	"github.com/yv1ing/SafeAgent/internal/service/control"
-	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
+	"github.com/yv1ing/SafeAgent/internal/service/guard"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
 	"github.com/yv1ing/SafeAgent/internal/transport/console"
 	"github.com/yv1ing/SafeAgent/internal/transport/gateway"
 )
 
-func assemble(configuration config.Config, database *repository.Store, providers *provider.Registry) (*gin.Engine, *diagnosis.Service) {
+func assemble(configuration config.Config, database *repository.Store, providers *provider.Registry) *gin.Engine {
 	selector := routing.NewSelector(routing.NewBreakers(nil), routing.NewKeyPool(nil), routing.NewSticky(nil), configuration.MaxAttempts)
 	settings := pipeline.Settings{
 		MaxRequestBytes:  configuration.MaxRequestBytes,
@@ -34,10 +34,10 @@ func assemble(configuration config.Config, database *repository.Store, providers
 		MaxAttempts:      configuration.MaxAttempts,
 	}
 	controlService := control.New(database, providers, selector)
-	diagnosisService := diagnosis.New(database, diagnosis.Options{})
-	online := pipeline.New(database, database.Secret, pipeline.Options{Settings: settings, Providers: providers, Selector: selector, Limiter: limit.New(nil), Veto: diagnosisService})
-	calls := serviceconsole.NewCallService(database, diagnosisService)
-	trajectory := serviceconsole.NewTrajectoryService(database, diagnosisService)
+	guardService := guard.New(database)
+	online := pipeline.New(database, database.Secret, pipeline.Options{Settings: settings, Providers: providers, Selector: selector, Limiter: limit.New(nil), Veto: guardService})
+	calls := serviceconsole.NewCallService(database)
+	trajectory := serviceconsole.NewTrajectoryService(database)
 	services := console.Services{
 		Account:    serviceconsole.NewAccountService(database),
 		Project:    serviceconsole.NewProjectService(database),
@@ -47,11 +47,11 @@ func assemble(configuration config.Config, database *repository.Store, providers
 		Calls:      calls,
 		Stats:      serviceconsole.NewStatsService(database, selector),
 		Operations: serviceconsole.NewOperationService(database),
-		Analysis:   diagnosisService,
+		Guard:      guardService,
 		Policy:     serviceconsole.NewPolicyService(database),
 		Monitor:    serviceconsole.NewMonitorService(database),
 		Trajectory: trajectory,
-		Redaction:  serviceconsole.NewRedactionService(trajectory),
+		Redaction:  serviceconsole.NewRedactionService(database),
 	}
 
 	router := gin.New()
@@ -61,12 +61,12 @@ func assemble(configuration config.Config, database *repository.Store, providers
 	gateway.NewHandler(online, settings).Register(router)
 	console.New(services, console.Options{SecureCookies: configuration.SecureCookies, PublicOrigin: configuration.PublicOrigin}).Register(router)
 	router.GET("/health", health(database))
-	return router, diagnosisService
+	return router
 }
 
-func NewServer(configuration config.Config, database *repository.Store, providers *provider.Registry, frontend fs.FS) (*http.Server, *diagnosis.Service) {
+func NewServer(configuration config.Config, database *repository.Store, providers *provider.Registry, frontend fs.FS) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
-	router, diagnosisService := assemble(configuration, database, providers)
+	router := assemble(configuration, database, providers)
 	serveFrontend(router, frontend)
 	return &http.Server{
 		Addr:              configuration.Listen,
@@ -75,7 +75,7 @@ func NewServer(configuration config.Config, database *repository.Store, provider
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		MaxHeaderBytes:    64 << 10,
-	}, diagnosisService
+	}
 }
 
 func health(database *repository.Store) gin.HandlerFunc {

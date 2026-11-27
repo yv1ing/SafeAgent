@@ -80,7 +80,7 @@ Agent clients also list models, retrieve one model, count tokens, manage Respons
 | embeddings and moderations | same-format forwarding when the selected model is of that kind and the channel declares the capability; the route's upstream model name is applied to the body |
 | undeclared capability | an unsupported error in the client's protocol format |
 
-Auxiliary endpoints are protocol traffic, not agent activity. They are authenticated, limited and audited like any other call, but they do not create conversations, do not enter diagnosis and do not count toward traffic metrics. Their expected refusals are recorded as outcomes so they are not mistaken for gateway failures.
+Auxiliary endpoints are protocol traffic, not agent activity. They are authenticated, limited and audited like any other call, but they do not join a session, do not run the online threat detectors and do not count toward traffic metrics. Their appended events are still projected, so an invariant finding can still be recorded. Their expected refusals are recorded as outcomes so they are not mistaken for gateway failures.
 
 ## Trade-offs
 

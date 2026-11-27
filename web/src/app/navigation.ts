@@ -22,8 +22,7 @@ import type { Messages } from '../i18n/messages';
 export type ProjectSection =
   | 'overview'
   | 'calls'
-  | 'conversations'
-  | 'risk'
+  | 'trajectories'
   | 'activity'
   | 'policies'
   | 'redaction'
@@ -107,20 +106,12 @@ export const navigation: NavSection[] = [
         label: (t) => t.nav.calls,
       },
       {
-        key: 'conversations',
+        key: 'trajectories',
         scope: 'project',
-        section: 'conversations',
-        to: '/projects/$projectId/conversations',
+        section: 'trajectories',
+        to: '/projects/$projectId/trajectories',
         icon: MessagesSquare,
-        label: (t) => t.nav.conversations,
-      },
-      {
-        key: 'risk',
-        scope: 'project',
-        section: 'risk',
-        to: '/projects/$projectId/risk',
-        icon: ShieldCheck,
-        label: (t) => t.nav.risk,
+        label: (t) => t.nav.trajectories,
       },
       {
         key: 'activity',

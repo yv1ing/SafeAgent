@@ -12,20 +12,21 @@ import (
 )
 
 type ProjectView struct {
-	ID                     string `json:"id" required:"true"`
-	Name                   string `json:"name" required:"true"`
-	RetentionDays          int    `json:"retention_days" required:"true"`
-	AuxiliaryRetentionDays int    `json:"auxiliary_retention_days" required:"true" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
-	DefaultRouteID         string `json:"default_route_id" description:"Route that serves side and auxiliary calls whose model has no route"`
-	RequestsPerMinute      int    `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
-	Concurrency            int    `json:"concurrency" required:"true" description:"0 means unlimited"`
-	DailyTokenQuota        int64  `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
-	DefaultMaxOutputTokens int    `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
-	StreamReviewBytes      int    `json:"stream_review_bytes" required:"true" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
-	StreamReviewTimeoutMS  int    `json:"stream_review_timeout_ms" required:"true" description:"Delay before a partially filled review window is checked on the next frame"`
-	ActivePolicyVersion    int64  `json:"active_policy_version" required:"true"`
-	Version                int64  `json:"version" required:"true"`
-	CreatedAt              string `json:"created_at" required:"true"`
+	ID                     string  `json:"id" required:"true"`
+	Name                   string  `json:"name" required:"true"`
+	RetentionDays          int     `json:"retention_days" required:"true"`
+	AuxiliaryRetentionDays int     `json:"auxiliary_retention_days" required:"true" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
+	DefaultRouteID         string  `json:"default_route_id" description:"Route that serves side and auxiliary calls whose model has no route"`
+	RequestsPerMinute      int     `json:"requests_per_minute" required:"true" description:"0 means unlimited"`
+	Concurrency            int     `json:"concurrency" required:"true" description:"0 means unlimited"`
+	DailyTokenQuota        int64   `json:"daily_token_quota" required:"true" description:"0 means unlimited"`
+	DefaultMaxOutputTokens int     `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      int     `json:"stream_review_bytes" required:"true" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  int     `json:"stream_review_timeout_ms" required:"true" description:"Delay before a partially filled review window is checked on the next frame"`
+	CoverageThreshold      float64 `json:"coverage_threshold" required:"true" description:"Minimum observed-boundary coverage for a safe verdict"`
+	ActivePolicyVersion    int64   `json:"active_policy_version" required:"true"`
+	Version                int64   `json:"version" required:"true"`
+	CreatedAt              string  `json:"created_at" required:"true"`
 	// Summary fields for project card display (24h window)
 	Calls24h          int64  `json:"calls_24h"`
 	Blocked24h        int64  `json:"blocked_24h"`
@@ -36,16 +37,17 @@ type ProjectView struct {
 
 // ProjectCreate leaves a limit out to take its default; an explicit zero means unlimited.
 type ProjectCreate struct {
-	Name                   string `json:"name" required:"true"`
-	RetentionDays          *int   `json:"retention_days,omitempty"`
-	AuxiliaryRetentionDays *int   `json:"auxiliary_retention_days,omitempty" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
-	DefaultRouteID         string `json:"default_route_id,omitempty" description:"Route that serves side and auxiliary calls whose model has no route"`
-	RequestsPerMinute      *int   `json:"requests_per_minute,omitempty"`
-	Concurrency            *int   `json:"concurrency,omitempty"`
-	DailyTokenQuota        *int64 `json:"daily_token_quota,omitempty"`
-	DefaultMaxOutputTokens *int   `json:"default_max_output_tokens,omitempty" description:"Applied when an upstream requires an output limit and the client omits one"`
-	StreamReviewBytes      *int   `json:"stream_review_bytes,omitempty" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
-	StreamReviewTimeoutMS  *int   `json:"stream_review_timeout_ms,omitempty" description:"Delay before a partially filled review window is checked on the next frame"`
+	Name                   string   `json:"name" required:"true"`
+	RetentionDays          *int     `json:"retention_days,omitempty"`
+	AuxiliaryRetentionDays *int     `json:"auxiliary_retention_days,omitempty" description:"Days auxiliary calls are kept; 0 keeps them as long as the project retention"`
+	DefaultRouteID         string   `json:"default_route_id,omitempty" description:"Route that serves side and auxiliary calls whose model has no route"`
+	RequestsPerMinute      *int     `json:"requests_per_minute,omitempty"`
+	Concurrency            *int     `json:"concurrency,omitempty"`
+	DailyTokenQuota        *int64   `json:"daily_token_quota,omitempty"`
+	DefaultMaxOutputTokens *int     `json:"default_max_output_tokens,omitempty" description:"Applied when an upstream requires an output limit and the client omits one"`
+	StreamReviewBytes      *int     `json:"stream_review_bytes,omitempty" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
+	StreamReviewTimeoutMS  *int     `json:"stream_review_timeout_ms,omitempty" description:"Delay before a partially filled review window is checked on the next frame"`
+	CoverageThreshold      *float64 `json:"coverage_threshold,omitempty" description:"Minimum observed-boundary coverage for a safe verdict"`
 }
 
 type ProjectUpdate struct {
@@ -59,6 +61,7 @@ type ProjectUpdate struct {
 	DefaultMaxOutputTokens int     `json:"default_max_output_tokens" description:"Applied when an upstream requires an output limit and the client omits one"`
 	StreamReviewBytes      int     `json:"stream_review_bytes" description:"Leading streaming text bytes reviewed before the first byte; 0 disables review"`
 	StreamReviewTimeoutMS  int     `json:"stream_review_timeout_ms" description:"Delay before a partially filled review window is checked on the next frame"`
+	CoverageThreshold      float64 `json:"coverage_threshold" description:"Minimum observed-boundary coverage for a safe verdict"`
 	Version                int64   `json:"version" required:"true"`
 }
 
@@ -80,6 +83,7 @@ func projectView(value *entity.Project) ProjectView {
 		DefaultMaxOutputTokens: value.DefaultMaxOutputTokens,
 		StreamReviewBytes:      value.StreamReviewBytes,
 		StreamReviewTimeoutMS:  value.StreamReviewTimeoutMS,
+		CoverageThreshold:      value.CoverageThreshold,
 		ActivePolicyVersion:    value.ActivePolicyVersion,
 		Version:                value.Version,
 		CreatedAt:              stamp(value.CreatedAt),
@@ -162,7 +166,7 @@ func (console *Console) registerProjects() {
 			Name: input.Name, RetentionDays: input.RetentionDays, AuxiliaryRetentionDays: input.AuxiliaryRetentionDays, DefaultRouteID: input.DefaultRouteID,
 			RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
 			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
-			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS,
+			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, CoverageThreshold: input.CoverageThreshold,
 		})
 		if err != nil {
 			return nil, err
@@ -185,7 +189,7 @@ func (console *Console) registerProjects() {
 			Name: input.Name, RetentionDays: input.RetentionDays, AuxiliaryRetentionDays: input.AuxiliaryRetentionDays, DefaultRouteID: input.DefaultRouteID,
 			RequestsPerMinute: input.RequestsPerMinute, Concurrency: input.Concurrency,
 			DailyTokenQuota: input.DailyTokenQuota, DefaultMaxOutputTokens: input.DefaultMaxOutputTokens,
-			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, Version: input.Version,
+			StreamReviewBytes: input.StreamReviewBytes, StreamReviewTimeoutMS: input.StreamReviewTimeoutMS, CoverageThreshold: input.CoverageThreshold, Version: input.Version,
 		})
 		if err != nil {
 			return nil, err

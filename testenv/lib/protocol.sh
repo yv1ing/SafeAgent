@@ -110,12 +110,20 @@ wait_call_settled() {
   return 1
 }
 
-wait_call_analysis() {
+trajectory_id_of() {
+  call_detail "$1" | jq -r '.call.trajectory_id // empty'
+}
+
+trajectory_detail() {
+  api_get "/projects/$SAFEAGENT_PROJECT/trajectories/$1"
+}
+
+wait_trajectory_settled() {
   local id=$1 state=""
   for _ in $(seq 1 "${2:-60}"); do
-    state=$(call_detail "$id" | jq -r '.call.analysis_state')
+    state=$(trajectory_detail "$id" | jq -r '.summary.state')
     case "$state" in
-      completed|failed) printf '%s' "$state"; return 0 ;;
+      ended|interrupted) printf '%s' "$state"; return 0 ;;
     esac
     sleep 1
   done

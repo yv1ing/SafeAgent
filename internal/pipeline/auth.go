@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	_ "github.com/yv1ing/SafeAgent/internal/analysis/builtin"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/platform/limit"
 	"github.com/yv1ing/SafeAgent/internal/platform/secure"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	_ "github.com/yv1ing/SafeAgent/internal/threat/builtin"
 )
 
 // Authenticate maps a presented agent key to its project.

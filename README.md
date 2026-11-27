@@ -1,10 +1,10 @@
 <h1 align="center">SafeAgent</h1>
 
-<p align="center"><strong>Make every agent call usable, controllable and traceable</strong></p>
+<p align="center"><strong>Make every agent trajectory auditable, controllable and verifiable</strong></p>
 
 <p align="center">English · <a href="README_zh.md">中文</a></p>
 
-SafeAgent is a self-hostable security gateway for governing agent behavior. It sits between agent clients and model providers, accepts the four APIs agents commonly speak, masks sensitive values before they leave the organization, checks each request and tool call against project policy, and records every call in a signed, replayable audit trail. Operators use one console to watch traffic, understand what an agent did, and stop a risky action before it reaches a business system.
+SafeAgent is a self-hostable security gateway for governing agent behavior. It sits between agent clients and model providers, accepts the four APIs agents commonly speak, masks sensitive values before they leave the organization, checks each request and tool call against project policy, and records every state transfer in a signed, replayable trajectory ledger. Operators use one console to watch traffic, understand what an agent did, and stop a risky action before it reaches a business system.
 
 ## Three common deployment problems
 
@@ -12,9 +12,9 @@ Agent deployments tend to fail in three places.
 
 **Fragmented interfaces.** Chat Completions, Responses, Anthropic Messages and Gemini coexist, and every new client or provider adds another pair of adapters to maintain. SafeAgent converts all four through one canonical model, so the integration work does not grow with every combination.
 
-**Sensitive data exposure.** Requests carry customer records, internal identifiers and credentials. Masking implemented separately in each client is inconsistent at best. SafeAgent masks values at the boundary and restores them on the way back; policy and diagnosis work on the masked text.
+**Sensitive data exposure.** Requests carry customer records, internal identifiers and credentials. Masking implemented separately in each client is inconsistent at best. SafeAgent masks values at the boundary and restores them on the way back; policy and the decision model work on the masked view; deterministic detectors may inspect raw text to find leaks, but stored evidence never quotes a masked range.
 
-**Behavior that cannot be explained later.** A tool call can read a file, send a message or change a system. Ordinary logs cannot show who triggered it, what it touched, or whether the record was altered afterwards. SafeAgent traces content from its origin to the tool that used it, blocks disallowed actions while the call is in flight, and signs every audit event.
+**Behavior that cannot be explained later.** A tool call can read a file, send a message or change a system, and a long task can compact context, write memory, roll back a workspace or delegate to a sub-agent. Ordinary logs cannot show which state transfer enabled the action or whether the record was altered afterwards. SafeAgent records the trajectory as a signed event chain, traces content from its origin to the action that used it, and makes capture gaps visible.
 
 ## Core capabilities
 
@@ -24,11 +24,11 @@ Chat Completions, Responses, Anthropic Messages and Gemini convert in both direc
 
 ### Sensitive data boundary
 
-Detectors replace sensitive values before a request leaves the gateway, so the model and the provider only see masked text. The response restores the original values from the call's mapping. A masked value keeps a stable identity across a conversation, which lets the console count and display it once instead of accumulating a copy on every continuation. Each call stores the rule set it ran under; historical calls are shown with those rules.
+Detectors replace sensitive values before a request leaves the gateway, so the model and the provider only see masked text. The response restores the original values from the call's mapping. A masked value keeps a stable identity across a trajectory, which lets the console count and display it once instead of accumulating a copy on every continuation. Each call stores the rule set it ran under; historical calls are shown with those rules.
 
-### Behavior tracing and online policy
+### Trajectory ledger and gates
 
-Every call becomes a protocol-neutral trace: where content came from, whether it is trusted, and what a tool call can do. Project rules run before the upstream call, before a tool call is released, before tool output returns to the model, and before a response is written. A project may also review the leading part of a streaming response before the first byte reaches the client.
+A trajectory is one delegated task, not one request. Its event log records observations, context assembly and compaction, memory reads and writes, action proposals and executions, approvals, rollbacks and delegations. Three online gates cover ingress, action release and response release; rollback and delegation events are reduced and projected as obligations and findings. The same events drive findings, coverage and risk. A project may also review the leading part of a streaming response before the first byte reaches the client.
 
 ### Editable model supply and routing
 
@@ -36,7 +36,7 @@ Providers, channels, models, routes and targets are configuration records. Opera
 
 ### Operator console
 
-The console shows traffic and failures, calls and conversations, risk findings and data flows, policy history, redaction rules, model supply and routing, and access control. Raw audit data is visible to administrators only, and operations that change state are recorded.
+The console shows traffic and failures, trajectories and calls, coverage and findings, policy history, redaction rules, model supply and routing, and access control. Raw event payloads are visible to administrators only, and operations that change state are recorded.
 
 ## Call path
 
@@ -44,7 +44,7 @@ The console shows traffic and failures, calls and conversations, risk findings a
 2. Sensitive values are masked; the call is recorded as a trace of content origins, trust and tool destinations.
 3. The public model name resolves to a route. The request checkpoint and any new tool results are checked before the upstream sees them.
 4. The upstream streams a response. Text and reasoning pass through, while a complete tool call waits for its verdict.
-5. The response checkpoint runs before the body or the first byte is written, masked values are restored, and the call is sealed into the audit chain. A background worker diagnoses finished main calls.
+5. The release gate runs before the body or the first byte is written, masked values are restored, and the call is appended as an action interval in the trajectory chain. A checkpoint signs the range; findings and coverage are projections of the log.
 
 ## Quick start
 
@@ -61,7 +61,7 @@ On first start the service initializes its database and prints the administrator
 
 ## Deployment and scope
 
-SafeAgent is deployed inside the operator's infrastructure. Agents reach models through one address, and call records stay inside the operator's environment. Coverage depends on how much of an agent's traffic is routed through the gateway. Images, audio and other binary payloads are not inspected or rewritten. Stream review covers only the configured leading window. Tool destinations and data flows are inferred and need human confirmation. Human approval queues and cross-call correlation are not implemented.
+SafeAgent is deployed inside the operator's infrastructure. Agents reach models through one address, and call records stay inside the operator's environment. Coverage depends on how much of an agent's traffic and state transfers reach a recorder. Deployment-specific limits are in [Agent safety](docs/human/agent-safety.md); what the test suite can and cannot prove is in [Verification](docs/human/verification.md).
 
 ## Documentation
 

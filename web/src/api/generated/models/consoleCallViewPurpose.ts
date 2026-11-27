@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.2.0
  */
 
-/**
- * Why the client issued the request
- */
 export type ConsoleCallViewPurpose =
   (typeof ConsoleCallViewPurpose)[keyof typeof ConsoleCallViewPurpose];
 

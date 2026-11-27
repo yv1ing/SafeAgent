@@ -57,24 +57,23 @@ func (store *Store) Series(ctx context.Context, projectID string, window, bucket
 	// Each request event stores the hits that call introduced. Grouping by label and counting the
 	// distinct ValueIDs makes the chart show redacted values, not repeated occurrences of one value.
 	if err := store.DB.NewRaw(`SELECT hit->>'label' AS label, count(DISTINCT hit->>'value_id') AS hits
-		FROM (SELECT id FROM calls WHERE project_id = ? AND created_at >= ? AND lane = 'main' AND redaction_values > 0
-				ORDER BY created_at DESC, id DESC LIMIT ?) recent
-		JOIN events e ON e.call_id = recent.id AND e.kind = 'request'
-		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.payload->'hits') = 'array' THEN e.payload->'hits' ELSE '[]'::jsonb END) hit
-		WHERE e.project_id = ? AND hit->>'value_id' <> '' GROUP BY 1 ORDER BY hits DESC, label`,
-		projectID, since, redactionCallLimit, projectID).Scan(ctx, &result.Redactions); err != nil {
+		FROM (SELECT e.id, e.payload FROM trajectory_events e
+				JOIN calls c ON c.trajectory_id = e.trajectory_id AND c.lane = 'main'
+				WHERE e.project_id = ? AND e.kind = 'observation' AND e.occurred_at >= ?
+				ORDER BY e.occurred_at DESC LIMIT ?) recent
+		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(recent.payload->'redactions') = 'array' THEN recent.payload->'redactions' ELSE '[]'::jsonb END) hit
+		WHERE hit->>'value_id' <> '' GROUP BY 1 ORDER BY hits DESC, label`,
+		projectID, since, redactionCallLimit).Scan(ctx, &result.Redactions); err != nil {
 		return result, err
 	}
 	if err := store.DB.NewRaw(`SELECT f.severity, count(*) AS count
-		FROM analysis_findings f JOIN calls c ON c.id = f.call_id AND c.lane = 'main'
-			AND f.analysis_id = c.latest_analysis_id
+		FROM findings f JOIN calls c ON c.id = f.call_id AND c.lane = 'main'
 		WHERE f.project_id = ? AND f.created_at >= ?
 		GROUP BY 1 ORDER BY 1`, projectID, since).Scan(ctx, &result.Findings); err != nil {
 		return result, err
 	}
 	if err := store.DB.NewRaw(`SELECT f.code, count(*) AS count
-		FROM analysis_findings f JOIN calls c ON c.id = f.call_id AND c.lane = 'main'
-			AND f.analysis_id = c.latest_analysis_id
+		FROM findings f JOIN calls c ON c.id = f.call_id AND c.lane = 'main'
 		WHERE f.project_id = ? AND f.created_at >= ?
 		GROUP BY 1 ORDER BY count DESC, f.code LIMIT ?`, projectID, since, codeRowLimit).Scan(ctx, &result.FindingCodes); err != nil {
 		return result, err

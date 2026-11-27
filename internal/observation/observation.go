@@ -1,6 +1,6 @@
 // Package observation defines the protocol-neutral behavior model of one agent trace. Nothing in
 // this package knows about wire formats: adapters translate protocol requests, responses and stored
-// audit events into these types, and every analyzer reads only this model.
+// stored trajectory events into these types, and every analyzer reads only this model.
 package observation
 
 // View selects which representation of a value an analyzer sees. Raw is what the client or upstream
@@ -137,7 +137,7 @@ type ShownSpan struct {
 }
 
 // Locator identifies one item of one call. CallID is the call that stored the item, which for an
-// ancestor item is the ancestor call, not the call under analysis. Ordinal is the item ordinal
+// ancestor item is the ancestor call, not the call under inspection. Ordinal is the item ordinal
 // inside its section; Path narrows down a part inside that item.
 type Locator struct {
 	CallID  string  `json:"call_id,omitempty"`
@@ -237,8 +237,8 @@ type Outcome struct {
 	Finish    string `json:"finish,omitempty"`
 }
 
-// Trace is the subject of analysis: one agent call, including its tools, its outcome and the
-// metadata a policy may inspect. Cross-call context lives in Context so a single analysis run stays
+// Trace is the subject of a policy pass: one agent call, including its tools, its outcome and the
+// metadata a policy may inspect. Cross-call context lives in Context so a single pass stays
 // reproducible from one call's events.
 type Trace struct {
 	ID             string         `json:"id"`
@@ -254,7 +254,7 @@ type Trace struct {
 }
 
 // ToolStep is the ordered tool chain of a trace: one entry per invocation and, when present, its
-// result. Policies and the flow analysis read this projection.
+// result. Policies and the flow detector read this projection.
 type ToolStep struct {
 	Turn        int    `json:"turn"`
 	Item        int    `json:"item"`

@@ -11,7 +11,7 @@ DOCS_ZH := README_zh.md $(shell find docs -name '*_zh.md' | sort)
 LAB_JS := $(sort $(wildcard testenv/protocol/*.mjs testenv/lib/*.mjs))
 
 .PHONY: help deps generate format check contract staticcheck test integration verify build run web dev security clean \
-	lab-setup lab-restart lab-agents lab-protocol lab-auxiliary lab-trajectory lab-control-plane lab-policy lab-analysis lab-security lab-faults lab-browser lab-integration lab-load lab-audit lab-acceptance lab-down
+	lab-setup lab-restart lab-agents lab-protocol lab-auxiliary lab-trajectory lab-control-plane lab-policy lab-threat lab-security lab-faults lab-browser lab-integration lab-load lab-audit lab-acceptance lab-down
 
 help:
 	@printf '%s\n' \
@@ -28,14 +28,14 @@ help:
 		'  lab-agents   Run Claude Code, Codex, Gemini CLI and Pi through every lab route' \
 		'  lab-protocol Run the live client-by-channel protocol matrix' \
 		'  lab-auxiliary Run model, counting, Responses lifecycle and WebSocket checks' \
-		'  lab-trajectory Drive a tool-loop conversation and check the trajectory graph and replay' \
+		'  lab-trajectory Drive a tool loop and check trajectory identity, edges, coverage and chain' \
 		'  lab-policy   Check request and tool-call enforcement across client protocols' \
-		'  lab-analysis Check asynchronous diagnosis and reversible redaction' \
+		'  lab-threat Check threat invariants, findings, coverage, redaction index and trajectory integrity' \
 		'  lab-security Check authentication, quotas, isolation, console permissions and stream review settings' \
 		'  lab-faults   Check failover, truncation, tool holds, stream review, audit projection, auxiliary mapping and limits' \
 		'  lab-browser  Run the Playwright console acceptance suite' \
 		'  lab-integration Run repository integration tests on the lab database' \
-		'  lab-audit    Verify every stored call audit chain on the lab database' \
+		'  lab-audit    Verify every stored trajectory chain on the lab database' \
 		'  lab-load     Run the quick four-protocol performance smoke' \
 		'  lab-acceptance Run every lab suite in order, then clean up on success' \
 		'  lab-down     Stop the lab and remove its containers, volume and runtime files' \
@@ -117,8 +117,8 @@ lab-control-plane:
 lab-policy:
 	testenv/suites/policy.sh
 
-lab-analysis:
-	testenv/suites/analysis.sh
+lab-threat:
+	testenv/suites/threat.sh
 
 lab-security:
 	testenv/suites/security.sh
@@ -133,7 +133,7 @@ lab-integration:
 	testenv/scripts/integration.sh
 
 lab-audit: build
-	build/bin/safeagent -config testenv/runtime/config.toml verify-audit
+	build/bin/safeagent -config testenv/runtime/config.toml verify-trajectory
 
 lab-load:
 	testenv/suites/load.sh

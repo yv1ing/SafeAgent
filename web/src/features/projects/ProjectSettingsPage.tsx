@@ -32,6 +32,7 @@ function draftOf(project: ConsoleProjectView): ProjectDraft {
   return {
     name: project.name,
     retention_days: project.retention_days,
+    coverage_threshold: project.coverage_threshold,
     requests_per_minute: project.requests_per_minute,
     concurrency: project.concurrency,
     daily_token_quota: project.daily_token_quota,

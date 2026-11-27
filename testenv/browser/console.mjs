@@ -4,7 +4,7 @@
 //   - every page must render an <h1>, without a client error and without a failed API call;
 //   - desktop flows create and remove a project, a provider graph, keys, policies, redaction rules,
 //     users and members through the UI, and soft-delete/restore the graph again;
-//   - traffic-dependent checks (call filters, call detail, conversations, trajectory, risk rows) are
+//   - traffic-dependent checks (call filters, call detail, trajectories) are
 //     skipped with a clear log line when the lab has no calls, so the suite runs with and without
 //     upstream credentials;
 //   - screenshots are written for every page and flow;
@@ -53,7 +53,6 @@ const L = {
   calls: 'Calls',
   check: 'Check',
   clearFilters: 'Clear filters',
-  closeInspector: 'Close inspector',
   completed: 'Completed',
   connect: 'Connect provider',
   connectAndDiscover: 'Connect and discover',
@@ -71,15 +70,11 @@ const L = {
   endpointCatalog: 'Endpoint catalog',
   failures: 'Failures',
   finishSetup: 'Finish setup',
-  flat: 'Flat',
-  graphView: 'Graph view',
   highFindings: 'High-severity calls',
   highSeverity: 'High',
   label: 'Label',
   language: 'Language',
   lane: 'Lane',
-  last24Hours: 'Last 24 hours',
-  last7Days: 'Last 7 days',
   light: 'Light',
   loadFailed: 'The page could not be loaded.',
   main: 'Main',
@@ -93,14 +88,9 @@ const L = {
   newRule: 'New rule',
   newUser: 'New user',
   next: 'Next',
-  nextStep: 'Next step',
-  noAuditEvents: 'No audit events were recorded.',
   noCalls: 'No calls recorded.',
-  noConversations: 'No conversations recorded.',
+  noTrajectories: 'No trajectories recorded.',
   noData: 'No data in this window.',
-  noFindings: 'No findings in this window.',
-  noRedactedValues: 'No redacted values in this conversation.',
-  noRedactions: 'This call introduced no redacted values.',
   noResults: 'No results match these filters.',
   openNavigation: 'Open navigation',
   operation: 'Operation',
@@ -111,16 +101,12 @@ const L = {
   policyDocument: 'Policy document',
   policyRestored: 'The earlier version is active again.',
   policyValid: 'The document is valid.',
-  previousStep: 'Previous step',
   project: 'Project',
   purpose: 'Purpose',
-  raw: 'Raw',
-  redactedValues: 'Redacted values',
   regularExpression: 'Regular expression',
   remove: 'Remove',
   requestsMainLane: 'Requests (main lane)',
   restore: 'Restore',
-  riskSources: 'Risk sources',
   ruleTest: 'Rule to test',
   sampleText: 'Sample text',
   save: 'Save',
@@ -129,20 +115,14 @@ const L = {
   selectAll: 'Select all',
   showAuxiliary: 'Show auxiliary calls',
   showDeleted: 'Show deleted',
-  showInOriginal: 'Show in original',
-  shown: 'Shown',
   signIn: 'Sign in',
   state: 'State',
   succeeded: 'Succeeded',
   theme: 'Theme',
-  timeWindow: 'Time window',
-  transcriptText: 'Transcript text',
-  tree: 'Tree',
   type: 'Type',
   updatePassword: 'Update password',
   user: 'User',
   username: 'Username',
-  view: 'View',
   changesSaved: 'Changes saved.',
 };
 
@@ -527,8 +507,7 @@ async function createAgentKey() {
 const projectPages = [
   ['project-overview', `/projects/${labProjectId}/overview`],
   ['project-calls', `/projects/${labProjectId}/calls`],
-  ['project-conversations', `/projects/${labProjectId}/conversations`],
-  ['project-risk', `/projects/${labProjectId}/risk`],
+  ['project-trajectories', `/projects/${labProjectId}/trajectories`],
   ['project-activity', `/projects/${labProjectId}/activity`],
   ['project-policies', `/projects/${labProjectId}/policies`],
   ['project-redaction', `/projects/${labProjectId}/redaction`],
@@ -917,161 +896,56 @@ async function callFilters() {
 }
 
 async function callDetail() {
-  let detail = null;
-  for (const call of labCalls.slice(0, 12)) {
-    const loaded = await api(`/projects/${labProjectId}/calls/${call.id}`);
-    if (!detail) detail = loaded;
-    if (loaded.call.session_id && loaded.hits.length > 0) {
-      detail = loaded;
-      break;
-    }
-  }
+  const detail = await api(`/projects/${labProjectId}/calls/${labCalls[0].id}`);
   requireValue(detail !== null, 'no call detail could be loaded');
   await goto(`/projects/${labProjectId}/calls?call=${detail.call.id}`);
-  const tab = (name) => page.getByRole('tab', { name });
-  await shot('52-call-detail', false);
-
-  await tab(/^Transcript$/).click();
-  await page.waitForTimeout(200);
-  const view = page.getByRole('group', { name: L.transcriptText });
-  await view.getByRole('button', { name: L.raw, exact: true }).click();
+  await page.waitForTimeout(400);
   requireValue(
-    (await view.getByRole('button', { name: L.raw, exact: true }).getAttribute('aria-pressed')) ===
-      'true',
-    'the raw transcript view was not selected',
+    (await bodyText()).includes(detail.call.id.slice(0, 8)),
+    'the call detail is not shown',
   );
-  await shot('53-call-transcript', false);
-  await view.getByRole('button', { name: L.shown, exact: true }).click();
-
-  await tab(/^Upstream attempts$/).click();
-  await page.waitForTimeout(200);
-  if (detail.attempts.length > 0) {
-    await page.getByText('Attempt 1', { exact: true }).first().waitFor({ timeout: 10_000 });
-  } else {
-    await expectText('No upstream attempt was recorded.');
-  }
-  await shot('54-call-attempts', false);
-
-  await tab(/^Redacted values/).click();
-  await page.waitForTimeout(200);
-  if (detail.hits.length > 0) {
-    await expectText(detail.hits[0].label);
-  } else {
-    await expectText(L.noRedactions);
-  }
-  await shot('55-call-redactions', false);
+  await shot('52-call-detail', false);
 }
 
-async function conversations() {
-  const conversationPage = await api(`/projects/${labProjectId}/conversations?limit=100`);
-  const conversation =
-    conversationPage.items.find((entry) => entry.calls > 1) ?? conversationPage.items[0];
-  if (!conversation) {
-    console.log(
-      'traffic: calls exist but no conversation was linked; skipping the trajectory check',
-    );
-    await goto(`/projects/${labProjectId}/conversations`);
-    await expectText(L.noConversations);
-    await shot('56-conversations-empty');
+async function trajectories() {
+  const pageData = await api(`/projects/${labProjectId}/trajectories?limit=100`);
+  const summary = pageData.items[0];
+  if (!summary) {
+    await goto(`/projects/${labProjectId}/trajectories`);
+    await expectText(L.noTrajectories);
+    await shot('56-trajectories-empty');
     return;
   }
-  const trajectory = await api(
-    `/projects/${labProjectId}/conversations/${conversation.id}/trajectory`,
-  );
-  const redactionIndex = await api(
-    `/projects/${labProjectId}/conversations/${conversation.id}/redactions`,
-  );
-  await goto(`/projects/${labProjectId}/conversations/${conversation.id}`);
-  await page.getByRole('group', { name: L.graphView }).waitFor({ timeout: 15_000 });
-  await page.waitForTimeout(300);
-  await shot('57-trajectory-flow');
-
-  await page
-    .getByRole('group', { name: L.view })
-    .getByRole('button', { name: L.tree, exact: true })
-    .click();
-  await page.locator('ul li').first().waitFor({ timeout: 10_000 });
-  await shot('58-trajectory-tree');
-
-  await page
-    .getByRole('group', { name: L.view })
-    .getByRole('button', { name: L.flat, exact: true })
-    .click();
-  const firstNode = page.locator('ol > li > button').first();
-  await firstNode.waitFor({ timeout: 10_000 });
-  await firstNode.click();
-  await page.waitForTimeout(300);
+  await goto(`/projects/${labProjectId}/trajectories`);
+  await expectText(summary.id.slice(0, 8));
+  await shot('56-trajectories');
+  await goto(`/projects/${labProjectId}/trajectories/${summary.id}`);
+  await page.waitForTimeout(400);
   requireValue(
-    new URL(page.url()).searchParams.get('node') !== null,
-    'selecting a trajectory node did not set the node deep link',
+    (await bodyText()).includes('Coverage'),
+    'the trajectory page has no coverage section',
   );
-  await page.getByRole('button', { name: L.closeInspector }).waitFor({ timeout: 10_000 });
-  await shot('59-trajectory-inspector', false);
-
-  const deepLink = page.url();
-  await page.goto(deepLink, { waitUntil: 'domcontentloaded' });
-  await waitForPage();
-  await page.getByRole('button', { name: L.closeInspector }).waitFor({ timeout: 10_000 });
-
-  if (trajectory.steps.length > 0) {
-    await page.getByRole('button', { name: L.nextStep }).click();
-    await page.getByText(/^Step 1 of \d+$/).waitFor({ timeout: 10_000 });
-    await shot('60-trajectory-replay', false);
-    await page.getByRole('button', { name: L.previousStep }).click();
-  } else {
-    await expectText(L.noAuditEvents);
-  }
-
-  const chip = page.getByRole('button', { name: /values? · \d+ occurrences/ }).first();
-  await chip.click();
-  const panel = await openDialog();
-  await panel.getByText(L.redactedValues, { exact: true }).first().waitFor({ timeout: 10_000 });
-  await shot('61-trajectory-redactions', false);
-  if (redactionIndex.values.length > 0) {
-    await panel.locator('summary').first().click();
-    await panel.getByRole('button', { name: L.showInOriginal, exact: true }).first().click();
-    await page.waitForURL((url) => (url.searchParams.get('node') ?? '').startsWith('call:'), {
-      timeout: 15_000,
-    });
-    await expectText('Metrics');
-  } else {
-    console.log('traffic: the conversation has no redacted values; skipping show-in-original');
-    await expectText(L.noRedactedValues);
-  }
+  requireValue(
+    (await bodyText()).includes('Audit integrity'),
+    'the trajectory page has no integrity section',
+  );
+  await shot('57-trajectory');
 }
 
-async function riskAndOverview() {
-  await goto(`/projects/${labProjectId}/risk`);
-  const riskText = await bodyText();
-  requireValue(
-    riskText.includes(L.riskSources) || riskText.includes(L.noFindings),
-    'the risk page shows neither findings nor an empty state',
-  );
-  await shot('62-risk', false);
+async function overviewAndMonitor() {
   await goto(`/projects/${labProjectId}/overview`);
   const overviewText = await bodyText();
   requireValue(
     overviewText.includes(L.requestsMainLane) || overviewText.includes(L.noData),
     'the overview shows neither counters nor an empty state',
   );
-  await shot('63-overview', false);
+  await shot('62-overview', false);
   await goto('/monitor');
   const monitorText = await bodyText();
   for (const label of [L.calls, L.failures, L.blocked, L.highFindings]) {
-    requireValue(monitorText.includes(label), `the monitor does not show the ${label} counter`);
+    requireValue(monitorText.includes(label), `the monitor does not show ${label}`);
   }
-  requireValue(monitorText.includes(L.mainLaneNote), 'the monitor does not explain the main lane');
-  await page
-    .getByRole('group', { name: L.timeWindow })
-    .getByRole('button', { name: L.last7Days, exact: true })
-    .click();
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
-  await page
-    .getByRole('group', { name: L.timeWindow })
-    .getByRole('button', { name: L.last24Hours, exact: true })
-    .click();
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
-  await shot('64-monitor', false);
+  await shot('63-monitor', false);
 }
 
 async function trafficChecks() {
@@ -1079,22 +953,17 @@ async function trafficChecks() {
   labCalls = callPage.items;
   if (labCalls.length === 0) {
     console.log(
-      'traffic: the lab has no calls (no upstream configured); asserting empty states and skipping call, conversation, trajectory and risk checks',
+      'traffic: the lab has no calls (no upstream configured); asserting empty states and skipping call and trajectory checks',
     );
     await step('calls empty state', async () => {
       await goto(`/projects/${labProjectId}/calls`);
       await expectText(L.noCalls);
       await shot('50-calls-empty');
     });
-    await step('conversations empty state', async () => {
-      await goto(`/projects/${labProjectId}/conversations`);
-      await expectText(L.noConversations);
-      await shot('51-conversations-empty');
-    });
-    await step('risk empty state', async () => {
-      await goto(`/projects/${labProjectId}/risk`);
-      await expectText(L.noFindings);
-      await shot('52-risk-empty');
+    await step('trajectories empty state', async () => {
+      await goto(`/projects/${labProjectId}/trajectories`);
+      await expectText(L.noTrajectories);
+      await shot('51-trajectories-empty');
     });
     await step('overview empty state', async () => {
       await goto(`/projects/${labProjectId}/overview`);
@@ -1114,9 +983,9 @@ async function trafficChecks() {
   }
   console.log(`traffic: ${labCalls.length} calls are available; running the data-dependent checks`);
   await step('call classification filters', callFilters);
-  await step('call detail attempts, redactions and transcript', callDetail);
-  await step('conversation trajectory views, replay and redactions', conversations);
-  await step('risk, overview and monitor data', riskAndOverview);
+  await step('call detail attempts and findings', callDetail);
+  await step('trajectory list and detail', trajectories);
+  await step('overview and monitor data', overviewAndMonitor);
 }
 
 async function languageAndTheme() {

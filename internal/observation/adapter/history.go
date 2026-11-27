@@ -35,7 +35,7 @@ func TrimAncestors(entries []Ancestor) ([]Ancestor, bool) {
 func ancestorSize(entry Ancestor) int {
 	size := len(model.Marshal(entry.Request.Items))
 	if entry.Response != nil {
-		size += len(model.Marshal(entry.Response.Response.Items))
+		size += len(model.Marshal(entry.Response.Items))
 	}
 	return size
 }

@@ -59,10 +59,10 @@ func (store *Store) CreateProject(ctx context.Context, project *entity.Project, 
 
 func (store *Store) UpdateProject(ctx context.Context, id string, project entity.Project, version int64) (*entity.Project, error) {
 	result, err := store.DB.NewUpdate().Model((*entity.Project)(nil)).
-		Set("name = ?, retention_days = ?, auxiliary_retention_days = ?, default_route_id = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, stream_review_bytes = ?, stream_review_timeout_ms = ?, version = version + 1",
+		Set("name = ?, retention_days = ?, auxiliary_retention_days = ?, default_route_id = ?, requests_per_minute = ?, concurrency = ?, daily_token_quota = ?, default_max_output_tokens = ?, stream_review_bytes = ?, stream_review_timeout_ms = ?, coverage_threshold = ?, version = version + 1",
 			project.Name, project.RetentionDays, project.AuxiliaryRetentionDays, project.DefaultRouteID,
 			project.RequestsPerMinute, project.Concurrency, project.DailyTokenQuota,
-			project.DefaultMaxOutputTokens, project.StreamReviewBytes, project.StreamReviewTimeoutMS).
+			project.DefaultMaxOutputTokens, project.StreamReviewBytes, project.StreamReviewTimeoutMS, project.CoverageThreshold).
 		Where("id = ? AND version = ?", id, version).Exec(ctx)
 	if err != nil {
 		return nil, err
@@ -74,11 +74,35 @@ func (store *Store) UpdateProject(ctx context.Context, id string, project entity
 }
 
 func (store *Store) DeleteProject(ctx context.Context, id string) error {
-	result, err := store.DB.NewDelete().Model((*entity.Project)(nil)).Where("id = ?", id).Exec(ctx)
+	var found bool
+	err := store.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewRaw(`DELETE FROM findings WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`, id).Exec(ctx); err != nil {
+			return err
+		}
+		for _, statement := range []string{
+			`DELETE FROM edges WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`,
+			`DELETE FROM segments WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`,
+			`DELETE FROM trajectory_events WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`,
+			`DELETE FROM checkpoints WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`,
+			`DELETE FROM trajectory_states WHERE trajectory_id IN (SELECT id FROM trajectory_summaries WHERE project_id = ?)`,
+			`DELETE FROM trajectory_summaries WHERE project_id = ?`,
+		} {
+			if _, err := tx.NewRaw(statement, id).Exec(ctx); err != nil {
+				return err
+			}
+		}
+		result, err := tx.NewDelete().Model((*entity.Project)(nil)).Where("id = ?", id).Exec(ctx)
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		found = affected > 0
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
+	if !found {
 		return ErrNotFound
 	}
 	return nil
@@ -126,9 +150,6 @@ func (store *Store) Prune(ctx context.Context, operationLogDays int) error {
 		{`DELETE FROM traffic_rollups WHERE ctid IN (
 			SELECT t.ctid FROM traffic_rollups t JOIN projects p ON p.id = t.project_id
 			WHERE t.bucket_start < now() - make_interval(days => p.retention_days::int) - interval '1 day' LIMIT ?)`, []any{pruneBatch}},
-		{`DELETE FROM analysis_batches WHERE id IN (
-			SELECT b.id FROM analysis_batches b JOIN projects p ON p.id = b.project_id
-			WHERE b.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
 		{`DELETE FROM calls WHERE id IN (
 			SELECT c.id FROM calls c JOIN projects p ON p.id = c.project_id
 			WHERE c.lane <> 'auxiliary' AND c.created_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
@@ -138,11 +159,28 @@ func (store *Store) Prune(ctx context.Context, operationLogDays int) error {
 				AND c.created_at < now() - make_interval(days => CASE
 					WHEN p.auxiliary_retention_days > 0 THEN p.auxiliary_retention_days
 					ELSE p.retention_days::int END) LIMIT ?)`, []any{pruneBatch}},
-		{`DELETE FROM conversations WHERE id IN (
-			SELECT cv.id FROM conversations cv WHERE NOT EXISTS (SELECT 1 FROM calls c WHERE c.project_id = cv.project_id AND c.session_id = cv.id) LIMIT ?)`, []any{pruneBatch}},
-		{`DELETE FROM analysis_jobs WHERE id IN (
-			SELECT id FROM analysis_jobs WHERE state IN ('done','failed','cancelled')
-				AND updated_at < now() - interval '7 days' LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM findings WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM edges WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM segments WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM trajectory_events WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM checkpoints WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM trajectory_states WHERE trajectory_id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM trajectory_summaries WHERE id IN (
+			SELECT s.id FROM trajectory_summaries s JOIN projects p ON p.id = s.project_id
+			WHERE s.last_event_at < now() - make_interval(days => p.retention_days::int) LIMIT ?)`, []any{pruneBatch}},
+		{`DELETE FROM blobs WHERE ctid IN (SELECT b.ctid FROM blobs b WHERE NOT EXISTS (SELECT 1 FROM segments s WHERE s.bytes_ref = b.hash) LIMIT ?)`, []any{pruneBatch}},
 	}
 	for _, statement := range statements {
 		for {

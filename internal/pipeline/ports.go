@@ -4,16 +4,22 @@ import (
 	"context"
 	"time"
 
-	"github.com/yv1ing/SafeAgent/internal/analysis/decision"
+	"github.com/yv1ing/SafeAgent/internal/decision"
 	"github.com/yv1ing/SafeAgent/internal/observation"
+	"github.com/yv1ing/SafeAgent/internal/state"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/trajectory"
 )
 
-// Repository is the persistence the pipeline needs. It is an interface so the gateway can be
-// driven against an in-memory store and a fake upstream without a database.
+// Repository is the persistence the pipeline needs. The only write model is the trajectory log;
+// calls are projections created by the repository.
 type Repository interface {
-	EventWriter
+	EnsureTrajectory(ctx context.Context, projectID, agentKeyID, sessionID, goal string, threshold float64) (*entity.TrajectorySummary, error)
+	Append(ctx context.Context, batch trajectory.Batch) (repository.AppendResult, error)
+	SegmentContent(ctx context.Context, trajectoryID, segmentID string) ([]byte, string, error)
+	TrajectoryState(ctx context.Context, projectID, trajectoryID string) (*state.State, error)
+
 	AgentKeyByHash(ctx context.Context, hash string) (*entity.AgentKey, error)
 	TouchAgentKey(ctx context.Context, id string)
 	Project(ctx context.Context, id string) (*entity.Project, error)
@@ -26,15 +32,14 @@ type Repository interface {
 	CapabilityOverrides(ctx context.Context, channelIDs []string) ([]entity.CapabilityOverride, error)
 	AddCapabilityOverride(ctx context.Context, override entity.CapabilityOverride) error
 	DeleteResponse(ctx context.Context, agentKeyID, responseID string) error
-	MarkCallCancelled(ctx context.Context, callID string)
+	MarkCallCancelled(ctx context.Context, callID string) error
 	ReserveTokens(ctx context.Context, projectID string, estimate, limit int64) (bool, time.Time, error)
 	SettleTokens(ctx context.Context, projectID string, day time.Time, estimate, actual int64) error
-	Call(ctx context.Context, projectID, callID string) (*entity.Call, error)
 	CallByResponseID(ctx context.Context, agentKeyID, responseID string) (*entity.Call, error)
 	CallByToolCall(ctx context.Context, projectID, agentKeyID, toolCallID string) (*entity.Call, error)
 	CallByConversationHash(ctx context.Context, agentKeyID, hash string) (*entity.Call, error)
 	CallChain(ctx context.Context, callID string) ([]entity.Call, error)
-	EventsOfKinds(ctx context.Context, callIDs []string, kinds ...string) ([]entity.Event, error)
+	EventsOfCalls(ctx context.Context, projectID string, callIDs []string) ([]trajectory.Event, error)
 }
 
 type Identity struct {

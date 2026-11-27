@@ -7,7 +7,6 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/codec"
 	"github.com/yv1ing/SafeAgent/internal/llm/codec/responses"
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 )
 
 // RetrieveResponse returns a stored Responses response and audits the lifecycle call.
@@ -98,7 +97,9 @@ func (pipeline *Pipeline) CancelResponse(ctx context.Context, key, responseID st
 	}
 	cancelled := pipeline.inflight.Cancel(call.ID)
 	if cancelled {
-		pipeline.repository.MarkCallCancelled(ctx, call.ID)
+		if err := pipeline.repository.MarkCallCancelled(ctx, call.ID); err != nil {
+			pipeline.logger.Error("cancelled call could not be marked", "call", call.ID, "error", err)
+		}
 	}
 	if failure := pipeline.endAuxiliary(ctx, auxiliary, nil); failure != nil {
 		return cancelled, failure
@@ -120,33 +121,18 @@ func (pipeline *Pipeline) storedResponse(ctx context.Context, identity *Identity
 	if !call.ResponseStore {
 		return nil, nil, responseNotFound()
 	}
-	events, err := pipeline.repository.EventsOfKinds(ctx, []string{call.ID}, auditevent.KindRequest, auditevent.KindResponse)
+	exchange, err := pipeline.storedExchange(ctx, identity, call)
 	if err != nil {
 		return nil, nil, internal("store_failure", "The response could not be loaded.")
 	}
-	var response *model.Response
-	var input []model.Item
-	for _, event := range events {
-		decoded, err := auditevent.Decode(event.Kind, event.Payload)
-		if err != nil {
-			continue
-		}
-		switch event.Kind {
-		case auditevent.KindRequest:
-			if decoded.Request != nil {
-				input = decoded.Request.Items
-			}
-		case auditevent.KindResponse:
-			if decoded.Response != nil {
-				stored := decoded.Response.Response
-				response = &stored
-			}
-		}
-	}
-	if response == nil {
+	if exchange.Response == nil {
 		return nil, nil, responseNotFound()
 	}
-	return response, input, nil
+	var input []model.Item
+	if exchange.Request != nil {
+		input = exchange.Request.Items
+	}
+	return exchange.Response, input, nil
 }
 
 // EncodeStoredResponse renders a stored response in the Responses wire shape.

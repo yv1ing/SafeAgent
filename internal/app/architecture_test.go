@@ -37,36 +37,39 @@ func joined(paths ...string) []string {
 // storage. The wire model, the codecs, the provider catalog and the stream engine sit below the
 // pipeline. Platform packages are utilities with no knowledge of any of them.
 func boundaries() []boundary {
-	above := joined("storage/entity", "storage/repository", "storage/auditevent", "service", "pipeline", "transport", "app", "testkit")
+	above := joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "testkit")
 	llmPackages := joined("llm/model", "llm/codec", "llm/provider", "llm/stream")
-	domains := append(append([]string{}, llmPackages...), joined("observation", "observation/adapter", "analysis", "redact")...)
+	domains := append(append([]string{}, llmPackages...), joined("observation", "observation/adapter", "redact", "trajectory", "state", "threat", "policy", "decision", "evidence", "harness")...)
 	platform := joined("platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure")
-	// Analysis inspects operator-supplied URLs before they reach a dialer, so it needs the same
-	// address policy the gateway applies. Every other platform package stays off limits.
-	analysisPlatform := []string{}
+	threatPlatform := []string{}
 	for _, path := range platform {
 		if path != module+"platform/netguard" {
-			analysisPlatform = append(analysisPlatform, path)
+			threatPlatform = append(threatPlatform, path)
 		}
 	}
 	return []boundary{
 		{packagePath: "transport", forbidden: append(joined("storage/repository", "app"), bun)},
 		{packagePath: "pipeline", forbidden: append(joined("transport", "app"), gin, bun)},
 		{packagePath: "service", forbidden: append(joined("transport", "app"), gin, bun)},
-		{packagePath: "service/access", forbidden: append(joined("service/console", "service/control", "service/diagnosis", "pipeline", "transport", "app", "testkit"), gin)},
-		{packagePath: "service/console", forbidden: append(joined("service/control", "transport", "app"), gin)},
-		{packagePath: "service/control", forbidden: append(joined("service/console", "transport", "app"), gin, bun)},
-		{packagePath: "service/diagnosis", forbidden: append(joined("service/console", "service/control", "transport", "app"), gin, bun)},
-		{packagePath: "storage/repository", forbidden: append(joined("service", "pipeline", "transport", "app", "redact", "routing", "llm", "analysis", "observation", "observation/adapter", "testkit"), gin)},
-		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "llm", "redact", "analysis", "observation", "observation/adapter", "platform/routing", "testkit"), gin)},
-		{packagePath: "storage/auditevent", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "analysis", "observation", "observation/adapter", "testkit"), gin)},
+		{packagePath: "service/access", forbidden: append(joined("service/console", "service/control", "service/guard", "pipeline", "transport", "app", "testkit"), gin)},
+		{packagePath: "service/console", forbidden: append(joined("service/control", "service/guard", "transport", "app"), gin)},
+		{packagePath: "service/control", forbidden: append(joined("service/console", "service/guard", "transport", "app"), gin, bun)},
+		{packagePath: "service/guard", forbidden: append(joined("service/console", "service/control", "transport", "app"), gin, bun)},
+		{packagePath: "storage/repository", forbidden: append(joined("service", "pipeline", "transport", "app", "observation", "observation/adapter", "testkit"), gin)},
+		{packagePath: "storage/entity", forbidden: append(joined("storage/repository", "service", "pipeline", "transport", "app", "llm", "redact", "threat", "observation", "observation/adapter", "platform/routing", "testkit"), gin)},
 		{packagePath: "llm/model", forbidden: append(append([]string{}, above...), platform...)},
 		{packagePath: "llm/codec", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider", "llm/stream")...)},
 		{packagePath: "llm/provider", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/codec", "llm/stream")...)},
 		{packagePath: "llm/stream", forbidden: append(append(append([]string{}, above...), platform...), joined("llm/provider")...)},
-		{packagePath: "observation", forbidden: append(append([]string{}, above...), platform...), shallow: true},
-		{packagePath: "observation/adapter", forbidden: joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "analysis", "llm/codec", "llm/provider", "llm/stream", "testkit")},
-		{packagePath: "analysis", forbidden: append(append([]string{}, above...), append(analysisPlatform, llmPackages...)...)},
+		{packagePath: "observation", forbidden: append(append(append([]string{}, above...), platform...), joined("llm")...), shallow: true},
+		{packagePath: "observation/adapter", forbidden: joined("storage/entity", "storage/repository", "service", "pipeline", "transport", "app", "llm/codec", "llm/provider", "llm/stream", "testkit")},
+		{packagePath: "trajectory", forbidden: append(append(append([]string{}, above...), platform...), joined("llm")...)},
+		{packagePath: "state", forbidden: append(append(append([]string{}, above...), platform...), joined("llm")...)},
+		{packagePath: "threat", forbidden: append(append(joined("storage", "service", "pipeline", "transport", "app", "testkit"), platform...), append(threatPlatform, llmPackages...)...)},
+		{packagePath: "policy", forbidden: append(append(joined("storage", "service", "pipeline", "transport", "app", "testkit"), gin, bun), joined("llm")...)},
+		{packagePath: "decision", forbidden: append(append(joined("storage", "service", "pipeline", "transport", "app", "testkit"), gin, bun), joined("llm")...)},
+		{packagePath: "evidence", forbidden: append(append(joined("storage", "service", "pipeline", "transport", "app", "testkit"), gin, bun), joined("llm")...)},
+		{packagePath: "harness", forbidden: append(append(joined("storage", "service", "pipeline", "transport", "app", "testkit"), gin, bun), joined("llm")...)},
 		{packagePath: "redact", forbidden: append(append([]string{}, above...), platform...)},
 		{packagePath: "platform/config", forbidden: append(append([]string{}, above...), domains...)},
 		{packagePath: "platform/secure", forbidden: append(append([]string{}, above...), domains...)},
@@ -90,11 +93,11 @@ func TestDependencyBoundaries(t *testing.T) {
 	}
 }
 
-func TestAnalysisHasNoTransitiveLLMDependency(t *testing.T) {
-	for _, path := range []string{"./internal/analysis", "./internal/analysis/policy", "./internal/observation"} {
+func TestThreatHasNoStorageDependency(t *testing.T) {
+	for _, path := range []string{"./internal/threat", "./internal/policy", "./internal/decision"} {
 		deps := goListDependencies(t, path)
 		for _, dependency := range deps {
-			if dependency == module+"llm" || strings.HasPrefix(dependency, module+"llm/") {
+			if dependency == module+"storage" || strings.HasPrefix(dependency, module+"storage/") {
 				t.Fatalf("%s must not depend on %s, directly or transitively", path, dependency)
 			}
 		}
@@ -116,11 +119,8 @@ func TestConsoleDoesNotImportTheWireModel(t *testing.T) {
 }
 
 func TestDomainLibrariesBelongToNoLayer(t *testing.T) {
-	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/provider/builtin", "llm/stream", "observation", "observation/adapter", "analysis", "analysis/builtin", "analysis/decision", "redact", "platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure"} {
+	for _, library := range []string{"llm/model", "llm/codec", "llm/provider", "llm/provider/builtin", "llm/stream", "observation", "observation/adapter", "threat", "threat/builtin", "policy", "decision", "trajectory", "state", "evidence", "harness", "redact", "platform/config", "platform/limit", "platform/netguard", "platform/routing", "platform/secure"} {
 		imports := packageImports(t, filepath.Join("..", library), false)
-		if library == "analysis" {
-			imports = append(imports, packageImports(t, filepath.Join("..", "analysis", "policy"), false)...)
-		}
 		for _, imported := range imports {
 			for _, layer := range []string{module + "storage/entity", module + "storage/repository", module + "service", module + "transport"} {
 				if imported == layer || strings.HasPrefix(imported, layer+"/") {

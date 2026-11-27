@@ -1,5 +1,5 @@
-// Package app is the composition root: it wires the store, gateway, analysis worker, console
-// services and HTTP transports, and owns process lifecycle and dependency boundaries.
+// Package app is the composition root: it wires the store, gateway, console services and HTTP
+// transports, and owns process lifecycle and dependency boundaries.
 package app
 
 import (

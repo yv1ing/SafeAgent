@@ -5,26 +5,21 @@
  * Failures return {code, message} with a 4xx or 5xx status. Requests that change state must send X-SafeAgent-Request: 1.
  * OpenAPI spec version: 0.2.0
  */
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
-  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
-  UseMutationOptions,
-  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from '@tanstack/react-query';
 
 import type {
   ConsoleAPIError,
-  ConsoleAnalysisPage,
-  ConsoleAnalysisView,
   ConsoleCallDetailView,
   ConsoleCallPage,
   ListCallsParams,
@@ -295,205 +290,3 @@ export function useGetCall<TData = Awaited<ReturnType<typeof getCall>>, TError =
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-export const getListCallAnalysesUrl = (projectId: string, callId: string) => {
-  return `/console/api/projects/${projectId}/calls/${callId}/analyses`;
-};
-
-export const listCallAnalyses = async (
-  projectId: string,
-  callId: string,
-  options?: Parameters<typeof request>[1],
-): Promise<ConsoleAnalysisPage> => {
-  return request<ConsoleAnalysisPage>(getListCallAnalysesUrl(projectId, callId), {
-    ...options,
-    method: 'GET',
-  });
-};
-
-export const getListCallAnalysesQueryKey = (projectId: string, callId: string) => {
-  return [`/console/api/projects/${projectId}/calls/${callId}/analyses`] as const;
-};
-
-export const getListCallAnalysesQueryOptions = <
-  TData = Awaited<ReturnType<typeof listCallAnalyses>>,
-  TError = ConsoleAPIError,
->(
-  projectId: string,
-  callId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData>>;
-    request?: SecondParameter<typeof request>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getListCallAnalysesQueryKey(projectId, callId);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof listCallAnalyses>>> = ({ signal }) =>
-    listCallAnalyses(projectId, callId, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled:
-      projectId !== null && projectId !== undefined && callId !== null && callId !== undefined,
-    ...queryOptions,
-  } as UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData> & {
-    queryKey: DataTag<QueryKey, TData, TError>;
-  };
-};
-
-export type ListCallAnalysesQueryResult = NonNullable<Awaited<ReturnType<typeof listCallAnalyses>>>;
-export type ListCallAnalysesQueryError = ConsoleAPIError;
-
-export function useListCallAnalyses<
-  TData = Awaited<ReturnType<typeof listCallAnalyses>>,
-  TError = ConsoleAPIError,
->(
-  projectId: string,
-  callId: string,
-  options: {
-    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData>> &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listCallAnalyses>>,
-          TError,
-          Awaited<ReturnType<typeof listCallAnalyses>>
-        >,
-        'initialData'
-      >;
-    request?: SecondParameter<typeof request>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useListCallAnalyses<
-  TData = Awaited<ReturnType<typeof listCallAnalyses>>,
-  TError = ConsoleAPIError,
->(
-  projectId: string,
-  callId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData>> &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listCallAnalyses>>,
-          TError,
-          Awaited<ReturnType<typeof listCallAnalyses>>
-        >,
-        'initialData'
-      >;
-    request?: SecondParameter<typeof request>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useListCallAnalyses<
-  TData = Awaited<ReturnType<typeof listCallAnalyses>>,
-  TError = ConsoleAPIError,
->(
-  projectId: string,
-  callId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData>>;
-    request?: SecondParameter<typeof request>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useListCallAnalyses<
-  TData = Awaited<ReturnType<typeof listCallAnalyses>>,
-  TError = ConsoleAPIError,
->(
-  projectId: string,
-  callId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listCallAnalyses>>, TError, TData>>;
-    request?: SecondParameter<typeof request>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-  const queryOptions = getListCallAnalysesQueryOptions(projectId, callId, options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
-    queryKey: DataTag<QueryKey, TData, TError>;
-  };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getReanalyzeCallUrl = (projectId: string, callId: string) => {
-  return `/console/api/projects/${projectId}/calls/${callId}/analyses`;
-};
-
-export const reanalyzeCall = async (
-  projectId: string,
-  callId: string,
-  options?: Parameters<typeof request>[1],
-): Promise<ConsoleAnalysisView> => {
-  return request<ConsoleAnalysisView>(getReanalyzeCallUrl(projectId, callId), {
-    ...options,
-    method: 'POST',
-  });
-};
-
-export const getReanalyzeCallMutationKey = () => ['reanalyzeCall'] as const;
-
-export const getReanalyzeCallMutationOptions = <
-  TError = ConsoleAPIError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof reanalyzeCall>>,
-    TError,
-    ReanalyzeCallMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof request>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof reanalyzeCall>>,
-  TError,
-  ReanalyzeCallMutationVariables,
-  TContext
-> => {
-  const mutationKey = getReanalyzeCallMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof reanalyzeCall>>,
-    ReanalyzeCallMutationVariables
-  > = (props) => {
-    const { projectId, callId } = props ?? {};
-
-    return reanalyzeCall(projectId, callId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type ReanalyzeCallMutationResult = NonNullable<Awaited<ReturnType<typeof reanalyzeCall>>>;
-
-export type ReanalyzeCallMutationError = ConsoleAPIError;
-export type ReanalyzeCallMutationVariables = { projectId: string; callId: string };
-
-export const useReanalyzeCall = <TError = ConsoleAPIError, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof reanalyzeCall>>,
-      TError,
-      ReanalyzeCallMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof request>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof reanalyzeCall>>,
-  TError,
-  ReanalyzeCallMutationVariables,
-  TContext
-> => {
-  return useMutation(getReanalyzeCallMutationOptions(options), queryClient);
-};

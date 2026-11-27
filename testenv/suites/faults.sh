@@ -190,9 +190,8 @@ if [ -n "$sibling_call" ]; then
   sibling_detail=$(api_get "/projects/$project/calls/$sibling_call")
 fi
 if [ -n "$sibling_call" ] &&
-  jq -e '[.events[] | select(.kind == "response") | .payload.response.items[]? | .parts[]? | .text | select(contains("delivered"))] | length > 0' <<<"$sibling_detail" >/dev/null &&
-  jq -e '[.events[] | select(.kind == "response") | .payload.response.items[]? | select(.tool_call.id == "call_2")] | length == 0' <<<"$sibling_detail" >/dev/null &&
-  jq -e '[.events[] | select(.kind == "tool_call") | .payload.id | select(. == "call_2")] | length == 0' <<<"$sibling_detail" >/dev/null; then
+  jq -e '[.events[] | select(.kind == "action.proposed") | .payload.tool_call_id | select(. == "call_2")] | length == 0' <<<"$sibling_detail" >/dev/null &&
+  jq -e '[.events[] | select(.kind == "action.executed") | select(.payload.response_segment != "")] | length > 0' <<<"$sibling_detail" >/dev/null; then
   pass "the audit response excludes the held sibling"
 else
   fail "sibling audit: $sibling_detail"
@@ -252,7 +251,7 @@ if [ -n "$review_call" ] &&
   [ "$(jq -r '.items[0].state' <<<"$review_detail")" = "completed" ] &&
   [ "$(jq -r '.items[0].outcome' <<<"$review_detail")" = "blocked" ] &&
   [ "$(jq -r '.items[0].error_code' <<<"$review_detail")" = "response_blocked" ] &&
-  jq -e '[.events[] | select(.kind == "response") | .payload.blocked] | any' <<<"$(api_get "/projects/$review_project/calls/$review_call")" >/dev/null; then
+  jq -e '[.events[] | select(.kind == "action.executed") | .payload.blocked] | any' <<<"$(api_get "/projects/$review_project/calls/$review_call")" >/dev/null; then
   pass "a stream review block records a completed call with a blocked outcome"
 else
   fail "stream review audit: $review_detail"

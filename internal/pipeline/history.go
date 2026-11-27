@@ -2,72 +2,92 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 	"github.com/yv1ing/SafeAgent/internal/storage/repository"
+	"github.com/yv1ing/SafeAgent/internal/trajectory"
 )
 
-// conversation loads the calls of one conversation, oldest first, with the request items each call
-// added, its response and the id of the call that stored them. It is the only reader of ancestor
-// conversation on the request path; the adapter turns the entries into history items and origins,
-// which is the same expansion the replay path performs.
+type storedExchange struct {
+	Request  *model.Request
+	Response *model.Response
+}
+
+// conversation loads the calls of one conversation, oldest first, from the canonical request and
+// response segments referenced by their trajectory events.
 func (pipeline *Pipeline) conversation(ctx context.Context, callID string) ([]adapter.Ancestor, bool, error) {
 	chain, err := pipeline.repository.CallChain(ctx, callID)
 	if err != nil {
 		return nil, false, err
 	}
+	if len(chain) == 0 {
+		return nil, false, repository.ErrNotFound
+	}
 	ids := make([]string, len(chain))
+	projectID := chain[0].ProjectID
 	for index, call := range chain {
 		ids[index] = call.ID
 	}
-	events, err := pipeline.repository.EventsOfKinds(ctx, ids, auditevent.KindRequest, auditevent.KindResponse)
+	events, err := pipeline.repository.EventsOfCalls(ctx, projectID, ids)
 	if err != nil {
 		return nil, false, err
 	}
-	requests := map[string]auditevent.Request{}
-	responses := map[string]auditevent.Response{}
-	for _, event := range events {
-		decoded, err := auditevent.Decode(event.Kind, event.Payload)
-		if err != nil {
-			return nil, false, err
-		}
+	exchanges := map[string]storedExchange{}
+	for index := range events {
+		event := &events[index]
 		switch event.Kind {
-		case auditevent.KindRequest:
-			if decoded.Request != nil {
-				requests[event.CallID] = *decoded.Request
+		case trajectory.KindActionProposed:
+			proposed, err := trajectory.DecodePayload[trajectory.ActionProposed](event)
+			if err != nil || proposed.ActionType != trajectory.ActionModel || proposed.RequestSegment == "" {
+				continue
 			}
-		case auditevent.KindResponse:
-			if decoded.Response != nil {
-				responses[event.CallID] = *decoded.Response
+			payload, _, err := pipeline.repository.SegmentContent(ctx, event.TrajectoryID, proposed.RequestSegment)
+			if err != nil {
+				continue
 			}
+			request := new(model.Request)
+			if err := json.Unmarshal(payload, request); err != nil {
+				continue
+			}
+			exchange := exchanges[event.CallID]
+			exchange.Request = request
+			exchanges[event.CallID] = exchange
+		case trajectory.KindActionExecuted:
+			executed, err := trajectory.DecodePayload[trajectory.ActionExecuted](event)
+			if err != nil || executed.ActionType != trajectory.ActionModel || executed.ResponseSegment == "" {
+				continue
+			}
+			payload, _, err := pipeline.repository.SegmentContent(ctx, event.TrajectoryID, executed.ResponseSegment)
+			if err != nil {
+				continue
+			}
+			response := new(model.Response)
+			if err := json.Unmarshal(payload, response); err != nil {
+				continue
+			}
+			exchange := exchanges[event.CallID]
+			exchange.Response = response
+			exchanges[event.CallID] = exchange
 		}
 	}
 	truncated := chain[0].ParentCallID != "" || chain[0].MessageOffset > 0
 	entries := make([]adapter.Ancestor, 0, len(chain))
 	for _, call := range chain {
-		request, found := requests[call.ID]
-		if !found {
+		exchange, found := exchanges[call.ID]
+		if !found || exchange.Request == nil {
 			return nil, false, repository.ErrNotFound
 		}
-		entry := adapter.Ancestor{Found: true, CallID: call.ID, Request: request}
-		if response, found := responses[call.ID]; found {
-			copied := response
-			entry.Response = &copied
-		}
-		entries = append(entries, entry)
+		entries = append(entries, adapter.Ancestor{Found: true, CallID: call.ID, Request: *exchange.Request, Response: exchange.Response})
 	}
 	entries, trimmed := adapter.TrimAncestors(entries)
 	return entries, truncated || trimmed, nil
 }
 
-// historyOf returns the flattened ancestor conversation of a call together with one origin per
-// item. A non-empty truncated flag means the history is incomplete and a continuation must not
-// pretend otherwise.
 func (pipeline *Pipeline) historyOf(ctx context.Context, callID string) ([]model.Item, []observation.Locator, bool, error) {
 	entries, truncated, err := pipeline.conversation(ctx, callID)
 	if err != nil {
@@ -83,9 +103,6 @@ func (pipeline *Pipeline) historyOf(ctx context.Context, callID string) ([]model
 	return history, origins, false, nil
 }
 
-// attachHistory expands previous_response_id into the stored conversation so the upstream receives
-// one self-contained request. It returns the parent call and the origins aligned with the leading
-// items the client did not add itself.
 func (pipeline *Pipeline) attachHistory(ctx context.Context, agentKeyID string, request *model.Request) (*entity.Call, int, []observation.Locator, *model.Error) {
 	parent, err := pipeline.repository.CallByResponseID(ctx, agentKeyID, request.PreviousResponseID)
 	if err != nil {
@@ -114,31 +131,43 @@ func (pipeline *Pipeline) attachHistory(ctx context.Context, agentKeyID string, 
 			request.Tools = settings.Tools
 		}
 		if request.Instructions == "" {
-			request.Instructions = settings.Params.Instructions
+			request.Instructions = settings.Instructions
 		}
 	}
 	return parent, offset, origins, nil
 }
 
-// parentSettings returns the effective tools and instructions of a stored call. A continuation that
-// names a previous response but repeats only the new input still needs the tools and system prompt
-// the earlier turn used.
-func (pipeline *Pipeline) parentSettings(ctx context.Context, callID string) (auditevent.Request, bool) {
-	events, err := pipeline.repository.EventsOfKinds(ctx, []string{callID}, auditevent.KindRequest)
-	if err != nil || len(events) == 0 {
-		return auditevent.Request{}, false
+func (pipeline *Pipeline) parentSettings(ctx context.Context, callID string) (*model.Request, bool) {
+	call, err := pipeline.repository.CallChain(ctx, callID)
+	if err != nil || len(call) == 0 {
+		return nil, false
 	}
-	decoded, err := auditevent.Decode(events[len(events)-1].Kind, events[len(events)-1].Payload)
-	if err != nil || decoded.Request == nil {
-		return auditevent.Request{}, false
+	events, err := pipeline.repository.EventsOfCalls(ctx, call[0].ProjectID, []string{callID})
+	if err != nil {
+		return nil, false
 	}
-	return *decoded.Request, true
+	for index := len(events) - 1; index >= 0; index-- {
+		event := &events[index]
+		if event.Kind != trajectory.KindActionProposed {
+			continue
+		}
+		proposed, err := trajectory.DecodePayload[trajectory.ActionProposed](event)
+		if err != nil || proposed.RequestSegment == "" {
+			continue
+		}
+		payload, _, err := pipeline.repository.SegmentContent(ctx, event.TrajectoryID, proposed.RequestSegment)
+		if err != nil {
+			continue
+		}
+		request := new(model.Request)
+		if err := json.Unmarshal(payload, request); err != nil {
+			continue
+		}
+		return request, true
+	}
+	return nil, false
 }
 
-// link finds the call this one continues when the client repeats its history: first by the id of
-// the latest tool result, then by the fingerprint of the history the client repeated. The returned
-// offset is the number of leading items the parent conversation already holds; only a verified
-// prefix is returned, so recording the tail never drops what the client sent.
 func (pipeline *Pipeline) link(ctx context.Context, identity *Identity, request *model.Request) (*entity.Call, []observation.Locator, int, string) {
 	if id := latestToolResult(request); id != "" {
 		if found, err := pipeline.repository.CallByToolCall(ctx, identity.Project.ID, identity.AgentKey.ID, id); err == nil {
@@ -165,4 +194,44 @@ func latestToolResult(request *model.Request) string {
 		}
 	}
 	return ""
+}
+
+func (pipeline *Pipeline) storedExchange(ctx context.Context, identity *Identity, call *entity.Call) (*storedExchange, error) {
+	events, err := pipeline.repository.EventsOfCalls(ctx, identity.Project.ID, []string{call.ID})
+	if err != nil {
+		return nil, err
+	}
+	exchange := new(storedExchange)
+	for index := range events {
+		event := &events[index]
+		switch event.Kind {
+		case trajectory.KindActionProposed:
+			proposed, err := trajectory.DecodePayload[trajectory.ActionProposed](event)
+			if err != nil || proposed.RequestSegment == "" {
+				continue
+			}
+			payload, _, err := pipeline.repository.SegmentContent(ctx, event.TrajectoryID, proposed.RequestSegment)
+			if err != nil {
+				continue
+			}
+			exchange.Request = new(model.Request)
+			if err := json.Unmarshal(payload, exchange.Request); err != nil {
+				exchange.Request = nil
+			}
+		case trajectory.KindActionExecuted:
+			executed, err := trajectory.DecodePayload[trajectory.ActionExecuted](event)
+			if err != nil || executed.ResponseSegment == "" {
+				continue
+			}
+			payload, _, err := pipeline.repository.SegmentContent(ctx, event.TrajectoryID, executed.ResponseSegment)
+			if err != nil {
+				continue
+			}
+			exchange.Response = new(model.Response)
+			if err := json.Unmarshal(payload, exchange.Response); err != nil {
+				exchange.Response = nil
+			}
+		}
+	}
+	return exchange, nil
 }

@@ -1,173 +1,112 @@
-# Model
+# Trajectory model
 
-`internal/observation` is the protocol-neutral model of one call. Nothing in it knows a wire format. `internal/observation/adapter` is the only adapter between the canonical request/response and this model; the online gateway and the replay path both build traces through it, so an online verdict and a stored finding describe the same nodes.
+## Unit of security
 
-```mermaid
-flowchart TB
-    Protocol["canonical request or response"] --> Obs["adapter: item translation"]
-    Obs --> Origin["origin + trust"]
-    Obs --> Call["tool call + normalized target"]
-    Call --> Sink["sink inference"]
-    Origin --> Finding["deterministic finding"]
-    Sink --> Finding
-    Finding --> Axes["axes derived from code, origin, sink"]
-    Origin --> Flow["flow: source to later sink"]
-    Sink --> Flow
-    Finding --> Verdict["coverage-aware verdict"]
-    Model["optional model labels"] --> Verdict
-    Flow --> Reports["call view, risk view, trajectory"]
-    Finding --> Reports
-```
+A **trajectory** is one delegated task, from `trajectory.start` to `trajectory.end`. It can contain hundreds of model calls and tool calls. A **call** is an interval inside it, opened by `action.proposed` and closed by `action.executed` or a terminal `gate.decision`. There is no call row as the source of truth.
 
-## Trace
+A **state transfer** is the atomic audit event: content entering the context, a compaction, a memory write or read, an action proposal, an approval, a rollback or a delegation. The event log is the only source of truth; `calls`, `findings`, `trajectory_states`, `edges` and `trajectory_summaries` are derived.
 
-A trace is one call as the detectors and the policy see it:
+## Event record
 
-| Field | Meaning |
+Every event carries:
+
+- identity: `id`, `trajectory_id`, contiguous `seq`, `kind`, `boundary`, `actor`, `principal`;
+- optional `call_id` and `action_id`, which anchor projections without becoming separate sources;
+- typed `inputs` and `outputs` (`segment`, `role`);
+- optional `auth` (capability, approval, invocation hash, execution count, lease);
+- typed `checks` and `obligations`;
+- optional `snapshot` and `capture`;
+- a kind-specific `payload`;
+- `prev_hash` and `hash`.
+
+The typed fields are hashed together with the canonical payload. A consumer may ignore a payload kind it does not know, but must not infer a gate decision from payload text alone.
+
+## Boundaries and kinds
+
+| Boundary | Kinds |
 | --- | --- |
-| `ID` | trace identity; online it is the call id |
-| `Task` and `TaskShown` | the leading instruction text and its shown representation |
-| `Turns` | the ordered turns of items |
-| `Tools` | the declared tool specs |
-| `Steps` | the ordered tool chain rebuilt from the turns by `Trace.RebuildSteps` |
-| `Outcome` | terminal state, error code and finish reason |
-| `Context` | request metadata detectors may need, such as `tool_choice`, `parallel_tool_calls` and `history_truncated`; part of the input hash |
-| `Principal` | the authenticated project, agent key, role and trust level |
-| `PreviousCallID` | the client's `previous_response_id` or the linked parent |
+| `root` | `trajectory.start`, `trajectory.end` |
+| `ingress` | `observation` |
+| `context` | `context.assemble`, `context.compact` |
+| `memory` | `memory.read`, `memory.write`, `memory.consolidate` |
+| `action` | `action.proposed`, `action.authorized`, `action.executed`, `external.effect`, `gate.decision`, `approval.*`, `delegation.spawn` |
+| `recovery` | `rollback`, `delegation.return` |
+| `control` | `tool.registry.change`, `policy.change`, `model.change`, `capture.heartbeat` |
 
-A `Turn` has a role and ordered `Item`s. An `Item` is text, reasoning, refusal, tool call, tool result, media or a native provider object; a tool result carries nested items.
+`checkpoint` exists as a kind for a harness that records a checkpoint reference, but the gateway writes checkpoints to their own table and does not emit it.
 
-`PreviousCallID` lets the schema detector avoid reporting a tool result as unmatched when the call is a continuation. `Context` is displayable and hashed, but it is never a policy principal: only the authenticated values enter `Principal`.
+`action.proposed` carries the call metadata (operation, purpose, lane, format, public model) for a model call, or the tool name, sink, target, arguments hash, input segment ids, required capabilities and invocation hash for a tool call. Provider attempts are `action.proposed` with `action_type=provider_attempt`; each gets its own `action.executed`.
 
-A `Trace` built for a diagnosis contains the call's own items plus the leading ancestor history within its bounded budget; `Rebuild.Own` in `internal/service/diagnosis` keeps only the items the call stored. See [Analysis](analysis.md) for the rebuild contract.
+A tool call that passes the action gate emits `action.authorized`. It carries the deciding approval, if any, and the invocation hash; this is the authorization edge a later execution is checked against.
 
-## Origin, trust and sink
+## Segments
 
-Every item records where its content entered:
+A segment is a content-addressed piece of text or JSON. The raw bytes live in `blobs`, encrypted with the instance key; a segment row records the media type, size, integrity and confidentiality labels, and the id of the event that first produced it. The canonical request and response of a call are stored as JSON segments bound to the proposal and execution event ids, so history and stored-response retrieval do not copy content into every event.
 
-| Origin                | Meaning                                    |
-| --------------------- | ------------------------------------------ |
-| `system`, `developer` | instructions supplied with the request     |
-| `user`                | the task text                              |
-| `assistant`           | the model's own text and tool calls        |
-| `tool_result`         | output returned by a tool                  |
-| `tool_description`    | a declared tool's description              |
-| `environment`         | a coverage or analysis note, not a message |
+Labels travel with segments:
 
-`Trust` is `trusted`, `untrusted` or `unknown`. Tool results and tool descriptions are untrusted: they are data even when their text looks like an instruction.
+- integrity: `trusted`, `untrusted`, `unknown`;
+- confidentiality: `public`, `private`, `user_identity`.
 
-Every tool call records a `Sink`, inferred from the tool name, its arguments and the normalized target:
+Tool descriptions and tool results are untrusted. User content is user-identity. System and developer content is private. A label can only become stronger, never silently weaker.
 
-| Sink | Inferred from |
-| --- | --- |
-| `external_send` | a URL or host target, or a send/upload/post style name outside a file or command target |
-| `shell_exec` | a command target, or a shell/exec style name |
-| `file_write` | a file target on a write/save/delete style tool |
-| `file_read` | a file target on any other tool |
-| `credential_access` | a secret/credential/token style name |
-| `payment` | a pay/transfer/refund style name |
-| `none` | no arguments and no recognized capability |
-| `unknown` | arguments exist but no destination can be identified |
+## Edges
 
-Name matching is token based: `truncate` is not read as `run`. The inference is a heuristic, not a guarantee. A policy that needs a strong claim matches findings instead of relying on the sink alone.
+`edges` is the only place causality is expressed. The writer currently emits `derived_from`, `used_data` and `authorized_by`; `executed_by`, `delegated_to`, `supersedes`, `revoked_by` and `checkpoint_of` are defined for adapters but not produced by the online path. Consumers must not infer causality from event ordering or timestamps.
 
-`ToolCall.Target`, `ToolCall.Input` and `ToolSpec.Parameters` hold the raw values. Their `Shown` counterparts (`TargetShown`, `InputShown`, `ParametersShown`) are filled when redaction changed the value; a tool description also carries its redaction spans. Consumers that may expose data to a project member, a policy rule or a third-party model use the shown value. The adapter normalizes a destination in `TargetOf` and its siblings: a URL keeps its host and a cleaned path, with the query dropped, so a random nonce cannot create a new graph node.
+## State
 
-## Item identity
+`state.State` is the reducer output:
 
-`observation.Locator` is the stable identity of one item, part or reference:
+- goal; compaction constraint losses appear as obligations, while a general constraint list is not populated by the current recorder;
+- labels by segment;
+- capabilities and their delegation parent;
+- obligations (`pending`, `satisfied`, `violated`, `expired`);
+- approvals and execution counts;
+- actions and their status;
+- memory entries and authority;
+- risk score and max severity;
+- coverage counters, gaps and threshold;
+- policy and redaction-rule versions in force.
 
-| Field     | Meaning                                                                    |
-| --------- | -------------------------------------------------------------------------- |
-| `CallID`  | the call that stored the item; an ancestor item keeps the ancestor call id |
-| `Section` | `request`, `response`, `instructions`, `params` or `tools`                 |
-| `Ordinal` | stored item ordinal inside the section                                     |
-| `Path`    | nested part, for example `tool_call.arguments`                             |
-| `ToolID`  | logical tool call id when the item belongs to one                          |
+The reducer is pure. The same event range produces the same state hash; `trajectory_states` stores the full JSON, the head event and the state hash.
 
-An ancestor item keeps the ancestor call id, so a finding, a redaction hit and a trajectory node can name the same item even when the trace was expanded with history. The online path writes the call id and ordinal; the replay path reads the stored values, which is why both produce the same identity. `SectionInstructions` names the instruction item prepended to the turns; `SectionParams` and `SectionTools` name request parameters and tool declarations, which are stored outside the turn list.
+## Coverage
 
-## Shown values and value identity
+Coverage is measured, not assumed:
 
-`observation.Value` carries both representations of one text:
+- every `action.proposed` expects an `action.executed` or a terminal gate decision;
+- every observation, context assembly, memory transfer, rollback and delegation boundary is counted when its event is present;
+- `capture.heartbeat` reports recorder gaps, which add to the denominator;
+- the project has a `coverage_threshold`.
 
-| Field             | Meaning                                                         |
-| ----------------- | --------------------------------------------------------------- |
-| `Raw`             | the text as the client or upstream exchanged it                 |
-| `Shown`           | the redacted text a project member may see                      |
-| `Redactions`      | `Span`s over `Raw`: start, end, label, value id and secret flag |
-| `ShownRedactions` | the same occurrences over `Shown`                               |
+The stored coverage is the trajectory-wide value. A gate that runs while a call is still open uses `CoverageForCall`, which removes that call's own unfinished actions from the denominator; an action left open by an earlier call still lowers it. A trajectory below the threshold has a `capture_gap` finding, cannot be reported `safe`, and a side-effecting tool needs an approval before it can run.
 
-A shown span carries `Start`, `End`, `Label`, `Action` and `ValueID`. `ValueID` is the identity of a masked value: an HMAC over the instance secret, the project namespace, the rule label and the matched text. It is stable for the whole project, so the same value keeps the same id in every call and the console can deduplicate occurrences without reading the rules again. The id is also the digest used by the placeholder (`[LABEL_xxxxxxxx]`, longer on a short-digest collision); the raw value is never needed to rebuild the view. The online redactor and the replay path derive a placeholder the same way, so applying the stored hits to a stored payload reproduces the shown view the call actually saw.
+## Gates
 
-Redaction hits are relocated onto the items a call stores: a hit on a request item keeps that item's section, ordinal and path, and a hit on an ancestor item is dropped because the ancestor recorded it when it was admitted. A call therefore reports only the values it introduced, and `calls.redaction_values` is the number of distinct value ids in that call. The conversation-level redaction index groups stored hits by value id; it is a projection over the same per-call records, not an accumulated list.
+| Gate     | Event family                                               |
+| -------- | ---------------------------------------------------------- |
+| ingress  | observation, context assembly, tool results                |
+| action   | action proposal, authorization, execution, external effect |
+| release  | response leaving the boundary                              |
+| recovery | rollback and delegation return                             |
 
-## Finding
+A gate decision is an event (`gate.decision`). It records the gate, action, rule or invariant, severity, reason, checks and whether it terminates the call. A deterministic gate may only read the current state, the current event, the observation trace and a policy compiled from the control plane; it may not call a codec or a service. The optional decision-model veto runs after the deterministic action gate and can only add a block.
 
-A deterministic finding has these fields:
+The online pipeline enforces ingress, action and release; recovery is reduced and projected. Gate outcomes, policy phases and failure semantics are in [Policy](policy.md); the verdict and invariants are in [Threat](threat.md).
 
-| Field | Meaning |
-| --- | --- |
-| `Fingerprint` | hash of detector, code, origin, sink, semantic location (including the locator path) and match ordinal |
-| `Code` | catalogue code such as `prompt_injection` |
-| `Origin`, `Trust`, `Sink` | the source, trust and destination axes the code applies to |
-| `Axes` | the three-axis labels: risk source, failure mode and harm |
-| `Severity` | `low`, `medium` or `high` |
-| `Confidence` | how strongly the detector asserts the code |
-| `Detector` | detector id and version |
-| `Evidence` | the byte ranges and display-safe quotes supporting the finding |
-| `Attribution` | turn, item, tool call and locator the finding is attributed to |
-| `Flow` | the source-to-sink edge when the finding is backed by one |
+## Identifiers
 
-The fingerprint does not depend on a byte offset, a timestamp or an analysis id, so re-analysing the same call keeps the same identities and two items with the same code do not collapse into one finding. Evidence and attribution carry the `Locator` of the item they point at; `Turn` and `Item` remain for detector logic.
-
-An `Evidence` entry records the view it indexes (`raw` or `redacted`), its byte range, and a quote that is always safe to display: a match overlapping a redacted span is stored as `[redacted]`. Nested tool arguments carry their shown text separately, so evidence never quotes a value that the call view hides.
-
-## Flow
-
-A flow is one edge from external content to a tool call that can act on it, computed inside one call:
-
-| Field | Meaning |
-| --- | --- |
-| `SourceTurn`, `SourceItem` | the position the detector matched |
-| `SourceLocator` | the stored identity of the source item, resolved by diagnosis before persisting |
-| `SourceOrigin`, `SourcePath` | where the content entered and its path inside the item |
-| `SinkToolCallID` | the tool call that can act on the content |
-| `Sink` | the destination class of that tool call |
-| `Relation` | `value_reuse` or `instruction_follow` |
-| `ContentHash` | hash of the matched source excerpt; the excerpt itself is not stored |
-| `Confidence` | the detector's confidence in the edge |
-
-The detector looks back over tool output and tool descriptions, extracts specific identifiers (URLs, paths, e-mail addresses, hostnames and mixed letter/digit tokens of at least eight bytes) and compares them with the arguments of each later side-effecting tool call. A shared specific token produces `value_reuse`; a token taken from the sentence that carries an injected instruction produces `instruction_follow`.
-
-Co-occurrence alone does not create a relation. The comparison count is capped at 5,000 pairs and the relation scan stops at 200 findings. Either cap adds an `analysis_incomplete` finding; the detector does not report an empty relation set as complete.
-
-## Axes
-
-The full AgentDoG taxonomy is kept: eight risk sources, fourteen failure modes and ten harms. The deterministic mapping is narrower than the taxonomy:
-
-- `prompt_injection` and `hidden_instructions` derive the risk source from their origin;
-- `untrusted_value_reuse` and `external_instruction_followed` derive it from their origin and take the harm from the sink;
-- every other code has a fixed mechanism and harm, and an inherent-agent risk source.
-
-An axis that cannot be justified is left empty. `analysis_incomplete` carries no axes: it is a coverage statement, not a risk claim. The decision model separately labels the whole trajectory; its answers are stored beside the findings and never overwrite them.
-
-## Principal
-
-`Principal` contains only values the gateway knows after authentication:
-
-| Field        | Meaning                              |
-| ------------ | ------------------------------------ |
-| `ProjectID`  | the project the agent key belongs to |
-| `AgentKeyID` | the authenticated agent key          |
-| `Role`       | the key's role                       |
-| `TrustLevel` | the key's trust level                |
-
-Client-supplied metadata is not copied into the principal. It is available in `Trace.Context` for display and hashing. The policy CEL environment exposes the principal, tool, target, tool chain, findings and phase; it has no `metadata` or `context` variable, so a rule cannot be satisfied by a value the client writes.
+- trajectory ids: `trj_<random>`;
+- event ids: `evt_<random>`;
+- approval ids: `apv_<random>`, checkpoint ids: `ckp_<random>`;
+- segment and blob ids: SHA-256 of the content;
+- invocation hash: SHA-256 of the tool name, exact arguments and target;
+- event hash: HMAC-SHA256 over the canonical typed record and `prev_hash`.
 
 ## Related
 
-- [Analysis](analysis.md)
+- [Threat](threat.md)
 - [Policy](policy.md)
 - [Storage](storage.md)
-- [Agent guide](README.md)
+- [Audit](audit.md)

@@ -14,6 +14,11 @@ export interface ConsoleProjectCreate {
   auxiliary_retention_days?: number | null;
   /** @nullable */
   concurrency?: number | null;
+  /**
+   * Minimum observed-boundary coverage for a safe verdict
+   * @nullable
+   */
+  coverage_threshold?: number | null;
   /** @nullable */
   daily_token_quota?: number | null;
   /**

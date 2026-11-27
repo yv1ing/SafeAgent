@@ -21,19 +21,6 @@ if ! curl -fsS "$base/health" >/dev/null; then
   exit 1
 fi
 
-wait_queue() {
-  local pending="unknown"
-  for _ in $(seq 1 150); do
-    pending=$(lab_compose exec -T database \
-      psql -U safeagent -d safeagent -tAc \
-      "SELECT count(*) FROM analysis_jobs WHERE state IN ('pending','running')" 2>/dev/null | tr -d '[:space:]')
-    [ "$pending" = "0" ] && return 0
-    sleep 2
-  done
-  echo "the analysis queue did not drain; wait for the worker before measuring" >&2
-  return 1
-}
-
 mkdir -p "$out"
 cd "$LAB_ROOT"
 GOFLAGS="${GOFLAGS:--buildvcs=false}" go build -trimpath -o "$out/loadgen" ./testenv/load
@@ -86,9 +73,7 @@ for format in "${formats[@]}"; do
     baseline="$out/baseline-$name.json"
     gateway="$out/gateway-$name.json"
     printf '\n=== %s native\n' "$name"
-    wait_queue
     measure "baseline-$name" "$format" "$direct_url" "$direct_model" "$stream" "$direct_key" "$baseline" "$requests" "$no_thinking"
-    wait_queue
     measure "gateway-$name" "$format" "$(gateway_endpoint "$format" "$route_name" "$stream")" "$route_name" "$stream" "$SAFEAGENT_MATRIX_KEY" "$gateway" "$requests" "$no_thinking"
     if ! "$out/loadgen" compare "$baseline" "$gateway"; then
       fail "native comparison $name"

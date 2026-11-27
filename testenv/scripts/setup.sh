@@ -119,7 +119,6 @@ max_attempts = 3
 shutdown_seconds = 30
 operation_log_days = 365
 tool_hold_bytes = 1048576
-analysis_concurrency = 2
 EOF
 : > "$runtime/gateway.log"
 "$LAB/scripts/restart-gateway.sh"

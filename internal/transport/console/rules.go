@@ -5,10 +5,10 @@ import (
 	"slices"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yv1ing/SafeAgent/internal/analysis"
 	"github.com/yv1ing/SafeAgent/internal/redact"
 	service "github.com/yv1ing/SafeAgent/internal/service/console"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/threat"
 )
 
 type RuleView struct {
@@ -107,8 +107,8 @@ func detectorView(value *redact.Detector) DetectorView {
 }
 
 func findingCodes() []FindingCodeView {
-	codes := make([]FindingCodeView, 0, len(analysis.CodeCatalogue))
-	for _, definition := range analysis.CodeCatalogue {
+	codes := make([]FindingCodeView, 0, len(threat.CodeCatalogue))
+	for _, definition := range threat.CodeCatalogue {
 		origins := make([]string, 0, len(definition.Origins))
 		for _, origin := range definition.Origins {
 			origins = append(origins, string(origin))
@@ -119,7 +119,7 @@ func findingCodes() []FindingCodeView {
 		})
 	}
 	slices.SortFunc(codes, func(left, right FindingCodeView) int {
-		if rank := analysis.SeverityRank(right.Severity) - analysis.SeverityRank(left.Severity); rank != 0 {
+		if rank := threat.SeverityRank(right.Severity) - threat.SeverityRank(left.Severity); rank != 0 {
 			return rank
 		}
 		return cmp.Compare(left.Code, right.Code)

@@ -14,8 +14,8 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
 	"github.com/yv1ing/SafeAgent/internal/platform/routing"
 	"github.com/yv1ing/SafeAgent/internal/redact"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
+	"github.com/yv1ing/SafeAgent/internal/threat"
 )
 
 // run walks the candidate list until one produces a response. Each candidate is admitted by its
@@ -74,23 +74,22 @@ func (state *call) try(channel *entity.Channel, admission routing.Admission) out
 		}
 		state.attempts++
 		state.recorder.Call().Attempts = state.attempts
-		state.recorder.Event(auditevent.KindAttempt, auditevent.Attempt{
-			ChannelID: channel.ID, ChannelName: channel.Name, ModelID: candidate.Target.ModelID,
-			UpstreamModel: candidate.Target.UpstreamModel, Format: candidate.Target.Format, KeyID: key.ID,
-		})
+		attemptAction := state.recorder.AttemptProposed(channel.ID, channel.Name, candidate.Target.ModelID, candidate.Target.UpstreamModel, candidate.Target.Format, state.attempts)
 		result, failure := state.attempt(channel, candidate, key)
 		switch result {
 		case attemptCompleted:
+			state.recorder.AttemptExecuted(attemptAction, "")
 			selector.RecordSuccess(state.stickyKey, admission)
 			return outcome{done: true}
 		case attemptEnded:
+			if failure != nil {
+				state.recorder.AttemptExecuted(attemptAction, failure.Code)
+			}
 			state.judge(admission, failure)
 			return outcome{done: true}
 		}
 		last = failure
-		state.recorder.Event(auditevent.KindAttemptFailed, auditevent.AttemptFailure{
-			Code: failure.Code, Class: string(failure.Class), ChannelID: channel.ID, KeyID: key.ID,
-		})
+		state.recorder.AttemptExecuted(attemptAction, failure.Code)
 		if failure.Class != model.ClassAuth && failure.Class != model.ClassRateLimit {
 			break
 		}
@@ -125,6 +124,10 @@ func (state *call) attempt(channel *entity.Channel, candidate routing.Candidate,
 	prepared, failure := state.prepare(candidate)
 	if failure != nil {
 		return attemptFailed, failure
+	}
+	state.recorder.Flush(ctx)
+	if state.recorder.WriteFailure() != nil {
+		return attemptFailed, internal("audit_unavailable", "The attempt could not be recorded.")
 	}
 	upstream, failure, field := state.openUpstream(ctx, prepared, key)
 	if field != "" && upstream == nil {
@@ -293,7 +296,7 @@ func (state *call) endSessionFailure(session *stream.Session, upstream *upstream
 				return state.blockReviewedStream(session, upstream, failure)
 			}
 			session.Close()
-			state.recordBlocked(auditevent.Decision{Action: "block", Blocked: true, Reason: failure.Code})
+			state.recorder.GateDecision("release", "block", true, false, "", failure.Code, threat.SeverityHigh, failure.Message, checksFromFindings(state.findings))
 			state.finish(failure)
 			return attemptEnded, failure
 		case failure.Class == model.ClassCancelled:
@@ -305,7 +308,7 @@ func (state *call) endSessionFailure(session *stream.Session, upstream *upstream
 		return attemptFailed, failure
 	}
 	if failure.Class == model.ClassPolicy {
-		state.recordBlocked(auditevent.Decision{Action: "block", Blocked: true, Reason: failure.Code})
+		state.recorder.GateDecision("release", "block", true, false, "", failure.Code, threat.SeverityHigh, failure.Message, checksFromFindings(state.findings))
 		state.failStream(session, upstream, failure)
 		return attemptEnded, failure
 	}
@@ -328,18 +331,24 @@ func (state *call) toolGate(item model.Item) *model.Error {
 	if spec, found := trace.ToolSpecByName(item.ToolCall.Name); found {
 		tags = spec.Tags
 	}
-	if refusal := state.evaluateToolCall(trace, *translated.ToolCall, tags); refusal != nil {
-		state.recorder.ToolCall(auditevent.ToolCall{
-			ID: item.ToolCall.ID, Kind: string(item.ToolCall.Kind), Name: item.ToolCall.Name,
-			Arguments: item.ToolCall.Arguments, Blocked: true,
-		})
-		return refusal
+	target := translated.ToolCall.Target.Value
+	if translated.ToolCall.TargetShown.Kind != "" {
+		target = translated.ToolCall.TargetShown.Value
 	}
-	state.recorder.ToolCall(auditevent.ToolCall{
-		ID: item.ToolCall.ID, Kind: string(item.ToolCall.Kind), Name: item.ToolCall.Name,
-		Arguments: item.ToolCall.Arguments,
-	})
-	return nil
+	actionID := "act_tool_" + state.record.ID + "_" + item.ToolCall.ID
+	state.recorder.SetAction(actionID)
+	defer state.recorder.ResetAction()
+	state.recorder.ToolCall(item.ToolCall.ID, string(item.ToolCall.Kind), item.ToolCall.Name, item.ToolCall.Arguments, target, string(translated.ToolCall.Sink), state.recorder.InputSegments(), false)
+	state.approvalID = ""
+	refusal := state.evaluateToolCall(trace, *translated.ToolCall, tags)
+	if refusal == nil {
+		state.recorder.Authorize(actionID, state.approvalID, toolInvocationHash(*translated.ToolCall))
+	}
+	state.recorder.Flush(state.ctx)
+	if state.recorder.WriteFailure() != nil {
+		return internal("audit_unavailable", "The tool decision could not be recorded.")
+	}
+	return refusal
 }
 
 func (state *call) recordFirstToken() {
@@ -347,9 +356,7 @@ func (state *call) recordFirstToken() {
 	if call.FirstTokenMilliseconds > 0 {
 		return
 	}
-	elapsed := max(int(time.Since(state.started).Milliseconds()), 1)
-	call.FirstTokenMilliseconds = elapsed
-	state.recorder.Event(auditevent.KindFirstToken, auditevent.FirstToken{Milliseconds: int64(elapsed)})
+	call.FirstTokenMilliseconds = max(int(time.Since(state.started).Milliseconds()), 1)
 }
 
 type scopeRestorers struct {

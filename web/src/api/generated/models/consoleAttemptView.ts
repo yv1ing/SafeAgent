@@ -10,18 +10,12 @@ import type { ConsoleAttemptViewResult } from './consoleAttemptViewResult.ts';
 export interface ConsoleAttemptView {
   channel_id: string;
   channel_name: string;
-  class: string;
   code: string;
   duration_ms: number;
-  end_ms: number;
   first_token_ms: number;
   format: string;
   index: number;
-  key_id: string;
   model_id: string;
-  /** A later attempt of the same call succeeded */
-  recovered: boolean;
   result: ConsoleAttemptViewResult;
-  start_ms: number;
   upstream_model: string;
 }

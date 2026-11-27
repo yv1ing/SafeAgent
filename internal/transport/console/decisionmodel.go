@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	access "github.com/yv1ing/SafeAgent/internal/service/access"
-	diagnosis "github.com/yv1ing/SafeAgent/internal/service/diagnosis"
+	"github.com/yv1ing/SafeAgent/internal/service/guard"
 	"github.com/yv1ing/SafeAgent/internal/storage/entity"
 )
 
@@ -53,7 +53,7 @@ func decisionModelView(value *entity.DecisionModelConfig) DecisionModelView {
 
 func (console *Console) registerDecisionModel() {
 	console.add("GET", "/projects/{project_id}/decision-model", "getDecisionModel", projectPath{}, DecisionModelView{}, func(ctx *gin.Context, identity *Identity) (any, error) {
-		stored, err := console.Analysis.StoredDecisionConfig(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"))
+		stored, err := console.Guard.StoredDecisionConfig(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"))
 		if err != nil {
 			return nil, err
 		}
@@ -69,9 +69,9 @@ func (console *Console) registerDecisionModel() {
 			TimeoutSeconds: input.TimeoutSeconds, AllowPrivate: input.AllowPrivate, UseRaw: input.UseRaw,
 			DailyTokenBudget: input.DailyTokenBudget, AuthorizeBelow: input.AuthorizeBelow,
 		}
-		saved, err := console.Analysis.SaveDecisionConfig(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), config, input.APIKey)
+		saved, err := console.Guard.SaveDecisionConfig(ctx.Request.Context(), identity.actor(), ctx.Param("project_id"), config, input.APIKey)
 		if err != nil {
-			if errors.Is(err, diagnosis.ErrInvalidDecisionConfig) {
+			if errors.Is(err, guard.ErrInvalidDecisionConfig) {
 				return nil, access.Invalid("invalid_decision_model")
 			}
 			return nil, err

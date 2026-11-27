@@ -1,34 +1,41 @@
-# Roadmap
-
-This page describes HEAD: what works, which limits are deliberate, and what is not built. It is a status page, not a plan.
+# Roadmap and current coverage
 
 ## Implemented
 
-- Four wire formats in both directions, with canonical streaming and non-streaming paths, a raw same-format pass-through and a per-call loss ledger.
-- Classification by operation, purpose, purpose source, lane and outcome. Main calls drive conversations, diagnosis and traffic metrics; side calls stay in the conversation and count cost; auxiliary calls are protocol traffic with no conversation.
-- Stored providers, channels, models, routes, aliases and targets, with soft deletion, impact previews, configuration health and a one-shot connect flow.
-- Four online checkpoints, reversible redaction before policy reads the text, and an optional bounded stream review window.
-- A signed audit chain per admitted call, a metadata timeline and offline verification.
-- Asynchronous diagnosis with deterministic detectors, coverage-aware verdicts and an optional decision model.
-- Console coverage for projects, monitor, calls, conversations, risk, activity, policy, redaction, keys, routes, members and settings, plus global providers, models, channels, users and operations.
+- one trajectory event log with per-trajectory HMAC chains, cumulative Merkle checkpoints and rebuildable calls/findings/summaries projections;
+- a protocol gateway with four codecs, raw pass-through, a conversion loss ledger and reversible redaction;
+- security state for labels, capabilities, obligations, approvals and coverage, with ten invariants, deterministic detectors and a console-derived verdict;
+- online ingress, action and release gates, bound approvals, `action.authorized` lineage and coverage-aware approval for side-effecting tools;
+- the provider/channel/model supply graph, project routes, console, offline evidence commands and the harness SDK;
+- the acceptance lab and browser suite in [testenv](testenv.md).
 
 ## Deliberate limits
 
-- No human approval or review queue. Online policy actions remain `block` and `record`.
-- Images, audio and other binary payloads are not inspected or redacted. Stream review covers only the configured leading window; later text reaches the client before asynchronous diagnosis.
-- A provider-executed server tool has already run when the gateway sees its result. The gateway can withhold the result but cannot undo the execution.
-- Tool destinations and source-to-sink flows are heuristic. A finding is evidence for review, not proof of an attack; a policy that needs a strong claim matches findings.
-- The decision model is optional, provider-dependent and returns calibrated answers without a rationale. Its failure cannot release a deterministic block.
-- Analysis and metrics cover only traffic through the gateway. Cross-call semantic relations are not modelled: a flow stays inside one call.
-- A trajectory reads at most 200 calls and 32 MiB of decoded payload; diagnosis expands at most 200 ancestors within the same budget. A truncated result cannot be `safe`.
-- A route target produces one candidate in one format. Multi-choice requests are served only by a streaming same-format pass-through with no redaction or history expansion.
-- Auxiliary calls follow `auxiliary_retention_days` (default 3; zero follows `retention_days`); main and side calls follow `retention_days`.
-- One process serves one database, and the schema is a fresh baseline with no migration path. A schema or audit-version change requires recreating the database.
-- There is no versioned, labelled safety benchmark. Detector changes are judged by unit, integration and acceptance fixtures.
+- No historical data or schema migration. A different fingerprint requires a fresh database.
+- Single writer and single process per database. No HA design.
+- No human approval queue beyond the trajectory page; approvals are API/console actions.
+- No compensation executor for `allow_with_compensation`; the action catalogue names it but the first cut has no external-effect adapter.
+- Harness adapters are a Go SDK and a repository writer; there are no production Claude Code, Codex, MCP or eBPF adapters in this repository.
+- Semantic checks are optional. A model is never the sole gate for an irreversible action.
+- Detectors are heuristic and coverage is measured; a `safe` verdict is not a proof.
+- Raw content in blobs is encrypted with the instance key, but a database operator can read it.
+- No cross-trajectory policy state or cross-session memory beyond the event log.
+- An explicit session trajectory stays open until a harness appends `trajectory.end`, the process restarts, or retention removes it; the console has no close action.
+- Risk is cumulative and diagnostic; score-based escalation and decay are not implemented.
+- Capability attenuation is checked when a parent capability set exists; production delegation adapters are not included.
+- The first cut recomputes a cumulative Merkle checkpoint on each append; partitioned event storage and incremental checkpointing are planned for very long trajectories.
+
+## Next work
+
+1. Production harness adapters and a signed recorder identity.
+2. A compensation catalogue and external-effect adapters.
+3. SIEM export with a stable bundle schema.
+4. Partitioned event storage and a streaming projector for very long trajectories.
+5. A versioned ground-truth benchmark for the invariants and the decision model.
 
 ## Related
 
-- [Analysis](analysis.md)
-- [Policy](policy.md)
+- [Model](model.md)
+- [Threat](threat.md)
 - [Audit](audit.md)
-- [Papers](papers.md)
+- [Testenv](testenv.md)

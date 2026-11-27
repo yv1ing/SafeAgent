@@ -133,7 +133,7 @@ export function MonitorPage() {
                         header: t.monitor.name,
                         cell: (project) => (
                           <Link
-                            to="/projects/$projectId/risk"
+                            to="/projects/$projectId/trajectories"
                             params={{ projectId: project.project_id }}
                             className="font-medium hover:text-accent"
                           >
@@ -177,7 +177,7 @@ export function MonitorPage() {
                         header: t.monitor.agent,
                         cell: (agent) => (
                           <Link
-                            to="/projects/$projectId/risk"
+                            to="/projects/$projectId/trajectories"
                             params={{ projectId: agent.project_id }}
                             className="font-mono text-xs hover:text-accent"
                           >
@@ -222,11 +222,9 @@ export function MonitorPage() {
                         className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
                       >
                         <Link
-                          to="/projects/$projectId/conversations/node/$nodeId"
-                          params={{
-                            projectId: call.project_id,
-                            nodeId: call.node_id || `call:${call.call_id}`,
-                          }}
+                          to="/projects/$projectId/calls"
+                          params={{ projectId: call.project_id }}
+                          search={{ call: call.call_id }}
                           className="font-mono text-xs text-accent hover:underline"
                         >
                           {call.call_id}

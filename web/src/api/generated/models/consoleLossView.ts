@@ -7,7 +7,6 @@
  */
 
 export interface ConsoleLossView {
-  /** fatal or degraded */
   class?: string;
   code: string;
   detail: string;

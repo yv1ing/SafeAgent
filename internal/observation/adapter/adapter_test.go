@@ -8,7 +8,6 @@ import (
 	"github.com/yv1ing/SafeAgent/internal/llm/model"
 	"github.com/yv1ing/SafeAgent/internal/observation"
 	"github.com/yv1ing/SafeAgent/internal/observation/adapter"
-	"github.com/yv1ing/SafeAgent/internal/storage/auditevent"
 )
 
 func request() *model.Request {
@@ -110,8 +109,8 @@ func TestToolTargetAndSteps(t *testing.T) {
 }
 
 func TestStoredTraceReplaysFromAuditPayloads(t *testing.T) {
-	response := auditResponse()
-	trace := adapter.Stored(auditRequest(), &response, adapter.Options{TraceID: "c", CallID: "c"})
+	response := storedResponse()
+	trace := adapter.Stored(storedRequest(), &response, adapter.Options{TraceID: "c", CallID: "c"})
 	if len(trace.Turns) < 2 {
 		t.Fatalf("turns were not replayed: %+v", trace.Turns)
 	}
@@ -123,26 +122,26 @@ func TestStoredTraceReplaysFromAuditPayloads(t *testing.T) {
 	}
 }
 
-func auditRequest() auditevent.Request {
-	return auditevent.Request{
-		Items:  []model.Item{model.MessageItem(model.RoleUser, "hi")},
-		Params: model.Request{Model: "gpt-5"},
-		Tools:  []model.Tool{{Kind: model.ToolFunction, Name: "read"}},
+func storedRequest() model.Request {
+	return model.Request{
+		Model: "gpt-5",
+		Items: []model.Item{model.MessageItem(model.RoleUser, "hi")},
+		Tools: []model.Tool{{Kind: model.ToolFunction, Name: "read"}},
 	}
 }
 
-func auditResponse() auditevent.Response {
-	return auditevent.Response{Response: model.Response{
+func storedResponse() model.Response {
+	return model.Response{
 		Meta:   model.ResponseMeta{ID: "r", Model: "gpt-5"},
 		Items:  []model.Item{model.MessageItem(model.RoleAssistant, "hello")},
 		Finish: model.Finish{Kind: model.FinishStop},
-	}}
+	}
 }
 
 func TestHistoryMarksMissingAncestors(t *testing.T) {
-	request := auditevent.Request{Items: []model.Item{model.MessageItem(model.RoleUser, "current")}}
-	response := &auditevent.Response{Response: model.Response{Items: []model.Item{model.MessageItem(model.RoleAssistant, "answer")}}}
-	ancestor := auditevent.Request{Items: []model.Item{model.MessageItem(model.RoleUser, "earlier")}}
+	request := model.Request{Items: []model.Item{model.MessageItem(model.RoleUser, "current")}}
+	response := &model.Response{Items: []model.Item{model.MessageItem(model.RoleAssistant, "answer")}}
+	ancestor := model.Request{Items: []model.Item{model.MessageItem(model.RoleUser, "earlier")}}
 	expanded, origins, truncated := adapter.History(request, []adapter.Ancestor{{Found: true, CallID: "ancestor", Request: ancestor, Response: response}})
 	if truncated || len(expanded.Items) != 3 || expanded.Items[1].Role != model.RoleAssistant {
 		t.Fatalf("history was not expanded: %+v %v", expanded.Items, truncated)

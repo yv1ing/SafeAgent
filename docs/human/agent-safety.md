@@ -2,91 +2,82 @@
 
 [中文](agent-safety_zh.md)
 
-An agent safety incident usually develops along a chain. External content enters the context, the model treats it as an instruction, and a tool with a legitimate purpose sends data out, rewrites a file or runs a command. Each step may appear reasonable in isolation; the risk emerges when they combine.
-
-SafeAgent takes one call and its tool chain as the unit of analysis and enforces policy before the side effect happens. It checks the request, tool call, tool result and response it can see, and records where a judgment is incomplete.
+An agent safety incident develops along a chain. External content enters the context, the model treats it as an instruction, memory keeps it after compaction, and an action sends data out or changes a system. Looking at one request cannot explain why the action happened on turn 700. SafeAgent records the state transfers that made it possible and enforces policy before the side effect.
 
 ## Threat model
 
-A deployment needs to guard against these failures:
+A deployment needs to guard against:
 
-- **Direct or indirect prompt injection.** User input, tool output or a tool description contains instructions aimed at the agent.
-- **Tool misuse.** The model selects a tool it should not use, passes overly broad arguments, or splices external content into a command or URL.
-- **Over-privileged action.** A powerful tool is released without an explicit authorization decision.
-- **Data exfiltration.** Credentials, private fields or internal identifiers are sent to an external destination.
-- **Untrusted tool chains.** Tool output is corrupted, or the tool description itself is controlled by an attacker.
-- **Irreversible execution.** A provider-executed server tool has already run; the gateway can withhold the result but cannot undo the execution.
+- direct or indirect prompt injection, including tool descriptions and recalled memory;
+- tool misuse, over-broad arguments and destructive or costly actions;
+- constraint loss during context compaction;
+- memory poisoning and authority collapse;
+- data exfiltration through a public sink;
+- privilege escalation through delegation;
+- approval replay after a rollback or retry;
+- retained inference state after a rollback;
+- capture gaps that make the record look complete when it is not.
 
 ## Origin, trust and sink
 
-Every observed item carries an origin and a trust level, and every tool call carries a sink. Together they describe the content, how much authority it carries, and what actions a tool can perform.
+Every segment carries an integrity label and a confidentiality label, and every action carries a sink:
 
 | Property | Values | Meaning |
 | --- | --- | --- |
-| Origin | system, developer, user, assistant, tool result, tool description, environment | who produced the item |
-| Trust | trusted, untrusted, unknown | tool results and tool descriptions are always untrusted; unclassified content is unknown |
-| Sink | external send, shell execution, file read, file write, credential access, payment, no side effect, unknown | what the call can act on, inferred from its name, arguments and target |
+| Integrity | trusted, untrusted, unknown | who produced it and whether it may influence an action |
+| Confidentiality | public, private, user_identity | what may leave the boundary |
+| Sink | external send, shell, file read/write, credential access, payment, no effect, unknown | what the action can touch |
 
-Sink inference is heuristic. A rule that needs a strong conclusion matches a finding code and uses the sink as supporting evidence rather than as proof on its own.
+Labels travel with content through compaction, memory and tool I/O. A label can only become stronger. Sink inference is heuristic; it supports a finding but is not proof on its own.
 
-## Four checkpoints
+## Gates and recovery
 
 ```mermaid
 flowchart LR
-    Request["request"] --> RequestGate["request checkpoint"]
-    RequestGate --> ResultGate["tool-result checkpoint"]
-    ResultGate --> Provider["upstream"]
-    Provider --> ToolGate["tool-call checkpoint"]
-    ToolGate --> ResponseGate["response checkpoint"]
-    ResponseGate --> Client["client"]
+    Ingress["ingress"] --> Action["action"]
+    Action --> Release["release"]
+    Action --> Recovery["recovery"]
 ```
 
-- **Request.** Checks the task, instructions, declared tools and every message, and can refuse the whole request before the upstream is contacted.
-- **Tool call.** Checks a call once its arguments are complete, while the call is still held back, so it can stop a client-side effect. If the response was already committed, the stream ends with a protocol error.
-- **Tool result.** When a request adds tool results, checks their content before forwarding, and can refuse the request so the model never sees the blocked output.
-- **Response.** Checks a non-streaming response before it is written, and can refuse the body while still settling the upstream usage. With stream review enabled, the same checkpoint checks a bounded leading window before its first byte.
+- **Ingress** admits observations and context assembly and checks tool results before the model sees them. Memory reads are recorded by a harness and projected rather than admitted by the online gate.
+- **Action** checks a proposed tool call while it is still held. It can block, require approval, or allow.
+- **Release** checks a response or tool result before it leaves the gateway. A blocked stream is withheld; an already-sent prefix cannot be recalled.
+- **Recovery** is not an online veto. When a rollback or delegation return is appended, the reducer records an obligation and the invariant projector records a finding; a missing or opaque cache marks the recovery incomplete.
 
-Text after the reviewed window has no online checkpoint. A token that reached the client cannot be recalled, so it is diagnosed after the call. A provider-executed server tool has already run by the time the gateway sees its result; the gateway can withhold the result, not the execution.
+Text after a reviewed stream window has no online release check. A provider-executed server tool may already have run; the gateway can withhold the result, not the execution.
 
 ## Policy and verdict
 
-Each project keeps one ordered rule table. A rule is a condition over the authenticated principal, the tool, its arguments and target, the tool chain, findings, tool results and response metadata. The available actions are block and record, and no human approval step holds a call open.
+Each project keeps one ordered rule table over the authenticated principal, tool, target, trace, findings, results and response. A rule can block or record. An action that violates an invariant can require approval; the approval is bound to the exact invocation and can be consumed once.
 
-Every call receives one of three verdicts:
+The console computes one verdict for a trajectory from its findings and coverage:
 
 | Verdict | Condition |
 | --- | --- |
-| `unsafe` | a high-severity finding, or a sufficiently probable unsafe model answer with complete coverage |
-| `unknown` | incomplete coverage, medium-only findings, an uncertain model answer or a failed model call |
-| `safe` | complete coverage, no medium or high finding, and no unsafe model answer |
+| `unsafe` | a high-severity finding |
+| `unknown` | coverage below the threshold, a capture gap, a failed check, or a medium-only finding |
+| `safe` | coverage meets the threshold and no medium or high finding |
 
-Without a high-severity finding, an unchecked path yields `unknown`. The verdict describes the evidence the system has, not a guarantee about the agent.
-
-Online decisions are stored with the call. Diagnosis is a separate record and never changes what the gateway already enforced.
+Without complete coverage, an unchecked path yields `unknown`. The verdict describes the evidence, not a guarantee.
 
 ## Decision model
 
-The decision model is optional. It is consulted only after deterministic rules allow a side-effecting tool call, and it can add a block; it cannot release a call that a rule blocked.
+The decision model is optional and only runs on the ambiguous tail. It can add a block to an action the deterministic rules allowed; it can never release a blocked action. The gateway records the veto outcome and rule id, not the model prompt or output. A timeout, malformed answer or exhausted budget leaves the deterministic result intact and is recorded as unavailable. A model is never the sole gate for an irreversible action.
 
-The authorization question deliberately excludes tool output and the model's own earlier text and tool calls, so external content cannot justify its own release. If the model times out, returns malformed output or exhausts its budget, a call blocked by the rules stays blocked; a call the rules allowed proceeds, and the missing judgment is recorded. When diagnosis evaluates the same evidence later, an unavailable model cannot produce a `safe` verdict; without a high-severity finding the result is `unknown`.
+## Evidence and verification
 
-After the call, diagnosis can ask the same model for a trajectory-level label: whether the trajectory is unsafe, its risk source, failure mode, potential harm and severity. The labels are stored beside the deterministic findings, with the model state, and do not overwrite them. The three-axis labels are adapted from AgentDoG; the runtime handling of principal, tool, arguments, target and history follows the attribute-based approach described by AgentGuard. SafeAgent does not train or ship a guard model.
+A finding points at one event and its input segments. Evidence never quotes a masked range. Edges connect content, actions, authorization and approval. The event chain is signed per trajectory, and checkpoints cover ranges with a separate checkpoint key. An evidence bundle exports the range for offline verification; a modified event, missing segment or broken checkpoint is named explicitly.
 
-## Diagnosis and evidence
-
-A deterministic finding carries a detector code, a severity, a stable identity and evidence that is safe to display. The identity does not depend on a text offset, so the same finding keeps the same identity across analyses. A quote that overlaps a masked span is shown as `[redacted]`.
-
-A flow edge connects external content inside one call to a later side-effecting tool call. It states that a value was reused or that an instruction was followed; it does not infer causality across calls. Findings, flows, model labels and a coverage record together form the evidence behind a verdict, and the coverage record explains which parts did not run.
-
-The call timeline shows admission, routing, upstream attempts, first token, tool calls and results, policy decisions, cancellation, response summary and termination in order. Audit events are signed and chained, and the chain is anchored in the call record when the call ends; the offline check locates a modified event or a deleted tail. The timeline itself is metadata-only, and raw text is still shown according to role permissions.
+Coverage is measured from expected and observed boundaries plus recorder gaps. A trajectory below its threshold cannot be `safe`, and an irreversible action without approval is blocked.
 
 ## Known limits
 
-- Relation detection is literal; paraphrased, translated or tool-transformed values can be missed.
-- Tool sinks are inferred from names, arguments and targets; a misleading tool name can misclassify a call.
+- Relation detection is literal; paraphrased or transformed values can be missed.
+- Sink inference is heuristic; a misleading tool name can misclassify an action.
 - Images, audio and other binary payloads are not masked or inspected.
-- Stream review covers only its configured leading window; text after the window has no online output check, and non-streaming responses are checked in full.
-- The gateway only observes traffic that passes through it. Coverage of an agent depends on how completely it is routed through the gateway.
+- Stream review covers only its configured leading window.
+- The gateway only observes traffic and state transfers that reach it. Coverage depends on the deployment's recorder placement.
+- Production Claude Code, Codex, MCP and eBPF adapters are not included; the Go harness SDK is the integration surface.
 
 ## Further reading
 

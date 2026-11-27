@@ -23,8 +23,12 @@ func TestSpecificationRegistersTrajectoryEndpoints(t *testing.T) {
 		t.Fatalf("specification is not JSON: %v", err)
 	}
 	for _, path := range []string{
-		"/console/api/projects/{project_id}/conversations/{session_id}/trajectory",
-		"/console/api/projects/{project_id}/conversations/{session_id}/redactions",
+		"/console/api/projects/{project_id}/trajectories",
+		"/console/api/projects/{project_id}/trajectories/{trajectory_id}",
+		"/console/api/projects/{project_id}/trajectories/{trajectory_id}/timeline",
+		"/console/api/projects/{project_id}/trajectories/{trajectory_id}/coverage",
+		"/console/api/projects/{project_id}/trajectories/{trajectory_id}/bundle",
+		"/console/api/projects/{project_id}/trajectories/{trajectory_id}/redactions",
 	} {
 		if _, found := document.Paths[path]; !found {
 			t.Fatalf("path %q is missing from the contract", path)
@@ -55,7 +59,7 @@ func TestCallFilterEnumsTrackClassify(t *testing.T) {
 
 func assertEnum(t *testing.T, field string, expected []string, valid func(string) bool) {
 	t.Helper()
-	structField, found := reflect.TypeOf(listCallsInput{}).FieldByName(field)
+	structField, found := reflect.TypeOf(CallView{}).FieldByName(field)
 	if !found {
 		t.Fatalf("listCallsInput has no %s field", field)
 	}

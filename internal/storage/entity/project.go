@@ -18,6 +18,7 @@ type Project struct {
 	DefaultMaxOutputTokens int       `json:"default_max_output_tokens"`
 	StreamReviewBytes      int       `json:"stream_review_bytes"`
 	StreamReviewTimeoutMS  int       `json:"stream_review_timeout_ms"`
+	CoverageThreshold      float64   `json:"coverage_threshold"`
 	DefaultRouteID         string    `json:"default_route_id"`
 	RulesVersion           int64     `json:"rules_version"`
 	ActivePolicyVersion    int64     `json:"active_policy_version"`
