@@ -1,0 +1,35 @@
+name: safeagent-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: safeagent-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: safeagent
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: safeagent
+    ports:
+      - "127.0.0.1:5432:5432"
+    # volumes:
+    #   - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safeagent -d safeagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: safeagent-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@safeagent.dev
+      PGADMIN_DEFAULT_PASSWORD: change-me
+    ports:
+      - "127.0.0.1:5433:80"
+    # volumes:
+    #   - ./pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
